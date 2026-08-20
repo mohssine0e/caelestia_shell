@@ -62,13 +62,15 @@ StyledWindow {
         screenState.launcher = false;
         screenState.session = false;
         screenState.dashboard = false;
+        screenState.tasks = false;
+
         panels.popouts.close();
     }
 
     name: "drawers"
     WlrLayershell.exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: (fsTransitionProg > 0 && contentItem.Config.general.showOverFullscreen) || (hasSpecialWorkspace && hasFullscreenOnNormalWs) ? WlrLayer.Overlay : WlrLayer.Top
-    WlrLayershell.keyboardFocus: screenState.launcher || screenState.session ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: screenState.launcher || screenState.session  || screenState.tasks ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     mask: hasFullscreen ? emptyRegion : regions
 
@@ -115,7 +117,7 @@ StyledWindow {
         active: {
             const s = root.screenState;
             const conf = root.contentItem.Config;
-            if ((s.launcher && conf.launcher.enabled) || (s.session && conf.session.enabled) || (s.sidebar && conf.sidebar.enabled))
+            if ((s.launcher && conf.launcher.enabled) || (s.session && conf.session.enabled) || (s.sidebar && conf.sidebar.enabled) || (s.tasks && conf.tasks.enabled) )
                 return true;
             if (!conf.dashboard.showOnHover && s.dashboard && conf.dashboard.enabled)
                 return true;
@@ -129,6 +131,7 @@ StyledWindow {
             root.screenState.session = false;
             root.screenState.sidebar = false;
             root.screenState.dashboard = false;
+            root.screenState.tasks = false;
             panels.popouts.hasCurrent = false;
             bar.closeTray();
         }
@@ -208,6 +211,13 @@ StyledWindow {
         }
 
         PanelBg {
+            id: tasksBg
+
+            panel: panels.tasks
+            deformAmount: 0.1
+        }
+
+        PanelBg {
             id: osdBg
 
             panel: panels.osdWrapper
@@ -281,6 +291,9 @@ StyledWindow {
             }
             sidebar.transform: Matrix4x4 {
                 matrix: sidebarBg.deformMatrix
+            }
+            tasks.transform: Matrix4x4 {
+                matrix: tasksBg.deformMatrix
             }
             osd.transform: Matrix4x4 {
                 matrix: osdBg.deformMatrix

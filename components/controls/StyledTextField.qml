@@ -15,6 +15,7 @@ TextFieldBase {
     }
 
     property int type: StyledTextField.Outlined
+    property bool placeholderFloats: true // if false, placeholder stays in place and hides when typing
 
     property int smallFontSize: Tokens.font.label.small.pointSize
     readonly property real smallFontScale: smallFontSize / font.pointSize
@@ -101,10 +102,13 @@ TextFieldBase {
             text: root.placeholderText
             color: root.isError ? Colours.palette.m3error : (root.activeFocus ? Colours.palette.m3primary : root.text ? Colours.palette.m3outline : root.placeholderTextColor)
 
+            opacity: (!root.placeholderFloats && root.text) ? 0 : 1
+            Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+
             states: [
                 State {
                     name: "smallOutlined"
-                    when: root.type === StyledTextField.Outlined && (root.activeFocus || root.text)
+                    when: root.type === StyledTextField.Outlined && root.placeholderFloats && (root.activeFocus || root.text)
 
                     PropertyChanges {
                         placeholder.scale: root.smallFontScale
@@ -117,7 +121,7 @@ TextFieldBase {
                 },
                 State {
                     name: "smallFilled"
-                    when: root.type === StyledTextField.Filled && (root.activeFocus || root.text)
+                    when: root.type === StyledTextField.Filled && root.placeholderFloats && (root.activeFocus || root.text)
 
                     PropertyChanges {
                         placeholder.scale: root.smallFontScale
@@ -206,7 +210,7 @@ TextFieldBase {
                 id: path
 
                 readonly property real outlineGap: placeholder.width * root.smallFontScale + root.Tokens.spacing.extraSmall * 2
-                property real outlineGapScale: root.activeFocus || root.text ? 1 : 0
+                property real outlineGapScale: (root.activeFocus || root.text) && root.placeholderFloats ? 1 : 0
                 readonly property real inset: strokeWidth / 2
 
                 strokeWidth: root.activeFocus ? 2 : 1

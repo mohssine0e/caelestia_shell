@@ -19,7 +19,8 @@ FocusScope {
     readonly property real listMaxHeight: 640
 
     implicitHeight: CUtils.clamp(scroller.contentHeight, listMinHeight, listMaxHeight)
-
+    
+    // ── Data ─────────────────────────────────────────────────────
     readonly property var defaultHabits: [
         { id: "water",    icon: "water_drop",       label: qsTr("Drink 2L of water"), subtasks: [] },
         { id: "stretch",  icon: "directions_run",   label: qsTr("Morning stretch"), subtasks: [] },

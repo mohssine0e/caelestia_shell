@@ -8,9 +8,9 @@ import qs.components
 Item {
     id: root
 
-    required property DrawerVisibilities visibilities
+    required property ScreenState screenState
 
-    readonly property bool shouldBeActive: visibilities.tasks
+    readonly property bool shouldBeActive: screenState.tasks
 
     property real offsetScale: shouldBeActive ? 0 : 1
 
@@ -46,7 +46,7 @@ Item {
         id: idleTimer
         interval: 5000
         running: root.shouldBeActive && !hover.hovered && !(content.item?.inputActive ?? false)
-        onTriggered: root.visibilities.tasks = false
+        onTriggered: root.screenState.tasks = false
     }
 
     Loader {
@@ -60,7 +60,7 @@ Item {
         onLoaded: item.forceActiveFocus()
 
         sourceComponent: Tasks {
-            onCloseRequested: root.visibilities.tasks = false
+            onCloseRequested: root.screenState.tasks = false
         }
     }
 }
