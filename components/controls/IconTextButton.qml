@@ -47,6 +47,7 @@ ButtonBase {
 
         MaterialIcon {
             id: iconLabel
+            visible: text !== ""
 
             Layout.alignment: Qt.AlignVCenter
             color: root.onColour
@@ -66,7 +67,7 @@ ButtonBase {
 
         StyledText {
             id: label
-
+            visible: text !== ""
             Layout.alignment: Qt.AlignVCenter
             Layout.topMargin: 1
             color: root.onColour

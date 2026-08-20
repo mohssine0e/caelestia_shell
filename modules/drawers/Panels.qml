@@ -12,6 +12,9 @@ import qs.modules.sidebar as Sidebar
 import qs.modules.utilities as Utilities
 import qs.modules.bar.popouts as BarPopouts
 import qs.modules.utilities.toasts as Toasts
+import qs.modules.tasks as Tasks
+
+
 
 Item {
     id: root
@@ -33,6 +36,9 @@ Item {
     readonly property alias utilities: utilities
     readonly property alias toasts: toasts
     readonly property alias sidebar: sidebar
+    readonly property alias tasks: tasks
+
+
 
     anchors.fill: parent
     anchors.margins: borderThickness
@@ -151,5 +157,14 @@ Item {
         anchors.bottom: utilities.top
         anchors.right: parent.right
         anchors.topMargin: -notifications.anchors.topMargin
+    }
+
+    Tasks.Wrapper {
+        id: tasks
+
+        screenState: root.screenState
+
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
     }
 }
