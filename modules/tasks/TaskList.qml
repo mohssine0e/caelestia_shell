@@ -643,6 +643,9 @@ FocusScope {
                     }
                     prog: progressData.ratio
 
+                    editingSubId: root.editingSubId
+
+
                     onToggleRequested: (taskIdx) => root.toggleTask(taskIdx)
                     onToggleExpandRequested: (taskIdx) => root.toggleExpand(taskIdx)
                     onRenameRequested: (taskIdx, newTitle) => root.renameTask(taskIdx, newTitle)
