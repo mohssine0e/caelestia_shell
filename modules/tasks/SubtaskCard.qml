@@ -1,6 +1,3 @@
-// SubtaskCard.qml
-// Enhanced with visual tree lines linking subtasks to parent
-
 pragma ComponentBehavior: Bound
 
 import QtQuick
@@ -43,7 +40,6 @@ Item {
 
     HoverHandler { id: subRowHover }
 
-
     // ── Tree Line Container ─────────────────────────────────────
     Item {
         id: treeContainer
@@ -67,8 +63,8 @@ Item {
             opacity: root.isDone ? 0.6 : 0.3
             
             visible: !root.isFirst || !root.isLast
-            anchors.topMargin: 0  // ← CHANGED: always start from top
-            anchors.bottomMargin: root.isLast ? parent.height / 2 : 0  // ← Keep this for last item
+            anchors.topMargin: 0
+            anchors.bottomMargin: root.isLast ? parent.height / 2 : 0
             
             Behavior on color { CAnim {} }
         }
@@ -82,11 +78,11 @@ Item {
             }
             width: Tokens.padding.extraLarge - Tokens.spacing.small
             height: 2
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant  // ← CHANGED
-            opacity: root.isDone ? 0.6 : 0.3  // ← CHANGED
+            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+            opacity: root.isDone ? 0.6 : 0.3
             
             visible: true
-            Behavior on color { CAnim {} }  // ← ADDED for smooth transition
+            Behavior on color { CAnim {} }
         }
 
         // ── Node Circle (at connection point) ──────────────────
@@ -104,7 +100,6 @@ Item {
         }
     }
 
-    // ── Main Row ────────────────────────────────────────────────
     RowLayout {
         id: subRow
         anchors.left: treeContainer.right
@@ -112,9 +107,6 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Tokens.spacing.small
 
-
-
-        // ── Checkbox ────────────────────────────────────────────
         MaterialIcon {
             text: root.isDone ? "check_box" : "check_box_outline_blank"
             fill: root.isDone ? 1 : 0
@@ -130,7 +122,6 @@ Item {
             }
         }
 
-        // ── Title ───────────────────────────────────────────────
         StyledText {
             visible: !root.isEditing
             Layout.fillWidth: true
@@ -157,6 +148,18 @@ Item {
             Layout.fillWidth: true
             text: root.title
             font: Tokens.font.body.medium
+            
+            // Match the non-editing text style
+            background: Rectangle {
+                color: "transparent"
+                border.width: 0
+            }
+            
+            leftPadding: 0
+            rightPadding: 0
+            topPadding: 0
+            bottomPadding: 0
+            verticalAlignment: Text.AlignVCenter
 
             onVisibleChanged: {
                 if (visible) {
@@ -191,7 +194,9 @@ Item {
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "edit"
-                onClicked: root.editingStarted(root.editId)
+                // onClicked: root.editingStarted(root.editId)
+                onClicked: root.editingStarted(root.subtaskId)  // ✅ Just "789012"
+
             }
 
             IconButton {
@@ -202,5 +207,4 @@ Item {
             }
         }
     }
-
 }

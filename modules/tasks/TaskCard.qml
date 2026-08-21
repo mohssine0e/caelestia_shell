@@ -27,6 +27,9 @@ Item {
     required property var subOrder        // Ordered list of subtask IDs
     required property real prog           // Progress (0-1)
 
+    // ── Additional Property for Subtask Editing ──────────────
+    property string editingSubId: ""      // ID of subtask being edited (passed from parent)
+
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
     signal toggleExpandRequested(int taskIdx)
@@ -53,8 +56,8 @@ Item {
 
     readonly property var subtaskMap: {
         const map = {};
-        if (task && task.subtasks) {
-            for (const sub of task.subtasks) {
+        if (taskData && taskData.subtasks) {
+            for (const sub of taskData.subtasks) {
                 map[sub.id] = sub;
             }
         }
@@ -83,15 +86,11 @@ Item {
         border.width: root.isSelected ? 2 : 0
         border.color: Colours.palette.m3primary
 
-        // opacity: root.taskDone ? 0.65 : 1
         Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
         implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
         Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
         Behavior on color { CAnim {} }
-
-
-
 
         HoverHandler { id: rowHover }
 
@@ -137,73 +136,71 @@ Item {
                     }
                 }
 
-               // ── Icon or Checkbox ────────────────────────────────────────
-Item {
-    Layout.preferredWidth: root.icon ? 60 : 24
-    Layout.preferredHeight: 24
-    
-    // Icon + Checkbox (for habits)
-    RowLayout {
-        id: iconRow
-        anchors.fill: parent
-        spacing: Tokens.spacing.small
-        visible: root.icon !== ""
-        
-        StyledRect {
-            implicitWidth: 36
-            implicitHeight: 36
-            radius: Tokens.rounding.medium
-            color: root.taskDone ? Colours.tPalette.m3primaryContainer : Colours.tPalette.m3surfaceContainerHigh
-            Behavior on color { CAnim {} }
-            
-            MaterialIcon {
-                anchors.centerIn: parent
-                text: root.icon
-                fontStyle: Tokens.font.icon.medium
-                color: root.taskDone ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
-                Behavior on color { CAnim {} }
-            }
-        }
-        
-        MaterialIcon {
-            text: root.taskDone ? "check_circle" : "radio_button_unchecked"
-            fill: root.taskDone ? 1 : 0
-            fontStyle: Tokens.font.icon.medium
-            color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3outline
-            Behavior on color { CAnim {} }
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -4
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.toggleRequested(root.taskIndex)
-            }
-        }
-    }
-    
-    // Checkbox only (for regular tasks)
-    MaterialIcon {
-        id: checkboxOnly
-        anchors.fill: parent
-        visible: root.icon === ""
-        text: root.taskDone ? "check_box"
-            : (root.nSub > 0 && root.dSub > 0) ? "indeterminate_check_box"
-            : "check_box_outline_blank"
-        fill: root.taskDone ? 1 : 0
-        fontStyle: Tokens.font.icon.medium
-        color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3primary
-        Behavior on color { CAnim {} }
-        MouseArea {
-            anchors.fill: parent
-            anchors.margins: -4
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleRequested(root.taskIndex)
-        }
-    }
-}
+                // ── Icon or Checkbox ───────────────────────────
+                Item {
+                    Layout.preferredWidth: root.icon ? 60 : 24
+                    Layout.preferredHeight: 24
+                    
+                    // Icon + Checkbox (for habits)
+                    RowLayout {
+                        id: iconRow
+                        anchors.fill: parent
+                        spacing: Tokens.spacing.small
+                        visible: root.icon !== ""
+                        
+                        StyledRect {
+                            implicitWidth: 36
+                            implicitHeight: 36
+                            radius: Tokens.rounding.medium
+                            color: root.taskDone ? Colours.tPalette.m3primaryContainer : Colours.tPalette.m3surfaceContainerHigh
+                            Behavior on color { CAnim {} }
+                            
+                            MaterialIcon {
+                                anchors.centerIn: parent
+                                text: root.icon
+                                fontStyle: Tokens.font.icon.medium
+                                color: root.taskDone ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
+                                Behavior on color { CAnim {} }
+                            }
+                        }
+                        
+                        MaterialIcon {
+                            text: root.taskDone ? "check_circle" : "radio_button_unchecked"
+                            fill: root.taskDone ? 1 : 0
+                            fontStyle: Tokens.font.icon.medium
+                            color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3outline
+                            Behavior on color { CAnim {} }
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleRequested(root.taskIndex)
+                            }
+                        }
+                    }
+                    
+                    // Checkbox only (for regular tasks)
+                    MaterialIcon {
+                        id: checkboxOnly
+                        anchors.fill: parent
+                        visible: root.icon === ""
+                        text: root.taskDone ? "check_box"
+                            : (root.nSub > 0 && root.dSub > 0) ? "indeterminate_check_box"
+                            : "check_box_outline_blank"
+                        fill: root.taskDone ? 1 : 0
+                        fontStyle: Tokens.font.icon.medium
+                        color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3primary
+                        Behavior on color { CAnim {} }
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleRequested(root.taskIndex)
+                        }
+                    }
+                }
 
-
-
-                // Title
+                // ── Title ──────────────────────────────────────
                 StyledText {
                     visible: !root.isEditing
                     Layout.fillWidth: true
@@ -223,12 +220,24 @@ Item {
                     }
                 }
 
-                // Edit Field
+                // ── Edit Field ──────────────────────────────────
                 StyledTextField {
                     visible: root.isEditing
                     Layout.fillWidth: true
                     text: root.taskTitle
                     font: Tokens.font.body.large
+                    
+                    background: Rectangle {
+                        color: "transparent"
+                        border.width: 0
+                    }
+                    
+                    leftPadding: 0
+                    rightPadding: 0
+                    topPadding: 0
+                    bottomPadding: 0
+                    verticalAlignment: Text.AlignVCenter
+                    
                     onVisibleChanged: if (visible) { forceActiveFocus(); selectAll(); }
                     onAccepted: root.renameRequested(root.taskIndex, text)
                     Keys.onEscapePressed: {
@@ -237,7 +246,7 @@ Item {
                     }
                 }
 
-                // Progress
+                // ── Progress ────────────────────────────────────
                 RowLayout {
                     visible: root.nSub > 0 && !root.isEditing
                     spacing: Tokens.spacing.small
@@ -262,7 +271,7 @@ Item {
                     }
                 }
 
-                // Actions
+                // ── Actions ─────────────────────────────────────
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
@@ -288,7 +297,6 @@ Item {
             ColumnLayout {
                 visible: root.expanded
                 Layout.fillWidth: true
-                // Layout.leftMargin: Tokens.padding.extraLarge
                 Layout.leftMargin: 40
                 spacing: 0
 
@@ -300,7 +308,7 @@ Item {
                         required property string modelData
                         required property int index
 
-                        readonly property var sub: root.subtaskMap[modelData] ??{
+                        readonly property var sub: root.subtaskMap[modelData] ?? {
                             id: modelData, title: "", done: false
                         }
                         readonly property int subIdx: index
@@ -310,7 +318,9 @@ Item {
                         subtaskData: sub
                         subtaskIndex: subIdx
                         subtaskId: modelData
-                        isEditing: false
+                        
+                        // FIXED: Check against parent's editingSubId
+                        isEditing: root.editingSubId === modelData
 
                         isFirst: index === 0
                         isLast: index === subRepeater.count - 1
@@ -344,13 +354,11 @@ Item {
                     Layout.fillWidth: true
                     Layout.topMargin: 0
                     
-
                     MaterialIcon {
                         text: "add_circle_outline"
                         fontStyle: Tokens.font.icon.small
                         color: Colours.palette.m3primary
                         opacity: 0.6
-
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
                     }
@@ -360,16 +368,13 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 28
 
-
-                        font:{
+                        font: {
                             body: Tokens.font.body.medium
-                            pointSize:11
-                        } 
+                            pointSize: 11
+                        }
                         
-
                         placeholderText: qsTr("Add subtask…")
-                        placeholderTextColor: Colours.palette.m3onSurfaceVariant  // ← Set placeholder color
-
+                        placeholderTextColor: Colours.palette.m3onSurfaceVariant
                         color: Colours.palette.m3onSurfaceVariant
                         
                         background: Rectangle {
@@ -377,12 +382,10 @@ Item {
                             border.width: 0
                         }
                         
-
                         topPadding: 2
                         bottomPadding: 2
                         leftPadding: 5
                         rightPadding: 5
-
 
                         onAccepted: {
                             if (text.trim()) {
