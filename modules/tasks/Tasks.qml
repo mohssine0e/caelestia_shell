@@ -127,21 +127,19 @@ FocusScope {
                 givenHeight: 40
             }
 
-            // Move completed items below active items. This is intentionally
-            // available on both Tasks and Daily pages.
-            IconTextButton {
-                implicitHeight: statusFilterSwitcher.givenHeight
-                visible: true
-                icon: "vertical_align_bottom"
-                onClicked: (root.activePage === "daily" ? dailyHabitsList : taskList).moveDoneToBottom()
-                isToggle: false
-                checked:true
-                type: ButtonBase.Tonal
-                activeColour: Colours.palette.m3primary
-                font: Tokens.font.label.medium
-                radius: Tokens.rounding.small
-                padding: Tokens.padding.small
-            }
+            // IconTextButton {
+            //     implicitHeight: statusFilterSwitcher.givenHeight
+            //     visible: true
+            //     icon: "vertical_align_bottom"
+            //     onClicked: (root.activePage === "daily" ? dailyHabitsList : taskList).moveDoneToBottom()
+            //     isToggle: false
+            //     checked:true
+            //     type: ButtonBase.Tonal
+            //     activeColour: Colours.palette.m3primary
+            //     font: Tokens.font.label.medium
+            //     radius: Tokens.rounding.small
+            //     padding: Tokens.padding.small
+            // }
 
             // spacer pushes evrything else to the right
             Item { Layout.fillWidth: true }

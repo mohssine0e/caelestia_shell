@@ -19,41 +19,41 @@ Item {
     signal captureAccepted(string text)
     signal habitIconSelected(string icon)
 
-// remove the big icons or the onte represented as Text
-readonly property var habitIcons: [
-        // ── No Icon (clear) ── (1)
-    "block",  // or "cancel" or "clear"
+    // remove the big icons or the onte represented as Text
+    readonly property var habitIcons: [
+            // ── No Icon (clear) ── (1)
+        "block",  // or "cancel" or "clear"
 
 
-    // ── Engineering & Coding ── (8)
-    "code", "terminal", "build", "engineering", 
-    "analytics", "dashboard",
-    
-    // ── Productivity ── (6)
-    "task_alt", "check_circle", "pending", "today",
-    "calendar_today", "trending_up",
-    
-    // ── Health & Wellness ── (6)
-    "directions_run", "fitness_center", "water_drop",
-    "bedtime", "spa", "self_improvement",
-    
-    // ── Learning ── (6)
-    "menu_book", "school", "book",
-    "lightbulb",
-    
-    // ── Focus & Mindfulness ── (4)
-    "balance",
-    
-    // ── Social & Networking ── (4)
-    "group", "handshake", "volunteer_activism",
-    
-    // ── Finance ── (4)
-    "savings", "receipt", "payments", "account_balance",
-    
-    // ── Daily Life ── (6)
-    "restaurant", "local_cafe", "cleaning_services",
-    "home", "pets"
-]
+        // ── Engineering & Coding ── (8)
+        "code", "terminal", "build", "engineering", 
+        "analytics", "dashboard",
+        
+        // ── Productivity ── (6)
+        "task_alt", "check_circle", "pending", "today",
+        "calendar_today", "trending_up",
+        
+        // ── Health & Wellness ── (6)
+        "directions_run", "fitness_center", "water_drop",
+        "bedtime", "spa", "self_improvement",
+        
+        // ── Learning ── (6)
+        "menu_book", "school", "book",
+        "lightbulb",
+        
+        // ── Focus & Mindfulness ── (4)
+        "balance",
+        
+        // ── Social & Networking ── (4)
+        "group", "handshake", "volunteer_activism",
+        
+        // ── Finance ── (4)
+        "savings", "receipt", "payments", "account_balance",
+        
+        // ── Daily Life ── (6)
+        "restaurant", "local_cafe", "cleaning_services",
+        "home", "pets"
+    ]
 
     implicitHeight: headerColumn.implicitHeight
 

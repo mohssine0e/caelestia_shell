@@ -13,95 +13,110 @@ import qs.components.containers
 import qs.services
 import qs.utils
 
-/*
-    modeldata: for both tasks and daily habits, the model data is an array of objects with the following structure:
-    [
-        {
-            todoId: string,
-            title: string,
-            done: bool,
-            minutes: int,
-            icon: string | null,
-            priority: int | null,
-            createdAt: int (timestamp),
-            subtasks: [
-                {
-                    id: string,
-                    title: string,
-                    done: bool,
-                    minutes: int
-                },
-                ...
-            ]
-        },
-        ...
-]
-*/ 
 FocusScope {
     id: root
 
-    property string dataType: "tasks" // "tasks" | "habits"
-
-    readonly property string dataPath: `${Paths.state}/${root.dataType}.json`
-
-    readonly property string emptyStateText: root.dataType === "habits" 
-    ? qsTr("No habits yet") 
-    : qsTr("No tasks yet")
-
-    property string statusFilter: "all" // "all" | "active" | "done"
+    property string dataType: "tasks"
+    property string statusFilter: "all"
     property string searchQuery: ""
 
+    readonly property string dataPath: `${Paths.state}/${root.dataType}.json`
+    readonly property string emptyStateText: root.dataType === "habits" ? qsTr("No habits yet") : qsTr("No tasks yet")
     readonly property real listMinHeight: 440
     readonly property real listMaxHeight: 640
 
     implicitHeight: CUtils.clamp(scroller.contentHeight, listMinHeight, listMaxHeight)
 
-    // ── Data ─────────────────────────────────────────────────────
-    property var    tasks:  []
-    property bool   loaded: false
-
-    // ── Maps for O(1) Lookups ──────────────────────────────────
+    property var tasks: []
+    property bool loaded: false
     property var taskMap: ({})
     property var taskIndexMap: ({})
 
+    // ── DataManager ──
     DataManager {
         id: dataManager
         tasks: root.tasks
-        
-        onDataChanged: {
+
+        onTaskAdded: function(taskId, task) {
+            filteredModel.insert(0, { todoId: taskId });
+            // root.selectedIndex = 0;
             root.tasks = dataManager.tasks;
-            root.save();
             root.updateMaps();
-            root.updateFilteredModel();
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onTaskDeleted: function(taskId) {
+            for (var i = 0; i < filteredModel.count; i++) {
+                if (filteredModel.get(i).todoId === taskId) {
+                    filteredModel.remove(i);
+                    break;
+                }
+            }
+            if (root.selectedIndex >= filteredModel.count) {
+                root.selectedIndex = filteredModel.count - 1;
+            }
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onTaskToggled: function(taskId, newState) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onTaskRenamed: function(taskId, oldTitle, newTitle) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            root.editingTaskId = "";
+            Qt.callLater(function() { root.save(); });
+        }
+
+
+        onSubtaskAdded: function(taskId, subtaskId) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onSubtaskToggled: function(taskId, subtaskId, newState) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onSubtaskRenamed: function(taskId, subtaskId, oldTitle, newTitle) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            root.editingSubId = "";
+            Qt.callLater(function() { root.save(); });
+        }
+
+        onSubtaskDeleted: function(taskId, subtaskId) {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
         }
     }
 
-
-    // ── Filtered Model (ONLY for search) ───────────────────────
+    // ── Filtered Model (ONLY for status, NOT for search) ──
     ListModel {
         id: filteredModel
     }
 
-    // ── Helper Functions ────────────────────────────────────────
     function updateMaps() {
-        const map = dataManager.getTaskMap();
-        const idxMap = dataManager.getTaskIndexMap();
-        taskMap = map;
-        taskIndexMap = idxMap;
+        taskMap = dataManager.getTaskMap();
+        taskIndexMap = dataManager.getTaskIndexMap();
     }
 
     function updateFilteredModel() {
-        const q = searchQuery.trim().toLowerCase();
+        // Status filter only - search is handled by visible
+        var filteredIds = dataManager.getFilteredTasks(statusFilter, "");
         
-        // Use DataManager to get filtered tasks
-        // Status changes are handled by delegate visibility below. Keeping the
-        // model stable avoids destroying and recreating every card.
-        const filteredIds = dataManager.getFilteredTasks("all", searchQuery);
-        
-        // Check if we need to update
         if (filteredModel.count === filteredIds.length) {
-            let same = true;
-            for (let i = 0; i < filteredIds.length; i++) {
+            var same = true;
+            for (var i = 0; i < filteredIds.length; i++) {
                 if (filteredModel.get(i).todoId !== filteredIds[i]) {
                     same = false;
                     break;
@@ -111,17 +126,12 @@ FocusScope {
         }
         
         filteredModel.clear();
-        for (let i = 0; i < filteredIds.length; i++) {
+        for (var i = 0; i < filteredIds.length; i++) {
             filteredModel.append({ todoId: filteredIds[i] });
         }
-
     }
 
-    function getTaskSubtaskMap(taskId) {
-        return dataManager.getSubtaskMap(taskId);
-    }
-
-    // ── Signal Handlers ─────────────────────────────────────────
+    // ── Signal Handlers ──
     onTasksChanged: {
         dataManager.tasks = root.tasks;
         updateMaps();
@@ -136,16 +146,35 @@ FocusScope {
         }
     }
 
-    onSearchQueryChanged: updateFilteredModel()
-    onStatusFilterChanged: updateFilteredModel()
+    // ── Search is handled by visible, NOT by rebuilding model ──
+    // onSearchQueryChanged: updateFilteredModel()  ← REMOVE THIS!
 
     readonly property int visibleTaskCount: {
-        let count = 0;
-        for (let i = 0; i < filteredModel.count; i++) {
-            const task = root.taskMap[filteredModel.get(i).todoId];
+        var count = 0;
+        var q = root.searchQuery.trim().toLowerCase();
+        for (var i = 0; i < filteredModel.count; i++) {
+            var task = root.taskMap[filteredModel.get(i).todoId];
             if (!task) continue;
+            
+            // Status filter
             if (root.statusFilter === "active" && task.done) continue;
             if (root.statusFilter === "done" && !task.done) continue;
+            
+            // Search filter (same as TaskCard.visible)
+            if (q) {
+                var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
+                var matchSubtask = false;
+                if (task.subtasks) {
+                    for (var j = 0; j < task.subtasks.length; j++) {
+                        if (task.subtasks[j].title && task.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
+                            matchSubtask = true;
+                            break;
+                        }
+                    }
+                }
+                if (!matchTitle && !matchSubtask) continue;
+            }
+            
             count++;
         }
         return count;
@@ -153,53 +182,50 @@ FocusScope {
 
     property string editingTaskId: ""
     property string editingSubId: ""
-    property int  selectedIndex: -1
+    property int selectedIndex: -1
 
-
-
-    // ── File I/O ─────────────────────────────────────────────────
+    // ── File I/O ──
     FileView {
         id: storage
         path: root.dataPath
         onLoaded: {
             try {
-                const raw = JSON.parse(text());
-                const parsed = Array.isArray(raw) ? raw : (raw.habits || []);
-                for (let i = 0; i < parsed.length; i++) {
-                    const t = parsed[i];
+                var raw = JSON.parse(text());
+                var parsed = Array.isArray(raw) ? raw : (raw.habits || []);
+                for (var i = 0; i < parsed.length; i++) {
+                    var t = parsed[i];
                     if (!t.subtasks) t.subtasks = [];
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
-                    // if (root.dataType === "habits" && !t.icon) t.icon = "task_alt";
                     dataManager.syncDone(t);
                 }
                 root.tasks = parsed;
                 if (!Array.isArray(raw))
-                    Qt.callLater(() => root.save());
+                    Qt.callLater(function() { root.save(); });
             } catch (e) {
                 root.tasks = [];
             }
             root.loaded = true;
         }
-        onLoadFailed: err => {
-            root.tasks = []; 
+        onLoadFailed: function(err) {
+            root.tasks = [];
             root.loaded = true;
             if (err === FileViewError.FileNotFound)
-                Qt.callLater(() => storage.setText("[]"));
+                Qt.callLater(function() { storage.setText("[]"); });
         }
     }
 
-    function save() { 
-        storage.setText(JSON.stringify(root.tasks, null, 2)); 
+    function save() {
+        storage.setText(JSON.stringify(root.tasks, null, 2));
     }
 
-    // ── Counts (using DataManager) ─────────────────────────────
+    // ── Counts ──
     readonly property int activeCount: dataManager.getActiveCount()
     readonly property int doneCount: dataManager.getDoneCount()
     readonly property int totalActiveMinutes: dataManager.getTotalActiveMinutes()
 
-    // ── List ─────────────────────────────────────────────────────
-    StyledFlickable { // this is the scrollable area
+    // ── List ──
+    StyledFlickable {
         id: scroller
         anchors.fill: parent
         clip: true
@@ -219,25 +245,12 @@ FocusScope {
                 visible: root.loaded && root.visibleTaskCount === 0
                 ColumnLayout {
                     id: emptyState
-                    anchors.centerIn: parent; 
+                    anchors.centerIn: parent
                     spacing: Tokens.spacing.small
-                    readonly property bool searching: root.searchQuery.trim().length > 0
-                    readonly property bool hasVisibleTasks: {
-                        for (let i = 0; i < filteredModel.count; i++) {
-                            const id = filteredModel.get(i).todoId;
-                            const task = root.taskMap[id];
-                            if (task) {
-                                if (root.statusFilter === "active" && task.done) continue;
-                                if (root.statusFilter === "done" && !task.done) continue;
-                                return true;
-                            }
-                        }
-                        return false;
-                    }
 
                     MaterialIcon {
                         Layout.alignment: Qt.AlignHCenter
-                        text: emptyState.searching ? "search_off"
+                        text: root.searchQuery.trim().length > 0 ? "search_off"
                             : root.statusFilter === "done" ? "sentiment_satisfied" : "check_circle"
                         fontStyle: Tokens.font.icon.builders.extraLarge.build()
                         color: Colours.palette.m3outlineVariant
@@ -245,16 +258,12 @@ FocusScope {
                     StyledText {
                         Layout.alignment: Qt.AlignHCenter
                         text: {
-                            if (emptyState.searching) {
+                            if (root.searchQuery.trim().length > 0) {
                                 return qsTr('No matches for "%1"').arg(root.searchQuery.trim());
                             }
-                            if (root.statusFilter === "done") {
-                                return qsTr("Nothing completed yet");
-                            }
-                            if (root.statusFilter === "active") {
-                                return qsTr("All caught up!");
-                            }
-                            return root.emptyStateText
+                            if (root.statusFilter === "done") return qsTr("Nothing completed yet");
+                            if (root.statusFilter === "active") return qsTr("All caught up!");
+                            return root.emptyStateText;
                         }
                         color: Colours.palette.m3outlineVariant
                         elide: Text.ElideRight
@@ -275,7 +284,7 @@ FocusScope {
                     property var taskIndexMap: root.taskIndexMap
                     
                     readonly property var task: (function() {
-                        const t = taskMap[todoId];
+                        var t = taskMap[todoId];
                         if (t) return t;
                         return {
                             todoId: todoId,
@@ -289,26 +298,45 @@ FocusScope {
                     })()
 
                     readonly property int absIdx: (function() {
-                        const idx = taskIndexMap[todoId];
+                        var idx = taskIndexMap[todoId];
                         return idx !== undefined ? idx : -1;
                     })()
 
+                    // ── Status + Search Filter ──
                     visible: {
+                        // Status filter
                         if (root.statusFilter === "active" && task.done) return false;
                         if (root.statusFilter === "done" && !task.done) return false;
+                        
+                        // Search filter (INSTANT - no model rebuild!)
+                        var q = root.searchQuery.trim().toLowerCase();
+                        if (q) {
+                            var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
+                            var matchSubtask = false;
+                            if (task.subtasks) {
+                                for (var j = 0; j < task.subtasks.length; j++) {
+                                    if (task.subtasks[j].title && task.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
+                                        matchSubtask = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!matchTitle && !matchSubtask) return false;
+                        }
+                        
                         return true;
                     }
 
                     readonly property var progressData: {
-                        const subtasks = task.subtasks || [];
-                        const total = subtasks.length;
+                        var subtasks = task.subtasks || [];
+                        var total = subtasks.length;
                         
                         if (total === 0) {
                             return { total: 0, done: 0, ratio: task.done ? 1 : 0 };
                         }
                         
-                        let done = 0;
-                        for (let i = 0; i < subtasks.length; i++) {
+                        var done = 0;
+                        for (var i = 0; i < subtasks.length; i++) {
                             if (subtasks[i].done) done++;
                         }
                         return { total: total, done: done, ratio: done / total };
@@ -321,8 +349,8 @@ FocusScope {
                     nSub: progressData.total
                     dSub: progressData.done
                     subOrder: {
-                        const order = [];
-                        for (let i = 0; i < task.subtasks.length; i++) {
+                        var order = [];
+                        for (var i = 0; i < task.subtasks.length; i++) {
                             order.push(task.subtasks[i].id);
                         }
                         return order;
@@ -332,88 +360,29 @@ FocusScope {
 
                     editingSubId: root.editingSubId
 
-                    // ── Signal Handlers (using DataManager) ──
-                    onToggleRequested: (taskIdx) => dataManager.toggleTask(taskIdx)
-                    onRenameRequested: (taskIdx, newTitle) => {
-                        dataManager.renameTask(taskIdx, newTitle)
-                        root.editingTaskId = ""
-                    }
-                    onDeleteRequested: (taskIdx) => dataManager.deleteTask(taskIdx)
-                    onAddSubtaskRequested: (taskIdx, title) => dataManager.addSubtask(taskIdx, title)
-                    onToggleSubtaskRequested: (taskIdx, subIdx) => dataManager.toggleSubtask(taskIdx, subIdx)
-                    onDeleteSubtaskRequested: (taskIdx, subIdx) => dataManager.deleteSubtask(taskIdx, subIdx)
-                    onRenameSubtaskRequested: (taskIdx, subIdx, newTitle) => {
-                        dataManager.renameSubtask(taskIdx, subIdx, newTitle)
-                        root.editingSubId = ""
-                    }
-                    onEditingStarted: (taskId) => root.editingTaskId = taskId
-                    onEditingCancelled: () => root.editingTaskId = ""
-                    onSubtaskEditingStarted: (subtaskId) => root.editingSubId = subtaskId
-                    onSubtaskEditingCancelled: () => root.editingSubId = ""
-                    onToggleExpandRequested: () => expanded = !expanded
+                    onToggleRequested: function(taskIdx) { dataManager.toggleTask(taskIdx); }
+                    onRenameRequested: function(taskIdx, newTitle) { dataManager.renameTask(taskIdx, newTitle); }
+                    onDeleteRequested: function(taskIdx) { dataManager.deleteTask(taskIdx); }
+                    onAddSubtaskRequested: function(taskIdx, title) { dataManager.addSubtask(taskIdx, title); }
+                    onToggleSubtaskRequested: function(taskIdx, subIdx) { dataManager.toggleSubtask(taskIdx, subIdx); }
+                    onDeleteSubtaskRequested: function(taskIdx, subIdx) { dataManager.deleteSubtask(taskIdx, subIdx); }
+                    onRenameSubtaskRequested: function(taskIdx, subIdx, newTitle) { dataManager.renameSubtask(taskIdx, subIdx, newTitle); }
+                    onEditingStarted: function(taskId) { root.editingTaskId = taskId; }
+                    onEditingCancelled: function() { root.editingTaskId = ""; }
+                    onSubtaskEditingStarted: function(subtaskId) { root.editingSubId = subtaskId; }
+                    onSubtaskEditingCancelled: function() { root.editingSubId = ""; }
+                    onToggleExpandRequested: function() { expanded = !expanded; }
                 }
             }
         }
     }
 
-
-    // ── Required Public API for adding tasks ─────────────────────────────
-    function addTask(title, icon = null) {
+    // ── Public API ──
+    function addTask(title, icon) {
         dataManager.addTask(title, root.dataType === "habits" ? (icon || "") : null);
     }
 
-    function moveDoneToBottom() {
-        const active = [];
-        const done = [];
-        let changed = false;
-        for (let i = 0; i < root.tasks.length; i++) {
-            const original = root.tasks[i];
-            const subtasks = original.subtasks || [];
-            const activeSubtasks = [];
-            const doneSubtasks = [];
-            for (let j = 0; j < subtasks.length; j++) {
-                (subtasks[j].done ? doneSubtasks : activeSubtasks).push(subtasks[j]);
-            }
-            const task = Object.assign({}, original, {
-                subtasks: activeSubtasks.concat(doneSubtasks)
-            });
-            if (subtasks.length !== task.subtasks.length)
-                changed = true;
-            else {
-                for (let j = 0; j < subtasks.length; j++) {
-                    if (subtasks[j].id !== task.subtasks[j].id) {
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-            if (task.done) done.push(task);
-            else active.push(task);
-        }
-        const ordered = active.concat(done);
-        changed = changed || ordered.length !== root.tasks.length;
-        if (!changed) {
-            for (let i = 0; i < ordered.length; i++) {
-                if (ordered[i].todoId !== root.tasks[i].todoId) {
-                    changed = true;
-                    break;
-                }
-            }
-        }
-        if (!changed) return;
-        dataManager.tasks = ordered;
-        root.tasks = ordered;
-        root.updateMaps();
-        root.updateFilteredModel();
-        root.save();
-    }
-
-    // Add this for habits
     function addHabit(title, icon) {
         dataManager.addTask(title, icon);
-    }
-
-    function clearDone() {
-        dataManager.clearDone();
     }
 }
