@@ -70,7 +70,7 @@ QtObject {
             title: title.trim(),
             done: false,
             minutes: 0,
-            icon: icon,
+            icon: icon || null,
             priority: null,
             createdAt: Date.now(),
             subtasks: []

@@ -92,6 +92,7 @@ FocusScope {
             onPageChanged: page => {
                 root.activePage = page
             }
+            onHabitIconSelected: icon => root.habitIcon = icon
 
             onCaptureAccepted: text => {
                 if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon)
@@ -107,7 +108,7 @@ FocusScope {
 
         // ── Status filter (All/Active/Done) + search ──────────────
         RowLayout {
-            visible: root.activePage === "tasks"
+            visible: true
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
 
@@ -116,26 +117,27 @@ FocusScope {
                 id: statusFilterSwitcher
                 Layout.fillHeight: true   
                 model: [
-                    { icon: "format_list_bulleted", text: qsTr("All"), value: "all", action: () => { root.statusFilter = "all" } },
-                    { icon: "pending", text: qsTr("Active"), value: "active", action: () => { root.statusFilter = "active" } },
-                    { icon: "task_alt", text: qsTr("Done"), value: "done", action: () => { root.statusFilter = "done" } }
+                    { icon: "format_list_bulleted", text: qsTr("All"), value: "all" },
+                    { icon: "pending", text: qsTr("Active"), value: "active" },
+                    { icon: "task_alt", text: qsTr("Done"), value: "done" }
                 ]
                 currentValue: root.statusFilter
+                onActivated: value => root.statusFilter = value
                 showOnlyActiveText: false
                 givenHeight: 40
             }
 
-            // Clear done button when any done tasks exist (only on tasks page)
+            // Move completed items below active items. This is intentionally
+            // available on both Tasks and Daily pages.
             IconTextButton {
                 implicitHeight: statusFilterSwitcher.givenHeight
-                visible: taskList.doneCount > 0
-                icon: "delete_sweep"
-                onClicked: taskList.clearDone()
+                visible: true
+                icon: "vertical_align_bottom"
+                onClicked: (root.activePage === "daily" ? dailyHabitsList : taskList).moveDoneToBottom()
                 isToggle: false
                 checked:true
                 type: ButtonBase.Tonal
-                activeColour: "#6750A4"
-                activeOnColour: "#FFFFFF"
+                activeColour: Colours.palette.m3primary
                 font: Tokens.font.label.medium
                 radius: Tokens.rounding.small
                 padding: Tokens.padding.small
@@ -151,7 +153,7 @@ FocusScope {
 
                 Layout.preferredWidth: 250
                 leadingIcon: "search"
-                placeholderText: qsTr("Search")
+                placeholderText: root.activePage === "daily" ? qsTr("Search habits") : qsTr("Search tasks")
                 text: root.searchQuery
                 onTextChanged: root.searchQuery = text
                 Keys.onEscapePressed: { clear(); focus = false; }
@@ -159,61 +161,12 @@ FocusScope {
         }
 
 
-        // ── Icon picker for a new habit (daily page, while composing) ─
-        // RowLayout {
-        //     visible: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
-        //     Layout.fillWidth: true
-        //     spacing: Tokens.spacing.small
-
-        //     StyledText {
-        //         text: qsTr("Icon:")
-        //         font: Tokens.font.label.small
-        //         color: Colours.palette.m3onSurfaceVariant
-        //     }
-
-        //     Repeater {
-        //         model: ["task_alt", "water_drop", "directions_run", "fitness_center", "menu_book",
-        //                 "self_improvement", "block", "bedtime", "restaurant", "code",
-        //                 "favorite", "music_note", "brush", "savings", "mop"]
-        //         delegate: StyledRect {
-        //             id: iconChip
-        //             required property string modelData
-        //             readonly property bool selected: root.habitIcon === modelData
-
-        //             implicitWidth: 32; implicitHeight: 32
-        //             radius: Tokens.rounding.full
-        //             color: selected ? Colours.palette.m3primary
-        //                  : iconChipHover.hovered ? Colours.tPalette.m3surfaceContainerHigh
-        //                  : "transparent"
-        //             Behavior on color { CAnim {} }
-
-        //             HoverHandler { id: iconChipHover }
-
-        //             MaterialIcon {
-        //                 anchors.centerIn: parent
-        //                 text: iconChip.modelData
-        //                 fontStyle: Tokens.font.icon.small
-        //                 color: iconChip.selected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-        //                 Behavior on color { CAnim {} }
-        //             }
-
-        //             MouseArea {
-        //                 anchors.fill: parent
-        //                 cursorShape: Qt.PointingHandCursor
-        //                 onClicked: root.habitIcon = iconChip.modelData
-        //             }
-        //         }
-        //     }
-
-        //     Item { Layout.fillWidth: true }
-        // }
-
-
 
         // seperator line
         StyledRect {
             Layout.fillWidth: true; implicitHeight: 1
             color: Colours.palette.m3outlineVariant; opacity: 0.4
+            visible: root.activePage === "tasks"
         }
 
         TaskList {
@@ -227,16 +180,6 @@ FocusScope {
             searchQuery: root.searchQuery
         }
 
-        // TaskList {
-        //     id: dailyHabitsList
-        //     Layout.fillWidth: true
-        //     Layout.fillHeight: true
-        //     visible: root.activePage === "daily"
-        //     focus: root.activePage === "daily"
-        //     dataType: "habits"
-        //     statusFilter: root.statusFilter
-        //     searchQuery: root.searchQuery
-        // }
         TaskList {
             id: dailyHabitsList
             Layout.fillWidth: true
