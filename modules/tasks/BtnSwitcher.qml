@@ -4,16 +4,14 @@ import Caelestia
 import Caelestia.Config
 import qs.components
 import qs.components.controls
+import qs.services
 
 Item {
     id: root
 
     property var model: []
     property string currentValue: ""
-    property color borderColor: "#6750A4"
-    property color activeColor: "#6750A4"
-    property color activeTextColor: "#FFFFFF"
-    property color inactiveTextColor: "#616161"
+
     property bool showOnlyActiveText: false
     property int givenHeight: 45
 
@@ -34,7 +32,7 @@ Item {
             color: "transparent"
             radius: Tokens.rounding.small
             border.width: 1
-            border.color: root.borderColor
+            border.color: root.Colours.palette.m3secondary
         }
 
         Repeater {
@@ -46,12 +44,20 @@ Item {
                 isToggle: false
                 checked: root.currentValue === modelData.value
                 type: ButtonBase.Tonal
-                activeColour: root.activeColor
-                activeOnColour: root.activeTextColor
+
+                activeColour: Colours.palette.m3primary
+                
                 inactiveColour: "transparent"
-                inactiveOnColour: root.inactiveTextColor
+                inactiveOnColour: Colours.palette.m3onSurfaceVariant
+
                 font: Tokens.font.label.medium
-                icon: modelData.icon
+                icon: {
+                    if (root.showOnlyActiveText) {
+                        return modelData.icon
+                    } else {
+                        return root.currentValue === modelData.value ? modelData.icon : ""
+                    }
+                }
                 text: {
                     if (!root.showOnlyActiveText) {
                         return modelData.text

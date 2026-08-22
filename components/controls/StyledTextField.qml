@@ -14,6 +14,7 @@ TextFieldBase {
         Filled
     }
 
+    property int borderWidth: 2
     property int type: StyledTextField.Outlined
     property bool placeholderFloats: true // if false, placeholder stays in place and hides when typing
 
@@ -213,7 +214,7 @@ TextFieldBase {
                 property real outlineGapScale: (root.activeFocus || root.text) && root.placeholderFloats ? 1 : 0
                 readonly property real inset: strokeWidth / 2
 
-                strokeWidth: root.activeFocus ? 2 : 1
+                strokeWidth: root.activeFocus ? root.borderWidth : 1
                 strokeColor: root.isError ? Colours.palette.m3error : (root.activeFocus ? Colours.palette.m3primary : Colours.palette.m3outline)
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap

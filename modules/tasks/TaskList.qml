@@ -94,7 +94,9 @@ FocusScope {
         const q = searchQuery.trim().toLowerCase();
         
         // Use DataManager to get filtered tasks
-        const filteredIds = dataManager.getFilteredTasks(statusFilter, searchQuery);
+        // Status changes are handled by delegate visibility below. Keeping the
+        // model stable avoids destroying and recreating every card.
+        const filteredIds = dataManager.getFilteredTasks("all", searchQuery);
         
         // Check if we need to update
         if (filteredModel.count === filteredIds.length) {
@@ -135,10 +137,22 @@ FocusScope {
     }
 
     onSearchQueryChanged: updateFilteredModel()
+    onStatusFilterChanged: updateFilteredModel()
+
+    readonly property int visibleTaskCount: {
+        let count = 0;
+        for (let i = 0; i < filteredModel.count; i++) {
+            const task = root.taskMap[filteredModel.get(i).todoId];
+            if (!task) continue;
+            if (root.statusFilter === "active" && task.done) continue;
+            if (root.statusFilter === "done" && !task.done) continue;
+            count++;
+        }
+        return count;
+    }
 
     property string editingTaskId: ""
     property string editingSubId: ""
-    property string expandedId: ""
     property int  selectedIndex: -1
 
 
@@ -156,7 +170,7 @@ FocusScope {
                     if (!t.subtasks) t.subtasks = [];
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
-                    if (root.dataType === "habits" && !t.icon) t.icon = "task_alt";
+                    // if (root.dataType === "habits" && !t.icon) t.icon = "task_alt";
                     dataManager.syncDone(t);
                 }
                 root.tasks = parsed;
@@ -202,7 +216,7 @@ FocusScope {
             Item {
                 Layout.fillWidth: true
                 implicitHeight: emptyState.implicitHeight + Tokens.padding.extraLarge * 2
-                visible: root.loaded && filteredModel.count === 0
+                visible: root.loaded && root.visibleTaskCount === 0
                 ColumnLayout {
                     id: emptyState
                     anchors.centerIn: parent; 
@@ -303,7 +317,6 @@ FocusScope {
                     taskData: task
                     taskIndex: absIdx
                     isEditing: root.editingTaskId === task.todoId
-                    expanded: root.expandedId === todoId
                     isSelected: root.selectedIndex === index
                     nSub: progressData.total
                     dSub: progressData.done
@@ -315,25 +328,29 @@ FocusScope {
                         return order;
                     }
                     prog: progressData.ratio
-                    icon: root.dataType === "habits" ? (task.icon || "task_alt") : ""
+                    icon: root.dataType === "habits" ? (task.icon || "") : ""
 
                     editingSubId: root.editingSubId
 
                     // ── Signal Handlers (using DataManager) ──
                     onToggleRequested: (taskIdx) => dataManager.toggleTask(taskIdx)
-                    onRenameRequested: (taskIdx, newTitle) => dataManager.renameTask(taskIdx, newTitle)
+                    onRenameRequested: (taskIdx, newTitle) => {
+                        dataManager.renameTask(taskIdx, newTitle)
+                        root.editingTaskId = ""
+                    }
                     onDeleteRequested: (taskIdx) => dataManager.deleteTask(taskIdx)
                     onAddSubtaskRequested: (taskIdx, title) => dataManager.addSubtask(taskIdx, title)
                     onToggleSubtaskRequested: (taskIdx, subIdx) => dataManager.toggleSubtask(taskIdx, subIdx)
                     onDeleteSubtaskRequested: (taskIdx, subIdx) => dataManager.deleteSubtask(taskIdx, subIdx)
-                    onRenameSubtaskRequested: (taskIdx, subIdx, newTitle) => dataManager.renameSubtask(taskIdx, subIdx, newTitle)
+                    onRenameSubtaskRequested: (taskIdx, subIdx, newTitle) => {
+                        dataManager.renameSubtask(taskIdx, subIdx, newTitle)
+                        root.editingSubId = ""
+                    }
                     onEditingStarted: (taskId) => root.editingTaskId = taskId
                     onEditingCancelled: () => root.editingTaskId = ""
                     onSubtaskEditingStarted: (subtaskId) => root.editingSubId = subtaskId
                     onSubtaskEditingCancelled: () => root.editingSubId = ""
-                    onToggleExpandRequested: () => {
-                        root.expandedId = root.expandedId === todoId ? "" : todoId;
-                    }
+                    onToggleExpandRequested: () => expanded = !expanded
                 }
             }
         }
@@ -342,7 +359,53 @@ FocusScope {
 
     // ── Required Public API for adding tasks ─────────────────────────────
     function addTask(title, icon = null) {
-        dataManager.addTask(title, root.dataType === "habits" ? (icon || "task_alt") : null);
+        dataManager.addTask(title, root.dataType === "habits" ? (icon || "") : null);
+    }
+
+    function moveDoneToBottom() {
+        const active = [];
+        const done = [];
+        let changed = false;
+        for (let i = 0; i < root.tasks.length; i++) {
+            const original = root.tasks[i];
+            const subtasks = original.subtasks || [];
+            const activeSubtasks = [];
+            const doneSubtasks = [];
+            for (let j = 0; j < subtasks.length; j++) {
+                (subtasks[j].done ? doneSubtasks : activeSubtasks).push(subtasks[j]);
+            }
+            const task = Object.assign({}, original, {
+                subtasks: activeSubtasks.concat(doneSubtasks)
+            });
+            if (subtasks.length !== task.subtasks.length)
+                changed = true;
+            else {
+                for (let j = 0; j < subtasks.length; j++) {
+                    if (subtasks[j].id !== task.subtasks[j].id) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (task.done) done.push(task);
+            else active.push(task);
+        }
+        const ordered = active.concat(done);
+        changed = changed || ordered.length !== root.tasks.length;
+        if (!changed) {
+            for (let i = 0; i < ordered.length; i++) {
+                if (ordered[i].todoId !== root.tasks[i].todoId) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (!changed) return;
+        dataManager.tasks = ordered;
+        root.tasks = ordered;
+        root.updateMaps();
+        root.updateFilteredModel();
+        root.save();
     }
 
     // Add this for habits

@@ -41,7 +41,7 @@ Item {
     required property var taskData        // The task object
     required property int taskIndex       // Index in tasks array
     required property bool isEditing      // Whether task is being edited
-    required property bool expanded       // Whether task is expanded
+    property bool expanded: false        // Independent per-card state
     required property bool isSelected     // Whether task is selected
     required property int nSub            // Number of subtasks
     required property int dSub            // Number of done subtasks
@@ -51,8 +51,7 @@ Item {
     // ── Additional Property for Subtask Editing ──────────────
     property string editingSubId: ""      // ID of subtask being edited (passed from parent)
 
-
-// Double-click handler
+    // Double-click handler
     MouseArea {
         anchors.fill: parent
         onClicked: root.forceActiveFocus()
@@ -85,8 +84,6 @@ Item {
     readonly property bool taskDone: root.taskData?.done ?? false
     readonly property var subtasks: root.taskData?.subtasks ?? []
 
-
-
     readonly property var subtaskMap: {
         const map = {};
         if (taskData && taskData.subtasks) {
@@ -112,19 +109,12 @@ Item {
 
         Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
-        implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
+        // implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
+        implicitHeight:rowCol.implicitHeight + Tokens.padding.small * 2
         Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
         Behavior on color { CAnim {} }
 
         HoverHandler { id: rowHover }
-
-        // MouseArea {
-        //     anchors.fill: parent
-        //     onClicked: {
-        //         root.forceActiveFocus()
-        //     }
-        //     onDoubleClicked: root.toggleExpandRequested(root.taskIndex)
-        // }
 
         ColumnLayout {
             id: rowCol
@@ -148,8 +138,6 @@ Item {
                     text: root.expanded ? "keyboard_arrow_down" : "keyboard_arrow_right"
                     fontStyle: Tokens.font.icon.small
                     color: Colours.palette.m3onSurfaceVariant
-                    opacity: root.nSub > 0 ? 1
-                           : (rowHover.hovered || root.isSelected) ? 0.5 : 0
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     MouseArea {
@@ -162,65 +150,62 @@ Item {
 
                 // ── Icon or Checkbox ───────────────────────────
                 Item {
-                    Layout.preferredWidth: root.icon ? 60 : 24
+                    Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
+                    anchors.verticalCenter: parent.verticalCenter
                     
-                    // Icon + Checkbox (for habits)
-                    RowLayout {
-                        id: iconRow
-                        anchors.fill: parent
-                        spacing: Tokens.spacing.small
-                        visible: root.icon !== ""
-                        
-                        StyledRect {
-                            implicitWidth: 36
-                            implicitHeight: 36
-                            radius: Tokens.rounding.medium
-                            color: root.taskDone ? Colours.tPalette.m3primaryContainer : Colours.tPalette.m3surfaceContainerHigh
-                            Behavior on color { CAnim {} }
-                            
-                            MaterialIcon {
-                                anchors.centerIn: parent
-                                text: root.icon
-                                fontStyle: Tokens.font.icon.medium
-                                color: root.taskDone ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
-                                Behavior on color { CAnim {} }
-                            }
-                        }
-                        
-                        MaterialIcon {
-                            text: root.taskDone ? "check_circle" : "radio_button_unchecked"
-                            fill: root.taskDone ? 1 : 0
-                            fontStyle: Tokens.font.icon.medium
-                            color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3outline
-                            Behavior on color { CAnim {} }
-                            MouseArea {
-                                anchors.fill: parent
-                                anchors.margins: -4
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.toggleRequested(root.taskIndex)
-                            }
-                        }
-                    }
-                    
-                    // Checkbox only (for regular tasks)
                     MaterialIcon {
-                        id: checkboxOnly
-                        anchors.fill: parent
-                        visible: root.icon === ""
-                        text: root.taskDone ? "check_box"
-                            : (root.nSub > 0 && root.dSub > 0) ? "indeterminate_check_box"
-                            : "check_box_outline_blank"
+                        id: toggleIcon
+                        anchors {
+                            verticalCenter: parent.verticalCenter
+                            left: parent.left
+                        }
+                        visible: true
+                        
+                        // ── Show icon if present, otherwise checkbox ──
+                        text: {
+                            if (root.icon === "" || root.icon === null || root.icon === "block") {
+                                // No icon → show checkbox/circle
+                                if (root.nSub > 0) {
+                                    return root.taskDone ? "check_box"
+                                        : (root.dSub > 0 && root.dSub < root.nSub) ? "indeterminate_check_box"
+                                        : "check_box_outline_blank"
+                                } else {
+                                    return root.taskDone ? "check_circle" : "radio_button_unchecked"
+                                }
+                            }else {
+                                // Show the provided icon
+                                return root.icon
+                            }
+                        }
+                        
                         fill: root.taskDone ? 1 : 0
-                        fontStyle: Tokens.font.icon.medium
-                        color: root.taskDone ? Colours.palette.m3tertiary : Colours.palette.m3primary
+                        
+                        fontStyle: root.icon !== "" ? Tokens.font.icon.medium : Tokens.font.icon.medium
+                        color: {
+                            if (root.icon !== "") {
+                                // Icon color - primary when done, normal when not
+                                return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                            } else {
+                                // Checkbox color
+                                return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3outline
+                            }
+                        }
                         Behavior on color { CAnim {} }
+                        
+                        // ── Click handler ────────────────────────────
                         MouseArea {
                             anchors.fill: parent
                             anchors.margins: -4
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.toggleRequested(root.taskIndex)
+                            cursorShape: root.nSub > 0 ? Qt.ArrowCursor : Qt.PointingHandCursor
+                            enabled: root.nSub === 0  // Disabled when has subtasks
+                            onClicked: {
+                                if (root.nSub === 0) {
+                                    root.toggleRequested(root.taskIndex)
+                                }
+                            }
                         }
+                        
                     }
                 }
 
@@ -230,7 +215,7 @@ Item {
                     Layout.fillWidth: true
                     text: root.taskTitle
                     font: Tokens.font.body.large
-                    color: root.taskDone ? Colours.palette.m3outline : Colours.palette.m3onSurface
+                    color: root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurface
                     elide: Text.ElideRight
                     Behavior on color { CAnim {} }
 
@@ -289,7 +274,7 @@ Item {
                             width: parent.width * root.prog
                             height: parent.height
                             radius: parent.radius
-                            color: Colours.palette.m3tertiary
+                            color: Colours.palette.m3primary
                             Behavior on width { Anim {} }
                         }
                     }
