@@ -13,6 +13,27 @@ import qs.components.controls
 import qs.services
 import qs.utils as Utils
 
+/*
+data model used: for both tasks and habits
+{
+    todoId: string,
+    title: string,
+    done: bool,
+    icon: string | null, // optional
+    minutes: int,
+    priority: int,
+    
+    subtasks: [
+        {
+            id: string,
+            title: string,
+            done: bool,
+            minutes: int
+        },
+        ...
+    ]
+}
+*/ 
 Item {
     id: root
 
@@ -29,6 +50,16 @@ Item {
 
     // ── Additional Property for Subtask Editing ──────────────
     property string editingSubId: ""      // ID of subtask being edited (passed from parent)
+
+
+// Double-click handler
+    MouseArea {
+        anchors.fill: parent
+        onClicked: root.forceActiveFocus()
+        onDoubleClicked: {
+            root.toggleExpandRequested(root.taskIndex)
+        }
+    }
 
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
@@ -50,9 +81,11 @@ Item {
 
     // ── Internal State ──────────────────────────────────────────
     readonly property string taskId: root.taskData?.todoId ?? ""
-    readonly property string taskTitle: root.taskData?.task ?? ""
+    readonly property string taskTitle: root.taskData?.title ?? ""
     readonly property bool taskDone: root.taskData?.done ?? false
     readonly property var subtasks: root.taskData?.subtasks ?? []
+
+
 
     readonly property var subtaskMap: {
         const map = {};
@@ -65,15 +98,6 @@ Item {
     }
 
     property string icon: ""  // If provided, show icon instead of checkbox
-
-    // this is a ScriptModel that holds the ordered list of subtask IDs for the Repeater
-    property var subOrderModel: {
-        const model = Qt.createQmlObject('import QtQuick 2.0; ListModel {}', root)
-        for (const id of root.subOrder) {
-            model.append({ id: id })
-        }
-        return model
-    }
 
     // ── Main Card ──────────────────────────────────────────────
     StyledRect {
@@ -94,13 +118,13 @@ Item {
 
         HoverHandler { id: rowHover }
 
-        MouseArea {
-            anchors.fill: parent
-            onClicked: {
-                root.forceActiveFocus()
-            }
-            onDoubleClicked: root.toggleExpandRequested(root.taskIndex)
-        }
+        // MouseArea {
+        //     anchors.fill: parent
+        //     onClicked: {
+        //         root.forceActiveFocus()
+        //     }
+        //     onDoubleClicked: root.toggleExpandRequested(root.taskIndex)
+        // }
 
         ColumnLayout {
             id: rowCol
@@ -303,7 +327,7 @@ Item {
                 // ── Subtask Repeater ────────────────────────────
                 Repeater {
                     id: subRepeater
-                    model: root.subOrderModel
+                    model: root.subOrder
                     delegate: SubtaskCard {
                         required property string modelData
                         required property int index
@@ -319,7 +343,6 @@ Item {
                         subtaskIndex: subIdx
                         subtaskId: modelData
                         
-                        // FIXED: Check against parent's editingSubId
                         isEditing: root.editingSubId === modelData
 
                         isFirst: index === 0

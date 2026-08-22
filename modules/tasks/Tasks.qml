@@ -34,13 +34,13 @@ FocusScope {
             if (root.activePage === "tasks")
                 taskList.forceActiveFocus();
             else
-                dailyHabits.forceActiveFocus();
+                dailyHabitsList.forceActiveFocus();
         }
     }
 
     property string activePage: "tasks" // "tasks" | "daily"
 
-    property string statusFilter: "active"
+    property string statusFilter: "all" // "all" | "active" | "done"
     property string searchQuery: ""
 
     property var timeLeftToday: ({ hours: 0, mins: 0 })
@@ -78,7 +78,7 @@ FocusScope {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: Tokens.padding.large
+        anchors.margins: Tokens.padding.medium
         spacing: Tokens.spacing.medium
 
         // switcher and capture field
@@ -94,12 +94,8 @@ FocusScope {
             }
 
             onCaptureAccepted: text => {
-                if (root.activePage === "daily") {
-                    dailyHabits.addHabit(text, root.habitIcon)
-                    root.habitIcon = "task_alt"
-                } else {
-                    taskList.addTask(text)
-                }
+                if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon)
+                else taskList.addTask(text)
             }
         }
 
@@ -148,31 +144,12 @@ FocusScope {
             // spacer pushes evrything else to the right
             Item { Layout.fillWidth: true }
 
-            // Estimated time  and time left today (only if any active tasks exist)
-            // StyledText {
-            //     visible: taskList.totalActiveMinutes > 0
-            //     text: {
-            //         const activeMins = taskList.totalActiveMinutes;
-            //         const h = Math.floor(activeMins / 60);
-            //         const m = activeMins % 60;
-            //         const estStr = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ""}` : `${m}m`;
-            //         const left = root.timeLeftToday;
-            //         const leftStr = left.hours > 0 ? `${left.hours}h${left.mins > 0 ? ` ${left.mins}m` : ""}` : `${left.mins}m`;
-            //         return `📊 ${estStr} estimated · ${leftStr} left today`;
-            //     }
-            //     font: Tokens.font.body.small
-            //     color: Colours.palette.m3onSurfaceVariant
-            // }
-
-            
-
             // Search input
             StyledTextField {
                 implicitHeight: statusFilterSwitcher.givenHeight
                 verticalPadding: Tokens.padding.small
 
                 Layout.preferredWidth: 250
-                // Layout.fillHeight: true
                 leadingIcon: "search"
                 placeholderText: qsTr("Search")
                 text: root.searchQuery
@@ -244,19 +221,31 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.activePage === "tasks"
-            
             focus: root.activePage === "tasks"
-
+            dataType: "tasks"
             statusFilter: root.statusFilter
             searchQuery: root.searchQuery
         }
 
-        DailyHabits {
-            id: dailyHabits
+        // TaskList {
+        //     id: dailyHabitsList
+        //     Layout.fillWidth: true
+        //     Layout.fillHeight: true
+        //     visible: root.activePage === "daily"
+        //     focus: root.activePage === "daily"
+        //     dataType: "habits"
+        //     statusFilter: root.statusFilter
+        //     searchQuery: root.searchQuery
+        // }
+        TaskList {
+            id: dailyHabitsList
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.activePage === "daily"
             focus: root.activePage === "daily"
+            dataType: "habits"
+            statusFilter: root.statusFilter
+            searchQuery: root.searchQuery
         }
     }
 }

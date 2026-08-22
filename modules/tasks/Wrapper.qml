@@ -14,17 +14,6 @@ Item {
 
     property real offsetScale: shouldBeActive ? 0 : 1
 
-    onShouldBeActiveChanged: {
-        if (shouldBeActive) {
-            implicitHeight = Qt.binding(() => content.implicitHeight);
-            // Content may still be alive from the close animation — refocus
-            // it so keyboard shortcuts ("/", j/k, Escape) work immediately
-            content.item?.forceActiveFocus();
-        } else {
-            implicitHeight = implicitHeight; // Break binding during close anim
-        }
-    }
-
     visible: offsetScale < 1
     anchors.bottomMargin: (-implicitHeight - 5) * offsetScale
     implicitHeight: content.implicitHeight
@@ -46,7 +35,7 @@ Item {
         id: idleTimer
         interval: 5000
         running: root.shouldBeActive && !hover.hovered && !(content.item?.inputActive ?? false)
-        onTriggered: root.screenState.tasks = false
+        onTriggered: if (root.shouldBeActive) root.screenState.tasks = false
     }
 
     Loader {
@@ -55,9 +44,10 @@ Item {
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
 
-        active: root.shouldBeActive || root.visible
+        asynchronous: true
+        active: true
         // Fresh load on open: grab keyboard focus right away
-        onLoaded: item.forceActiveFocus()
+        onLoaded: Qt.callLater(() => item?.forceActiveFocus())
 
         sourceComponent: Tasks {
             onCloseRequested: root.screenState.tasks = false
