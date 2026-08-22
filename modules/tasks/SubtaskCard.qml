@@ -181,6 +181,7 @@ Item {
                 root.editingCancelled()
                 text = root.title
             }
+            onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, root.subtaskIndex, text) }
         }
 
         // ── Action Buttons ──────────────────────────────────────

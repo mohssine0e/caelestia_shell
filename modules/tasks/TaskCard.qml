@@ -253,6 +253,7 @@ Item {
                         root.editingCancelled()
                         text = root.taskTitle
                     }
+                    onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, text) }
                 }
 
                 // ── Progress ────────────────────────────────────
