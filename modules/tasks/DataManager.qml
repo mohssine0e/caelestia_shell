@@ -6,49 +6,60 @@ import QtQuick
 QtObject {
     id: dataManager
 
-    // Reference to the tasks list (will be passed from parent)
     property var tasks: []
     
-    // Signal to notify when data changes
-    signal dataChanged()
-    signal taskRenamed(string oldTitle, string newTitle)
+    // ── Specific Signals ──
+    signal taskAdded(string taskId, var task)
     signal taskDeleted(string taskId)
-    signal taskAdded(string taskId)
     signal taskToggled(string taskId, bool newState)
+    signal taskRenamed(string taskId, string oldTitle, string newTitle)
+    
+    signal subtaskAdded(string taskId, string subtaskId)
+    signal subtaskToggled(string taskId, string subtaskId, bool newState)
+    signal subtaskRenamed(string taskId, string subtaskId, string oldTitle, string newTitle)
+    signal subtaskDeleted(string taskId, string subtaskId)
 
     function copyTask(task, changes) {
-        return Object.assign({}, task, changes);
+        var newTask = {};
+        for (var key in task) {
+            if (task.hasOwnProperty(key)) {
+                newTask[key] = task[key];
+            }
+        }
+        for (var changeKey in changes) {
+            if (changes.hasOwnProperty(changeKey)) {
+                newTask[changeKey] = changes[changeKey];
+            }
+        }
+        return newTask;
     }
 
-    // ── Helper Functions ────────────────────────────────────────
     function updateTask(index, newTask) {
-        const newTasks = [];
-        for (let i = 0; i < tasks.length; i++) {
+        var newTasks = [];
+        for (var i = 0; i < tasks.length; i++) {
             newTasks[i] = i === index ? newTask : tasks[i];
         }
         tasks = newTasks;
-        dataChanged();
     }
 
     function updateSubtask(taskIndex, subtaskIndex, newSubtask) {
-        const task = tasks[taskIndex];
+        var task = tasks[taskIndex];
         if (!task) return;
         
-        const newSubtasks = [];
-        for (let i = 0; i < task.subtasks.length; i++) {
+        var newSubtasks = [];
+        for (var i = 0; i < task.subtasks.length; i++) {
             newSubtasks[i] = i === subtaskIndex ? newSubtask : task.subtasks[i];
         }
         
-        const newTask = copyTask(task, { subtasks: newSubtasks });
-        
+        var newTask = copyTask(task, { subtasks: newSubtasks });
         syncDone(newTask);
         updateTask(taskIndex, newTask);
     }
 
     function syncDone(t) {
         if (t.subtasks && t.subtasks.length > 0) {
-            let allDone = true;
-            for (let i = 0; i < t.subtasks.length; i++) {
+            var allDone = true;
+            for (var i = 0; i < t.subtasks.length; i++) {
                 if (!t.subtasks[i].done) {
                     allDone = false;
                     break;
@@ -58,14 +69,11 @@ QtObject {
         }
     }
 
-
-    // ── Task CRUD Operations ─────────────────────────────────────
-    
-    // Add a new task (works for both tasks and habits with optional icon)
-    function addTask(title, icon = null) {
+    // ── Task CRUD ──
+    function addTask(title, icon) {
         if (!title || !title.trim()) return;
         
-        const newTask = {
+        var newTask = {
             todoId: Date.now() + "-" + Math.floor(Math.random() * 1e6),
             title: title.trim(),
             done: false,
@@ -76,25 +84,24 @@ QtObject {
             subtasks: []
         };
         
-        const newTasks = [newTask];
-        for (let i = 0; i < tasks.length; i++) {
+        var newTasks = [newTask];
+        for (var i = 0; i < tasks.length; i++) {
             newTasks[i + 1] = tasks[i];
         }
         tasks = newTasks;
-        dataChanged();
-        taskAdded(newTask.todoId);
+        taskAdded(newTask.todoId, newTask);
     }
 
-    // Toggle task done status
     function toggleTask(i) {
         if (i < 0 || i >= tasks.length) return;
         
-        const task = tasks[i];
-        const newDone = !task.done;
+        var task = tasks[i];
+        var newDone = !task.done;
+        var taskId = task.todoId;
         
-        const newSubtasks = [];
-        for (let j = 0; j < task.subtasks.length; j++) {
-            const s = task.subtasks[j];
+        var newSubtasks = [];
+        for (var j = 0; j < task.subtasks.length; j++) {
+            var s = task.subtasks[j];
             newSubtasks[j] = {
                 id: s.id,
                 title: s.title,
@@ -103,108 +110,73 @@ QtObject {
             };
         }
         
-        const newTask = copyTask(task, { done: newDone, subtasks: newSubtasks });
-        
+        var newTask = copyTask(task, { done: newDone, subtasks: newSubtasks });
         updateTask(i, newTask);
-        taskToggled(task.todoId, newDone);
+        taskToggled(taskId, newDone);
     }
 
-    // Rename a task
     function renameTask(i, newTitle) {
         if (!newTitle || !newTitle.trim()) return;
         
-        const task = tasks[i];
+        var task = tasks[i];
         if (!task) return;
         
-        const oldTitle = task.title;
-        const newTask = copyTask(task, {
+        var taskId = task.todoId;
+        var oldTitle = task.title;
+        var newTask = copyTask(task, {
             title: newTitle.trim(),
             subtasks: task.subtasks ? task.subtasks.slice() : []
         });
         
         updateTask(i, newTask);
-        taskRenamed(oldTitle, newTitle.trim());
+        taskRenamed(taskId, oldTitle, newTitle.trim());
     }
 
-    // Set task estimate in minutes
-    function setTaskEstimate(i, mins) {
-        const task = tasks[i];
-        if (!task) return;
-        
-        const newTask = copyTask(task, {
-            minutes: mins,
-            subtasks: task.subtasks ? task.subtasks.slice() : []
-        });
-        
-        updateTask(i, newTask);
-    }
-
-    // Delete a task
     function deleteTask(i) {
         if (i < 0 || i >= tasks.length) return;
         
-        const taskId = tasks[i].todoId;
-        const newTasks = [];
-        for (let j = 0; j < tasks.length; j++) {
+        var taskId = tasks[i].todoId;
+        var newTasks = [];
+        for (var j = 0; j < tasks.length; j++) {
             if (j !== i) newTasks.push(tasks[j]);
         }
         tasks = newTasks;
-        dataChanged();
         taskDeleted(taskId);
     }
 
-    // Clear all done tasks
-    function clearDone() {
-        const newTasks = [];
-        const deletedIds = [];
-        for (let i = 0; i < tasks.length; i++) {
-            if (!tasks[i].done) {
-                newTasks.push(tasks[i]);
-            } else {
-                deletedIds.push(tasks[i].todoId);
-            }
-        }
-        tasks = newTasks;
-        dataChanged();
-        for (let i = 0; i < deletedIds.length; i++) {
-            taskDeleted(deletedIds[i]);
-        }
-    }
-
-    // ── Subtask CRUD Operations ──────────────────────────────────
-
-    // Add a subtask
+    // ── Subtask CRUD ──
     function addSubtask(taskIndex, title) {
         if (!title || !title.trim()) return;
         
-        const task = tasks[taskIndex];
+        var task = tasks[taskIndex];
         if (!task) return;
+        var taskId = task.todoId;
         
-        const newSubtask = {
+        var newSubtask = {
             id: Date.now() + "-" + Math.floor(Math.random() * 1e6),
             title: title.trim(),
             done: false,
             minutes: 0
         };
         
-        const newSubtasks = task.subtasks.slice();
+        var newSubtasks = task.subtasks.slice();
         newSubtasks.push(newSubtask);
         
-        const newTask = copyTask(task, { subtasks: newSubtasks });
-        
+        var newTask = copyTask(task, { subtasks: newSubtasks });
         syncDone(newTask);
         updateTask(taskIndex, newTask);
+        subtaskAdded(taskId, newSubtask.id);
     }
 
-    // Toggle a subtask
     function toggleSubtask(taskIndex, subtaskIndex) {
         if (taskIndex < 0 || taskIndex >= tasks.length) return;
         
-        const task = tasks[taskIndex];
+        var task = tasks[taskIndex];
         if (subtaskIndex < 0 || subtaskIndex >= task.subtasks.length) return;
+        var taskId = task.todoId;
         
-        const sub = task.subtasks[subtaskIndex];
-        const newSub = {
+        var sub = task.subtasks[subtaskIndex];
+        var newSub = {
             id: sub.id,
             title: sub.title,
             done: !sub.done,
@@ -212,19 +184,21 @@ QtObject {
         };
         
         updateSubtask(taskIndex, subtaskIndex, newSub);
+        subtaskToggled(taskId, sub.id, !sub.done);
     }
 
-    // Rename a subtask
     function renameSubtask(taskIndex, subtaskIndex, title) {
         if (!title || !title.trim()) return;
         
-        const task = tasks[taskIndex];
+        var task = tasks[taskIndex];
         if (!task) return;
+        var taskId = task.todoId;
         
-        const sub = task.subtasks[subtaskIndex];
+        var sub = task.subtasks[subtaskIndex];
         if (!sub) return;
+        var oldTitle = sub.title;
         
-        const newSub = {
+        var newSub = {
             id: sub.id,
             title: title.trim(),
             done: sub.done,
@@ -232,62 +206,30 @@ QtObject {
         };
         
         updateSubtask(taskIndex, subtaskIndex, newSub);
+        subtaskRenamed(taskId, sub.id, oldTitle, title.trim());
     }
 
-    // Delete a subtask
     function deleteSubtask(taskIndex, subtaskIndex) {
-        const task = tasks[taskIndex];
+        var task = tasks[taskIndex];
         if (!task) return;
+        var taskId = task.todoId;
+        var subId = task.subtasks[subtaskIndex].id;
         
-        const newSubtasks = [];
-        for (let i = 0; i < task.subtasks.length; i++) {
+        var newSubtasks = [];
+        for (var i = 0; i < task.subtasks.length; i++) {
             if (i !== subtaskIndex) newSubtasks.push(task.subtasks[i]);
         }
         
-        const newTask = copyTask(task, { subtasks: newSubtasks });
-        
+        var newTask = copyTask(task, { subtasks: newSubtasks });
         syncDone(newTask);
         updateTask(taskIndex, newTask);
+        subtaskDeleted(taskId, subId);
     }
 
-    // ── Batch Operations ─────────────────────────────────────────
-
-    // Reorder tasks (if needed in the future)
-    function reorderTasks(newOrder) {
-        const newTasks = [];
-        for (let i = 0; i < newOrder.length; i++) {
-            const taskId = newOrder[i];
-            for (let j = 0; j < tasks.length; j++) {
-                if (tasks[j].todoId === taskId) {
-                    newTasks.push(tasks[j]);
-                    break;
-                }
-            }
-        }
-        tasks = newTasks;
-        dataChanged();
-    }
-
-    // Import tasks (merge with existing)
-    function importTasks(importedTasks) {
-        if (!importedTasks || !Array.isArray(importedTasks)) return;
-        
-        const newTasks = tasks.slice();
-        for (let i = 0; i < importedTasks.length; i++) {
-            const t = importedTasks[i];
-            if (!t.subtasks) t.subtasks = [];
-            syncDone(t);
-            newTasks.push(t);
-        }
-        tasks = newTasks;
-        dataChanged();
-    }
-
-    // ── Statistics ───────────────────────────────────────────────
-    
+    // ── Statistics ──
     function getActiveCount() {
-        let count = 0;
-        for (let i = 0; i < tasks.length; i++) {
+        var count = 0;
+        for (var i = 0; i < tasks.length; i++) {
             if (!tasks[i].done) count++;
         }
         return count;
@@ -298,18 +240,18 @@ QtObject {
     }
 
     function getTotalActiveMinutes() {
-        let sum = 0;
-        for (let i = 0; i < tasks.length; i++) {
-            const t = tasks[i];
+        var sum = 0;
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
             if (!t.done && t.minutes > 0) sum += t.minutes;
         }
         return sum;
     }
 
     function getTaskMap() {
-        const map = {};
-        for (let i = 0; i < tasks.length; i++) {
-            const t = tasks[i];
+        var map = {};
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
             if (t && t.todoId) {
                 map[t.todoId] = t;
             }
@@ -318,9 +260,9 @@ QtObject {
     }
 
     function getTaskIndexMap() {
-        const idxMap = {};
-        for (let i = 0; i < tasks.length; i++) {
-            const t = tasks[i];
+        var idxMap = {};
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
             if (t && t.todoId) {
                 idxMap[t.todoId] = i;
             }
@@ -328,26 +270,23 @@ QtObject {
         return idxMap;
     }
 
-    // Get filtered tasks based on status and search query
     function getFilteredTasks(statusFilter, searchQuery) {
-        const q = searchQuery.trim().toLowerCase();
-        const result = [];
+        var q = searchQuery.trim().toLowerCase();
+        var result = [];
         
-        for (let i = 0; i < tasks.length; i++) {
-            const t = tasks[i];
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
             
-            // Status filter
             if (statusFilter === "active" && t.done) continue;
             if (statusFilter === "done" && !t.done) continue;
             
-            // Search filter
             if (q) {
-                const matchTitle = t.title ? t.title.toLowerCase().includes(q) : false;
-                let matchSubtask = false;
+                var matchTitle = t.title ? t.title.toLowerCase().indexOf(q) !== -1 : false;
+                var matchSubtask = false;
                 if (t.subtasks) {
-                    for (let j = 0; j < t.subtasks.length; j++) {
-                        const s = t.subtasks[j];
-                        if (s.title && s.title.toLowerCase().includes(q)) {
+                    for (var j = 0; j < t.subtasks.length; j++) {
+                        var s = t.subtasks[j];
+                        if (s.title && s.title.toLowerCase().indexOf(q) !== -1) {
                             matchSubtask = true;
                             break;
                         }
@@ -355,39 +294,20 @@ QtObject {
                 }
                 if (!matchTitle && !matchSubtask) continue;
             }
-            
             result.push(t.todoId);
         }
-        
         return result;
     }
 
-    // Get subtask map for a specific task
     function getSubtaskMap(taskId) {
-        const task = getTaskMap()[taskId];
+        var task = getTaskMap()[taskId];
         if (!task) return {};
         
-        const map = {};
-        for (let i = 0; i < task.subtasks.length; i++) {
-            const sub = task.subtasks[i];
+        var map = {};
+        for (var i = 0; i < task.subtasks.length; i++) {
+            var sub = task.subtasks[i];
             map[sub.id] = sub;
         }
         return map;
-    }
-
-    // Calculate progress for a task
-    function getTaskProgress(task) {
-        const subtasks = task.subtasks || [];
-        const total = subtasks.length;
-        
-        if (total === 0) {
-            return { total: 0, done: 0, ratio: task.done ? 1 : 0 };
-        }
-        
-        let done = 0;
-        for (let i = 0; i < subtasks.length; i++) {
-            if (subtasks[i].done) done++;
-        }
-        return { total: total, done: done, ratio: done / total };
     }
 }
