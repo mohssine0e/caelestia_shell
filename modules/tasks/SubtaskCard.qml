@@ -201,10 +201,86 @@ Item {
             }
 
             IconButton {
+                id: subDeleteButton
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "delete_outline"
-                onClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
+                        
+                property bool isShaking: false
+                
+                onClicked: {
+                    if (!isShaking) {
+                        isShaking = true
+                        shakeAnim.start()
+                    }
+                }
+                
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    
+                    onClicked: {
+                        subDeleteButton.clicked()
+                    }
+                    
+                    onDoubleClicked: {
+                        root.deleteRequested(root.taskIndex, root.subtaskIndex)
+                    }
+                }
+                        
+                        // ── Shake Animation ──────────────────────────────────────
+                        SequentialAnimation {
+                            id: shakeAnim
+                            onFinished: {
+                                subDeleteButton.isShaking = false
+                                subDeleteButton.rotation = 0  // Reset rotation
+                            }
+                            
+                            // Shake 2 times
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: -8
+                                to: 8
+                                duration: 80
+                            }
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: 8
+                                to: -8
+                                duration: 80
+                            }
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: -8
+                                to: 8
+                                duration: 80
+                            }
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: 8
+                                to: -8
+                                duration: 80
+                            }
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: -4
+                                to: 4
+                                duration: 50
+                            }
+                            PropertyAnimation {
+                                target: subDeleteButton
+                                property: "rotation"
+                                from: 4
+                                to: 0
+                                duration: 50
+                            }
+                        }
+                    
             }
         }
     }
