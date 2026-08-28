@@ -248,6 +248,13 @@ CustomMouseArea {
 
     // Monitor individual visibility changes
     Connections {
+        function onTasksChanged() {
+            if (root.screenState.tasks) {
+                // If tasks is visible, hide launcher and dashboard
+                root.screenState.launcher = false;
+                root.screenState.dashboard = false;
+            }
+        }
         function onLauncherChanged() {
             // If launcher is hidden, clear shortcut flags for dashboard and OSD
             if (!root.screenState.launcher) {
@@ -266,11 +273,20 @@ CustomMouseArea {
                     root.screenState.osd = false;
                     root.panels.osd.hovered = false;
                 }
+            }else{
+                if (root.screenState.tasks) {
+                    // If tasks is visible, hide launcher
+                    root.screenState.tasks = false;
+                }
             }
         }
 
         function onDashboardChanged() {
             if (root.screenState.dashboard) {
+                if (root.screenState.tasks) {
+                    // If tasks is visible, hide dashboard
+                    root.screenState.tasks = false;
+                }
                 // Dashboard became visible, immediately check if this should be shortcut mode
                 const inDashboardArea = root.inTopPanel(root.panels.dashboard, root.mouseX, root.mouseY);
                 if (!inDashboardArea) {
