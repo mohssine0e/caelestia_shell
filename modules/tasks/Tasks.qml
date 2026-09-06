@@ -43,16 +43,19 @@ FocusScope {
     property string statusFilter: "all" // "all" | "active" | "done"
     property string searchQuery: ""
 
-    property var timeLeftToday: ({ hours: 0, mins: 0 })
+    property var timeUntilReset: ({ hours: 0, mins: 0 })
     
     function updateTimeLeft() {
         const now = new Date();
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        const diffMs = end - now;
-        const diffMins = Math.max(0, Math.floor(diffMs / 60000));
+        const resetHour = 2;
+        let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0, 0);
+        if (now >= end)
+            end.setDate(end.getDate() + 1);
+        const diffMs = Math.max(0, end - now);
+        const diffMins = Math.floor(diffMs / 60000);
         const hours = Math.floor(diffMins / 60);
         const mins = diffMins % 60;
-        timeLeftToday = { hours: hours, mins: mins };
+        timeUntilReset = { hours: hours, mins: mins };
     }
     
     Timer {
@@ -125,6 +128,32 @@ FocusScope {
                 onActivated: value => root.statusFilter = value
                 showOnlyActiveText: false
                 givenHeight: 40
+            }
+
+            // Daily: completions today + countdown to 2am reset
+            RowLayout {
+                visible: root.activePage === "daily"
+                spacing: Tokens.spacing.small
+                Layout.fillHeight: true
+
+                MaterialIcon {
+                    text: "local_fire_department"
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3primary
+                    fill: dailyHabitsList.doneCount > 0 ? 1 : 0
+                }
+                StyledText {
+                    text: qsTr("%1 / %2 today").arg(dailyHabitsList.doneCount).arg(dailyHabitsList.tasks.length)
+                    font: Tokens.font.label.medium
+                    color: Colours.palette.m3onSurfaceVariant
+                }
+                StyledText {
+                    text: root.timeUntilReset.hours > 0
+                          ? qsTr("resets in %1h %2m").arg(root.timeUntilReset.hours).arg(root.timeUntilReset.mins)
+                          : qsTr("resets in %1m").arg(root.timeUntilReset.mins)
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3outline
+                }
             }
 
             // IconTextButton {

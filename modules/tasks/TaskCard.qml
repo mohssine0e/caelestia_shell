@@ -22,6 +22,12 @@ data model used: for both tasks and habits
     icon: string | null, // optional
     minutes: int,
     priority: int,
+
+    // habits only
+    completions: { "YYYY-MM-DD": [ids] },
+    streak: int,
+    bestStreak: int,
+    lastCompleted: string | null,
     
     subtasks: [
         {
@@ -50,6 +56,7 @@ Item {
 
     // ── Additional Property for Subtask Editing ──────────────
     property string editingSubId: ""      // ID of subtask being edited (passed from parent)
+    property bool showStreak: false       // Habits: show fire + streak count
 
     // Double-click handler
     MouseArea {
@@ -95,6 +102,8 @@ Item {
     }
 
     property string icon: ""  // If provided, show icon instead of checkbox
+    readonly property int streak: root.taskData?.streak ?? 0
+    readonly property int bestStreak: root.taskData?.bestStreak ?? 0
 
     // ── Main Card ──────────────────────────────────────────────
     StyledRect {
@@ -109,8 +118,7 @@ Item {
 
         Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
-        // implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
-        implicitHeight:rowCol.implicitHeight + Tokens.padding.small * 2
+        implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
         Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
         Behavior on color { CAnim {} }
 
@@ -130,23 +138,24 @@ Item {
 
             // ── Main row ───────────────────────────────────────
             RowLayout {
+                id: mainRow
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
 
                 // Expander
-                MaterialIcon {
-                    text: root.expanded ? "keyboard_arrow_down" : "keyboard_arrow_right"
-                    fontStyle: Tokens.font.icon.small
-                    color: Colours.palette.m3onSurfaceVariant
-                    Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+                // MaterialIcon {
+                //     text: root.expanded ? "keyboard_arrow_down" : "keyboard_arrow_right"
+                //     fontStyle: Tokens.font.icon.small
+                //     color: Colours.palette.m3onSurfaceVariant
+                //     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleExpandRequested(root.taskIndex)
-                    }
-                }
+                //     MouseArea {
+                //         anchors.fill: parent
+                //         anchors.margins: -4
+                //         cursorShape: Qt.PointingHandCursor
+                //         onClicked: root.toggleExpandRequested(root.taskIndex)
+                //     }
+                // }
 
                 // ── Icon or Checkbox ───────────────────────────
                 Item {
@@ -162,10 +171,8 @@ Item {
                         }
                         visible: true
                         
-                        // ── Show icon if present, otherwise checkbox ──
                         text: {
                             if (root.icon === "" || root.icon === null || root.icon === "block") {
-                                // No icon → show checkbox/circle
                                 if (root.nSub > 0) {
                                     return root.taskDone ? "check_box"
                                         : (root.dSub > 0 && root.dSub < root.nSub) ? "indeterminate_check_box"
@@ -173,8 +180,7 @@ Item {
                                 } else {
                                     return root.taskDone ? "check_circle" : "radio_button_unchecked"
                                 }
-                            }else {
-                                // Show the provided icon
+                            } else {
                                 return root.icon
                             }
                         }
@@ -184,28 +190,24 @@ Item {
                         fontStyle: root.icon !== "" ? Tokens.font.icon.medium : Tokens.font.icon.medium
                         color: {
                             if (root.icon !== "") {
-                                // Icon color - primary when done, normal when not
                                 return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                             } else {
-                                // Checkbox color
                                 return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3outline
                             }
                         }
                         Behavior on color { CAnim {} }
                         
-                        // ── Click handler ────────────────────────────
                         MouseArea {
                             anchors.fill: parent
                             anchors.margins: -4
                             cursorShape: root.nSub > 0 ? Qt.ArrowCursor : Qt.PointingHandCursor
-                            enabled: root.nSub === 0  // Disabled when has subtasks
+                            enabled: root.nSub === 0
                             onClicked: {
                                 if (root.nSub === 0) {
                                     root.toggleRequested(root.taskIndex)
                                 }
                             }
                         }
-                        
                     }
                 }
 
@@ -256,30 +258,10 @@ Item {
                     onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, text) }
                 }
 
-                // ── Progress ────────────────────────────────────
-                RowLayout {
-                    visible: root.nSub > 0 && !root.isEditing
-                    spacing: Tokens.spacing.small
-                    StyledText {
-                        text: `${root.dSub} / ${root.nSub}`
-                        font: Tokens.font.body.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                    StyledRect {
-                        implicitWidth: 128
-                        implicitHeight: 6
-                        radius: Tokens.rounding.full
-                        color: Colours.tPalette.m3surfaceContainerHighest
+                // ── Spacer to push streak and progress to the right ──
+                Item { Layout.fillWidth: true }
 
-                        StyledRect {
-                            width: parent.width * root.prog
-                            height: parent.height
-                            radius: parent.radius
-                            color: Colours.palette.m3primary
-                            Behavior on width { Anim {} }
-                        }
-                    }
-                }
+
 
                 // ── Actions ─────────────────────────────────────
                 RowLayout {
@@ -318,20 +300,17 @@ Item {
                             }
                             
                             onDoubleClicked: {
-                                // Handle double click for delete
                                 root.deleteRequested(root.taskIndex)
                             }
                         }
                         
-                        // ── Shake Animation ──────────────────────────────────────
                         SequentialAnimation {
                             id: shakeAnim
                             onFinished: {
                                 deleteButton.isShaking = false
-                                deleteButton.rotation = 0  // Reset rotation
+                                deleteButton.rotation = 0
                             }
                             
-                            // Shake 2 times
                             PropertyAnimation {
                                 target: deleteButton
                                 property: "rotation"
@@ -376,15 +355,72 @@ Item {
                             }
                         }
                     }
-
                 }
+
+
+                // ── Progress ────────────────────────────────────
+                RowLayout {
+                    visible: root.nSub > 0 && !root.isEditing
+                    spacing: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledText {
+                        text: `${root.dSub}/${root.nSub}`
+                        font: Tokens.font.body.small
+                        color: root.dSub === root.nSub ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                        opacity: 0.7
+                    }
+                    StyledRect {
+                        implicitWidth: 120
+                        implicitHeight: 4
+                        radius: Tokens.rounding.full
+                        color: Colours.tPalette.m3surfaceContainerHighest
+
+                        StyledRect {
+                            width: parent.width * root.prog
+                            height: parent.height
+                            radius: parent.radius
+                            color: Colours.palette.m3primary
+                            Behavior on width { Anim {} }
+                        }
+                    }
+                }
+
+                // ── Streak (habits) ─────────────────────────────
+                RowLayout {
+                    id: streakBadge
+                    visible: root.showStreak && !root.isEditing
+                    Layout.leftMargin: Tokens.spacing.small  // ← Add this
+
+                    Layout.alignment: Qt.AlignVCenter
+
+                    
+                    MaterialIcon {
+                        text: "local_fire_department"
+                        fill: 1
+                        color: root.streak >= 1 ? Colours.palette.m3primary : Colours.palette.m3outlineVariant   
+                        Behavior on color { CAnim { duration: 300 } }
+                    }
+                    StyledText {
+                        text: String(root.streak)
+                        font.pointSize: 12
+                        Layout.preferredWidth: 15  // ← Fixed width for the number
+                        color: root.streak >= 1 ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+                        Behavior on color { CAnim { duration: 300 } }
+                    }
+                }
+
+
+
+
+
             }
 
             // ── Subtasks ────────────────────────────────────────
             ColumnLayout {
                 visible: root.expanded
                 Layout.fillWidth: true
-                Layout.leftMargin: 40
+                Layout.leftMargin:11
                 spacing: 0
 
                 // ── Subtask Repeater ────────────────────────────

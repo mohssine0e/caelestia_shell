@@ -20,10 +20,11 @@ FocusScope {
     property string statusFilter: "all"
     property string searchQuery: ""
 
-    readonly property string dataPath: `${Paths.state}/${root.dataType}.json`
+    readonly property string dataPath: `/home/mohssine/${root.dataType}.json`
     readonly property string emptyStateText: root.dataType === "habits" ? qsTr("No habits yet") : qsTr("No tasks yet")
     readonly property real listMinHeight: 440
     readonly property real listMaxHeight: 640
+    readonly property bool isHabitList: root.dataType === "habits"
 
     implicitHeight: CUtils.clamp(scroller.contentHeight, listMinHeight, listMaxHeight)
 
@@ -36,6 +37,7 @@ FocusScope {
     DataManager {
         id: dataManager
         tasks: root.tasks
+        habitMode: root.isHabitList
 
         onTaskAdded: function(taskId, task) {
             filteredModel.insert(0, { todoId: taskId });
@@ -97,6 +99,28 @@ FocusScope {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             Qt.callLater(function() { root.save(); });
+        }
+
+        onHabitDayRolledOver: function() {
+            root.tasks = dataManager.tasks;
+            root.updateMaps();
+            Qt.callLater(function() { root.save(); });
+        }
+    }
+
+    // ── 2am habit-day rollover ──
+    // Fires at the next reset (and at least every 60s so suspend/resume still catches it).
+    Timer {
+        id: habitResetTimer
+        running: root.isHabitList && root.loaded
+        repeat: false
+        interval: 1000
+        triggeredOnStart: true
+        onTriggered: {
+            dataManager.applyHabitDayRollover();
+            var ms = dataManager.msUntilNextReset();
+            interval = Math.max(1000, Math.min(ms + 250, 60000));
+            restart();
         }
     }
 
@@ -192,15 +216,29 @@ FocusScope {
             try {
                 var raw = JSON.parse(text());
                 var parsed = Array.isArray(raw) ? raw : (raw.habits || []);
+                var migrated = false;
                 for (var i = 0; i < parsed.length; i++) {
                     var t = parsed[i];
                     if (!t.subtasks) t.subtasks = [];
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
+                    if (root.isHabitList) {
+                        if (dataManager.ensureHabitFields(t))
+                            migrated = true;
+                        // First install: a checked habit with no history counts as today
+                        // so we don't wipe a completion they already did this session.
+                        var today = dataManager.habitDate();
+                        if (t.done && Object.keys(t.completions).length === 0) {
+                            dataManager.applyHabitCompletion(t, true);
+                            migrated = true;
+                        }
+                    }
                     dataManager.syncDone(t);
                 }
                 root.tasks = parsed;
-                if (!Array.isArray(raw))
+                if (root.isHabitList)
+                    dataManager.applyHabitDayRollover();
+                if (!Array.isArray(raw) || migrated)
                     Qt.callLater(function() { root.save(); });
             } catch (e) {
                 root.tasks = [];
@@ -219,10 +257,24 @@ FocusScope {
         storage.setText(JSON.stringify(root.tasks, null, 2));
     }
 
-    // ── Counts ──
-    readonly property int activeCount: dataManager.getActiveCount()
-    readonly property int doneCount: dataManager.getDoneCount()
-    readonly property int totalActiveMinutes: dataManager.getTotalActiveMinutes()
+    // ── Counts (read `tasks` so QML bindings actually re-evaluate) ──
+    readonly property int activeCount: {
+        var count = 0;
+        for (var i = 0; i < root.tasks.length; i++) {
+            if (!root.tasks[i].done) count++;
+        }
+        return count;
+    }
+    readonly property int doneCount: Math.max(0, root.tasks.length - activeCount)
+    readonly property int totalActiveMinutes: {
+        var sum = 0;
+        for (var i = 0; i < root.tasks.length; i++) {
+            var t = root.tasks[i];
+            if (!t.done && t.minutes > 0) sum += t.minutes;
+        }
+        return sum;
+    }
+    readonly property string habitDay: dataManager.currentHabitDay
 
     // ── List ──
     StyledFlickable {
@@ -293,7 +345,9 @@ FocusScope {
                             done: false,
                             priority: null,
                             minutes: null,
-                            subtasks: []
+                            subtasks: [],
+                            streak: 0,
+                            bestStreak: 0
                         };
                     })()
 
@@ -356,7 +410,8 @@ FocusScope {
                         return order;
                     }
                     prog: progressData.ratio
-                    icon: root.dataType === "habits" ? (task.icon || "") : ""
+                    icon: root.isHabitList ? (task.icon || "") : ""
+                    showStreak: root.isHabitList
 
                     editingSubId: root.editingSubId
 
@@ -379,7 +434,7 @@ FocusScope {
 
     // ── Public API ──
     function addTask(title, icon) {
-        dataManager.addTask(title, root.dataType === "habits" ? (icon || "") : null);
+        dataManager.addTask(title, root.isHabitList ? (icon || "") : null);
     }
 
     function addHabit(title, icon) {
