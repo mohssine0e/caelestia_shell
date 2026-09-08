@@ -58,18 +58,8 @@ Item {
     property string editingSubId: ""      // ID of subtask being edited (passed from parent)
     property bool showStreak: false       // Habits: show fire + streak count
 
-    // Double-click handler
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.forceActiveFocus()
-        onDoubleClicked: {
-            root.toggleExpandRequested(root.taskIndex)
-        }
-    }
-
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
-    signal toggleExpandRequested(int taskIdx)
     signal renameRequested(int taskIdx, string newTitle)
     signal deleteRequested(int taskIdx)
     signal addSubtaskRequested(int taskIdx, string title)
@@ -84,6 +74,7 @@ Item {
     // ── Layout ──────────────────────────────────────────────────
     Layout.fillWidth: true
     implicitHeight: rowBg.implicitHeight
+    height: implicitHeight
 
     // ── Internal State ──────────────────────────────────────────
     readonly property string taskId: root.taskData?.todoId ?? ""
@@ -119,6 +110,7 @@ Item {
         Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
         implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
+        height: implicitHeight
         Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
         Behavior on color { CAnim {} }
 
@@ -141,21 +133,6 @@ Item {
                 id: mainRow
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
-
-                // Expander
-                // MaterialIcon {
-                //     text: root.expanded ? "keyboard_arrow_down" : "keyboard_arrow_right"
-                //     fontStyle: Tokens.font.icon.small
-                //     color: Colours.palette.m3onSurfaceVariant
-                //     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
-
-                //     MouseArea {
-                //         anchors.fill: parent
-                //         anchors.margins: -4
-                //         cursorShape: Qt.PointingHandCursor
-                //         onClicked: root.toggleExpandRequested(root.taskIndex)
-                //     }
-                // }
 
                 // ── Icon or Checkbox ───────────────────────────
                 Item {

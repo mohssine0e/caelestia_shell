@@ -13,6 +13,8 @@ FocusScope {
     id: root
     width: 1040
     height: 720
+    implicitWidth: 1040
+    implicitHeight: 720
 
     signal closeRequested() // this is handled by the popout wrapper, not this component itself 
     Keys.onEscapePressed: {
@@ -81,6 +83,7 @@ FocusScope {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.fill: parent
         anchors.margins: Tokens.padding.medium
         spacing: Tokens.spacing.medium
 

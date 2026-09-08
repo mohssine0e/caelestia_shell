@@ -108,6 +108,19 @@ Scope {
         }
     }
 
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "tasks"
+        description: "Toggle tasks"
+        onPressed: {
+            if (root.hasFullscreen)
+                return;
+            const screenState = ShellState.forActive();
+            screenState.tasks = !screenState.tasks;
+        }
+    }
+
     IpcHandler {
         function toggle(drawer: string): void {
             if (list().split("\n").includes(drawer)) {

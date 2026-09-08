@@ -19,7 +19,6 @@ Item {
     signal captureAccepted(string text)
     signal habitIconSelected(string icon)
 
-    // remove the big icons or the onte represented as Text
     readonly property var habitIcons: [
             // ── No Icon (clear) ── (1)
         "block",  // or "cancel" or "clear"
@@ -30,7 +29,7 @@ Item {
         "analytics", "dashboard",
         
         // ── Productivity ── (6)
-        "task_alt", "check_circle", "pending", "today",
+        "pending", "today",
         "calendar_today", "trending_up",
         
         // ── Health & Wellness ── (6)
@@ -183,34 +182,34 @@ Item {
                         enabled: !iconListView.moving
                     }
                 }
+            }
 
-                // ── Left Shadow Edge ─────────────────────────────
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 16
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: Colours.tPalette.m3surfaceContainerLow }
-                        GradientStop { position: 1.0; color: "transparent" }
-                    }
-                    visible: iconListView.contentX > 0
+            // ── Left Shadow Edge ─────────────────────────────
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 16
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: Colours.tPalette.m3surfaceContainerLow }
+                    GradientStop { position: 1.0; color: "transparent" }
                 }
+                visible: iconListView.contentX > 0
+            }
 
-                // ── Right Shadow Edge ────────────────────────────
-                Rectangle {
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 16
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Colours.tPalette.m3surfaceContainerLow }
-                    }
-                    visible: iconListView.contentX < iconListView.contentWidth - iconListView.width
+            // ── Right Shadow Edge ────────────────────────────
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 16
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 1.0; color: Colours.tPalette.m3surfaceContainerLow }
                 }
+                visible: iconListView.contentX < iconListView.contentWidth - iconListView.width
             }
         }
     }

@@ -39,15 +39,15 @@ FocusScope {
         tasks: root.tasks
         habitMode: root.isHabitList
 
-        onTaskAdded: function(taskId, task) {
+        onTaskAdded: (taskId, task) => {
             filteredModel.insert(0, { todoId: taskId });
             // root.selectedIndex = 0;
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onTaskDeleted: function(taskId) {
+        onTaskDeleted: (taskId) => {
             for (var i = 0; i < filteredModel.count; i++) {
                 if (filteredModel.get(i).todoId === taskId) {
                     filteredModel.remove(i);
@@ -59,52 +59,52 @@ FocusScope {
             }
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onTaskToggled: function(taskId, newState) {
+        onTaskToggled: (taskId, newState) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onTaskRenamed: function(taskId, oldTitle, newTitle) {
+        onTaskRenamed: (taskId, oldTitle, newTitle) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             root.editingTaskId = "";
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
 
-        onSubtaskAdded: function(taskId, subtaskId) {
+        onSubtaskAdded: (taskId, subtaskId) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onSubtaskToggled: function(taskId, subtaskId, newState) {
+        onSubtaskToggled: (taskId, subtaskId, newState) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onSubtaskRenamed: function(taskId, subtaskId, oldTitle, newTitle) {
+        onSubtaskRenamed: (taskId, subtaskId, oldTitle, newTitle) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             root.editingSubId = "";
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onSubtaskDeleted: function(taskId, subtaskId) {
+        onSubtaskDeleted: (taskId, subtaskId) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
 
-        onHabitDayRolledOver: function() {
+        onHabitDayRolledOver: () => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(function() { root.save(); });
+            Qt.callLater(() => { root.save(); });
         }
     }
 
@@ -207,6 +207,50 @@ FocusScope {
     property string editingTaskId: ""
     property string editingSubId: ""
     property int selectedIndex: -1
+    focus: true
+
+    function selectedCard() {
+        return selectedIndex >= 0 ? taskRepeater.itemAt(selectedIndex) : null;
+    }
+
+    function keepSelectedVisible(card) {
+        if (!card)
+            return;
+        if (card.y < scroller.contentY)
+            scroller.contentY = card.y;
+        else if (card.y + card.height > scroller.contentY + scroller.height)
+            scroller.contentY = card.y + card.height - scroller.height;
+    }
+
+    Keys.onPressed: event => {
+        if (root.editingTaskId !== "" || root.editingSubId !== "")
+            return;
+
+        var nextIndex = root.selectedIndex;
+        if (event.key === Qt.Key_Down) {
+            nextIndex = Math.min(filteredModel.count - 1, Math.max(0, nextIndex + 1));
+        } else if (event.key === Qt.Key_Up) {
+            nextIndex = nextIndex < 0 ? filteredModel.count - 1 : Math.max(0, nextIndex - 1);
+        } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+            var card = root.selectedCard();
+            if (!card)
+                return;
+            if (event.key === Qt.Key_Left)
+                card.expanded = false;
+            else if (card.nSub > 0)
+                card.expanded = true;
+            event.accepted = true;
+            return;
+        } else {
+            return;
+        }
+
+        if (filteredModel.count > 0) {
+            root.selectedIndex = nextIndex;
+            root.keepSelectedVisible(root.selectedCard());
+        }
+        event.accepted = true;
+    }
 
     // ── File I/O ──
     FileView {
@@ -285,9 +329,14 @@ FocusScope {
         interactive: contentHeight > height
         contentHeight: col.implicitHeight
 
+        StyledScrollBar.vertical: StyledScrollBar {
+            flickable: scroller
+        }
+
         ColumnLayout {
             id: col
             width: parent.width
+            height: implicitHeight
             spacing: Tokens.spacing.small
 
             // Empty state
@@ -404,8 +453,9 @@ FocusScope {
                     dSub: progressData.done
                     subOrder: {
                         var order = [];
-                        for (var i = 0; i < task.subtasks.length; i++) {
-                            order.push(task.subtasks[i].id);
+                        var subs = (task && task.subtasks) ? task.subtasks : [];
+                        for (var i = 0; i < subs.length; i++) {
+                            order.push(subs[i].id);
                         }
                         return order;
                     }
@@ -426,8 +476,13 @@ FocusScope {
                     onEditingCancelled: function() { root.editingTaskId = ""; }
                     onSubtaskEditingStarted: function(subtaskId) { root.editingSubId = subtaskId; }
                     onSubtaskEditingCancelled: function() { root.editingSubId = ""; }
-                    onToggleExpandRequested: function() { expanded = !expanded; }
                 }
+            }
+
+            // Keep the last row clear of the viewport edge when scrolled to bottom.
+            Item {
+                Layout.fillWidth: true
+                implicitHeight: Tokens.padding.medium
             }
         }
     }

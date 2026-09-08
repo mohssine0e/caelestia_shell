@@ -160,28 +160,35 @@ Item {
             topPadding: 0
             bottomPadding: 0
             verticalAlignment: Text.AlignVCenter
+            property bool commitInProgress: false
 
-            onVisibleChanged: {
-                if (visible) {
-                    forceActiveFocus()
-                    selectAll()
-                }
-            }
-
-            onAccepted: {
-                if (text.trim()) {
+            function commit() {
+                if (commitInProgress || !root.isEditing)
+                    return
+                commitInProgress = true
+                if (text.trim())
                     root.renameRequested(root.taskIndex, root.subtaskIndex, text)
-                } else {
+                else {
                     text = root.title
                     root.editingCancelled()
                 }
             }
 
+            onVisibleChanged: {
+                if (visible) {
+                    commitInProgress = false
+                    forceActiveFocus()
+                    selectAll()
+                }
+            }
+
+            onAccepted: commit()
+
             Keys.onEscapePressed: {
                 root.editingCancelled()
                 text = root.title
             }
-            onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, root.subtaskIndex, text) }
+            onFocusChanged: if (!focus) commit()
         }
 
         // ── Action Buttons ──────────────────────────────────────
