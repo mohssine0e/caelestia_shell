@@ -44,7 +44,7 @@ Item {
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
 
-        asynchronous: true
+        asynchronous: false
         active: true
         // Fresh load on open: grab keyboard focus right away
         onLoaded: Qt.callLater(() => item?.forceActiveFocus())

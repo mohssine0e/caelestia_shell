@@ -17,6 +17,7 @@ Item {
     required property int subtaskIndex  
     required property string subtaskId    
     required property bool isEditing
+    property bool isSelected: false
 
     // ── New Properties for Tree Lines ──────────────────────────
     property bool isFirst: false      // Is this the first subtask?
@@ -32,6 +33,7 @@ Item {
 
     readonly property bool isDone: root.subtaskData?.done ?? false
     readonly property string title: root.subtaskData?.title ?? ""
+    readonly property int streak: root.subtaskData?.streak ?? 0
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
 
@@ -39,6 +41,14 @@ Item {
     Layout.fillWidth: true
 
     HoverHandler { id: subRowHover }
+
+    // StyledRect {
+    //     anchors.fill: parent
+    //     color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh : "transparent"
+    //     border.width: root.isSelected ? 1 : 0
+    //     border.color: Colours.palette.m3primary
+    //     radius: Tokens.rounding.small
+    // }
 
     // ── Tree Line Container ─────────────────────────────────────
     Item {
@@ -59,8 +69,10 @@ Item {
                 bottom: parent.bottom
             }
             width: 2
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-            opacity: root.isDone ? 0.6 : 0.3
+            // color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+            // opacity: root.isDone ? 0.6 : 0.3
+            opacity: 0.6
+            color: Colours.palette.m3primary
             
             visible: !root.isFirst || !root.isLast
             anchors.topMargin: 0
@@ -78,8 +90,8 @@ Item {
             }
             width: Tokens.padding.extraLarge - Tokens.spacing.small
             height: 2
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-            opacity: root.isDone ? 0.6 : 0.3
+            color: (root.isDone || root.isSelected) ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+            opacity: root.isDone ? 1 : root.isSelected ? 0.5 : 0.3
             
             visible: true
             Behavior on color { CAnim {} }
@@ -94,8 +106,8 @@ Item {
             width: 6
             height: 6
             radius: 3
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-            opacity: 0.5
+            color: (root.isDone || root.isSelected) ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+            opacity: root.isDone ? 1 : root.isSelected ? 0.5 : 0.3
             Behavior on color { CAnim {} }
         }
     }
@@ -111,7 +123,8 @@ Item {
             text: root.isDone ? "check_box" : "check_box_outline_blank"
             fill: root.isDone ? 1 : 0
             fontStyle: Tokens.font.icon.small
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3outline
+            color: (root.isDone || root.isSelected) ? Colours.palette.m3primary : Colours.palette.m3outline
+            opacity: (root.isDone || root.isSelected) ? 1 : 0.6
             Behavior on color { CAnim {} }
 
             MouseArea {
@@ -127,7 +140,8 @@ Item {
             Layout.fillWidth: true
             text: root.title
             font: Tokens.font.body.medium
-            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+            color: (root.isDone || root.isSelected) ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+            opacity: root.isSelected ? 1 : !root.isDone ? 1 : 0.6
             elide: Text.ElideRight
             Behavior on color { CAnim {} }
 
@@ -135,10 +149,27 @@ Item {
             StyledRect {
                 anchors.verticalCenter: parent.verticalCenter
                 width: root.isDone ? Math.min(parent.contentWidth, parent.width) : 0
-                height: 2
+                height: 1
                 radius: Tokens.rounding.full
                 color: Colours.palette.m3outline    
                 Behavior on width { Anim { type: Anim.FastSpatial } }
+            }
+        }
+
+        RowLayout {
+            visible: root.streak > 0 && !root.isEditing
+            spacing: Tokens.spacing.extraSmall
+            opacity: root.isSelected ? 1 : 0.8
+
+            MaterialIcon {
+                text: "local_fire_department"
+                fontStyle: Tokens.font.icon.small
+                color: Colours.palette.m3primary
+            }
+            StyledText {
+                text: String(root.streak)
+                font: Tokens.font.label.small
+                color: Colours.palette.m3primary
             }
         }
 

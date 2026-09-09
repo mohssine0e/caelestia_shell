@@ -20,14 +20,14 @@ Item {
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
 
-    // Background and border for the switcher
-    Rectangle {
-        anchors.fill: parent
-        color: "transparent"
-        radius: Tokens.rounding.small
-        border.width: 1
-        border.color: Colours.palette.m3secondary
-    }
+    // // Background and border for the switcher
+    // Rectangle {
+    //     anchors.fill: parent
+    //     color: "transparent"
+    //     radius: Tokens.rounding.small
+    //     border.width: 1
+    //     border.color: Colours.palette.m3secondary
+    // }
 
     RowLayout {
         id: row

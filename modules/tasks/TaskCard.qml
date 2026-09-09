@@ -49,6 +49,7 @@ Item {
     required property bool isEditing      // Whether task is being edited
     property bool expanded: false        // Independent per-card state
     required property bool isSelected     // Whether task is selected
+    property int selectedSubtaskIndex: -1
     required property int nSub            // Number of subtasks
     required property int dSub            // Number of done subtasks
     required property var subOrder        // Ordered list of subtask IDs
@@ -104,7 +105,7 @@ Item {
         color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh
              : rowHover.hovered ? Colours.tPalette.m3surfaceContainer
              : Colours.tPalette.m3surfaceContainerLow
-        border.width: root.isSelected ? 2 : 0
+        border.width: root.isSelected ? 1 : 0
         border.color: Colours.palette.m3primary
 
         Behavior on opacity { Anim { type: Anim.DefaultEffects } }
@@ -134,6 +135,20 @@ Item {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
 
+
+                //expandable icon
+                MaterialIcon {
+                    text: root.expanded ? "expand_more" : "chevron_right"
+                    fontStyle: Tokens.font.icon.medium
+                    color: Colours.palette.m3onSurfaceVariant
+                    visible: root.nSub > 0
+                    opacity: root.expanded ? 1 : 0.6
+                    Behavior on opacity { CAnim {} }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.expanded = !root.expanded
+                    }
+                }
                 // ── Icon or Checkbox ───────────────────────────
                 Item {
                     Layout.preferredWidth: 24
@@ -169,9 +184,12 @@ Item {
                             if (root.icon !== "") {
                                 return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                             } else {
-                                return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3outline
+                                // return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3outline
+                                return root.dSub >0 ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                             }
                         }
+                        opacity: root.taskDone ? 0.5 : 8
+
                         Behavior on color { CAnim {} }
                         
                         MouseArea {
@@ -194,14 +212,16 @@ Item {
                     Layout.fillWidth: true
                     text: root.taskTitle
                     font: Tokens.font.body.large
-                    color: root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurface
                     elide: Text.ElideRight
+
+                    color: Colours.palette.m3primary 
+                    opacity: root.taskDone ? 0.5 : 8
                     Behavior on color { CAnim {} }
 
                     StyledRect {
                         anchors.verticalCenter: parent.verticalCenter
                         width: root.taskDone ? Math.min(parent.contentWidth, parent.width) : 0
-                        height: 2
+                        height: 1
                         radius: Tokens.rounding.full
                         color: Colours.palette.m3outline
                         Behavior on width { Anim { type: Anim.FastSpatial } }
@@ -420,6 +440,7 @@ Item {
                         subtaskId: modelData
                         
                         isEditing: root.editingSubId === modelData
+                        isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
 
                         isFirst: index === 0
                         isLast: index === subRepeater.count - 1

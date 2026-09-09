@@ -178,6 +178,35 @@ QtObject {
         task.bestStreak = best > s ? best : s;
     }
 
+    function ensureSubtaskFields(subtask) {
+        var mutated = false;
+        if (!subtask.completions || typeof subtask.completions !== "object" || Array.isArray(subtask.completions)) {
+            subtask.completions = {};
+            mutated = true;
+        }
+        if (typeof subtask.streak !== "number" || subtask.streak < 0) {
+            subtask.streak = computeStreak(subtask);
+            mutated = true;
+        }
+        if (typeof subtask.bestStreak !== "number" || subtask.bestStreak < 0) {
+            subtask.bestStreak = subtask.streak;
+            mutated = true;
+        }
+        return mutated;
+    }
+
+    function updateSubtaskStreak(subtask, isDone) {
+        ensureSubtaskFields(subtask);
+        var completions = copyCompletions(subtask.completions);
+        var today = habitDate();
+        if (isDone)
+            completions[today] = true;
+        else if (completions.hasOwnProperty(today))
+            delete completions[today];
+        subtask.completions = completions;
+        updateStreaks(subtask);
+    }
+
     function applyHabitCompletion(task, isDone) {
         var today = habitDate();
         var completions = copyCompletions(task.completions);
@@ -321,8 +350,12 @@ QtObject {
                 id: s.id,
                 title: s.title,
                 done: newDone,
-                minutes: s.minutes || 0
+                minutes: s.minutes || 0,
+                completions: copyCompletions(s.completions),
+                streak: s.streak || 0,
+                bestStreak: s.bestStreak || 0
             };
+            updateSubtaskStreak(newSubtasks[j], newDone);
         }
 
         var newTask = copyTask(task, { done: newDone, subtasks: newSubtasks });
@@ -373,7 +406,10 @@ QtObject {
             id: Date.now() + "-" + Math.floor(Math.random() * 1e6),
             title: title.trim(),
             done: false,
-            minutes: 0
+            minutes: 0,
+            completions: {},
+            streak: 0,
+            bestStreak: 0
         };
 
         var newSubtasks = task.subtasks.slice();
@@ -399,8 +435,12 @@ QtObject {
             id: sub.id,
             title: sub.title,
             done: !sub.done,
-            minutes: sub.minutes || 0
+            minutes: sub.minutes || 0,
+            completions: copyCompletions(sub.completions),
+            streak: sub.streak || 0,
+            bestStreak: sub.bestStreak || 0
         };
+        updateSubtaskStreak(newSub, newSub.done);
 
         updateSubtask(taskIndex, subtaskIndex, newSub);
         subtaskToggled(taskId, sub.id, !sub.done);
@@ -421,7 +461,10 @@ QtObject {
             id: sub.id,
             title: title.trim(),
             done: sub.done,
-            minutes: sub.minutes || 0
+            minutes: sub.minutes || 0,
+            completions: copyCompletions(sub.completions),
+            streak: sub.streak || 0,
+            bestStreak: sub.bestStreak || 0
         };
 
         updateSubtask(taskIndex, subtaskIndex, newSub);

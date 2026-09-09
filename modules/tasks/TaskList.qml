@@ -207,10 +207,26 @@ FocusScope {
     property string editingTaskId: ""
     property string editingSubId: ""
     property int selectedIndex: -1
+    property int selectedSubtaskIndex: -1
     focus: true
 
     function selectedCard() {
         return selectedIndex >= 0 ? taskRepeater.itemAt(selectedIndex) : null;
+    }
+
+    function selectTask(index) {
+        selectedIndex = index;
+        selectedSubtaskIndex = -1;
+        keepSelectedVisible(selectedCard());
+    }
+
+    function toggleSelected() {
+        var card = selectedCard();
+        if (!card || card.nSub > 0 && root.selectedSubtaskIndex < 0)
+            return;
+        if (selectedSubtaskIndex >= 0)
+            dataManager.toggleSubtask(card.taskIndex, selectedSubtaskIndex);
+        else dataManager.toggleTask(card.taskIndex);
     }
 
     function keepSelectedVisible(card) {
@@ -228,17 +244,51 @@ FocusScope {
 
         var nextIndex = root.selectedIndex;
         if (event.key === Qt.Key_Down) {
+            var downCard = root.selectedCard();
+            if (downCard && downCard.expanded && downCard.nSub > 0 && root.selectedSubtaskIndex < downCard.nSub - 1) {
+                root.selectedSubtaskIndex = Math.max(0, root.selectedSubtaskIndex + 1);
+                root.keepSelectedVisible(downCard);
+                event.accepted = true;
+                return;
+            }
+            if (downCard && downCard.expanded && root.selectedSubtaskIndex < 0) {
+                root.selectedSubtaskIndex = 0;
+                event.accepted = true;
+                return;
+            }
             nextIndex = Math.min(filteredModel.count - 1, Math.max(0, nextIndex + 1));
+            root.selectedSubtaskIndex = -1;
         } else if (event.key === Qt.Key_Up) {
+            var upCard = root.selectedCard();
+            if (upCard && root.selectedSubtaskIndex > 0) {
+                root.selectedSubtaskIndex--;
+                root.keepSelectedVisible(upCard);
+                event.accepted = true;
+                return;
+            }
+            if (upCard && root.selectedSubtaskIndex === 0) {
+                root.selectedSubtaskIndex = -1;
+                event.accepted = true;
+                return;
+            }
             nextIndex = nextIndex < 0 ? filteredModel.count - 1 : Math.max(0, nextIndex - 1);
+            root.selectedSubtaskIndex = -1;
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
             var card = root.selectedCard();
             if (!card)
                 return;
-            if (event.key === Qt.Key_Left)
+            if (event.key === Qt.Key_Left && root.selectedSubtaskIndex >= 0) {
+                root.selectedSubtaskIndex = -1;
+            } else if (event.key === Qt.Key_Left) {
                 card.expanded = false;
-            else if (card.nSub > 0)
+            } else if (card.nSub > 0 && root.selectedSubtaskIndex < 0) {
                 card.expanded = true;
+                root.selectedSubtaskIndex = 0;
+            }
+            event.accepted = true;
+            return;
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter ) {
+            root.toggleSelected();
             event.accepted = true;
             return;
         } else {
@@ -246,7 +296,7 @@ FocusScope {
         }
 
         if (filteredModel.count > 0) {
-            root.selectedIndex = nextIndex;
+            root.selectTask(nextIndex);
             root.keepSelectedVisible(root.selectedCard());
         }
         event.accepted = true;
@@ -264,6 +314,10 @@ FocusScope {
                 for (var i = 0; i < parsed.length; i++) {
                     var t = parsed[i];
                     if (!t.subtasks) t.subtasks = [];
+                    for (var j = 0; j < t.subtasks.length; j++) {
+                        if (dataManager.ensureSubtaskFields(t.subtasks[j]))
+                            migrated = true;
+                    }
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
                     if (root.isHabitList) {
@@ -449,6 +503,7 @@ FocusScope {
                     taskIndex: absIdx
                     isEditing: root.editingTaskId === task.todoId
                     isSelected: root.selectedIndex === index
+                    selectedSubtaskIndex: root.selectedIndex === index ? root.selectedSubtaskIndex : -1
                     nSub: progressData.total
                     dSub: progressData.done
                     subOrder: {
