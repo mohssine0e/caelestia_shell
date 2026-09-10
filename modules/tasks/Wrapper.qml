@@ -44,9 +44,9 @@ Item {
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
 
-        asynchronous: false
+        asynchronous: true
+        // Keep the content cached between opens so the popout appears immediately.
         active: true
-        // Fresh load on open: grab keyboard focus right away
         onLoaded: Qt.callLater(() => item?.forceActiveFocus())
 
         sourceComponent: Tasks {

@@ -41,10 +41,9 @@ FocusScope {
 
         onTaskAdded: (taskId, task) => {
             filteredModel.insert(0, { todoId: taskId });
-            // root.selectedIndex = 0;
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onTaskDeleted: (taskId) => {
@@ -59,72 +58,75 @@ FocusScope {
             }
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onTaskToggled: (taskId, newState) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             root.editingTaskId = "";
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
-
 
         onSubtaskAdded: (taskId, subtaskId) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onSubtaskToggled: (taskId, subtaskId, newState) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onSubtaskRenamed: (taskId, subtaskId, oldTitle, newTitle) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             root.editingSubId = "";
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onSubtaskDeleted: (taskId, subtaskId) => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
 
         onHabitDayRolledOver: () => {
             root.tasks = dataManager.tasks;
             root.updateMaps();
-            Qt.callLater(() => { root.save(); });
+            root.requestSave();
         }
     }
 
     // ── 2am habit-day rollover ──
-    // Fires at the next reset (and at least every 60s so suspend/resume still catches it).
     Timer {
         id: habitResetTimer
         running: root.isHabitList && root.loaded
-        repeat: false
-        interval: 1000
+        repeat: true
+        interval: 60000
         triggeredOnStart: true
         onTriggered: {
             dataManager.applyHabitDayRollover();
             var ms = dataManager.msUntilNextReset();
             interval = Math.max(1000, Math.min(ms + 250, 60000));
-            restart();
         }
     }
 
-    // ── Filtered Model (ONLY for status, NOT for search) ──
+    Timer {
+        id: saveTimer
+        interval: 100
+        onTriggered: root.save()
+    }
+
+    // ── Filtered Model ──
     ListModel {
         id: filteredModel
     }
@@ -135,9 +137,8 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        // Status filter only - search is handled by visible
-        var filteredIds = dataManager.getFilteredTasks(statusFilter, "");
-        
+        var filteredIds = dataManager.getFilteredTasks(statusFilter, searchQuery);
+
         if (filteredModel.count === filteredIds.length) {
             var same = true;
             for (var i = 0; i < filteredIds.length; i++) {
@@ -148,7 +149,7 @@ FocusScope {
             }
             if (same) return;
         }
-        
+
         filteredModel.clear();
         for (var i = 0; i < filteredIds.length; i++) {
             filteredModel.append({ todoId: filteredIds[i] });
@@ -157,7 +158,10 @@ FocusScope {
 
     // ── Signal Handlers ──
     onTasksChanged: {
-        dataManager.tasks = root.tasks;
+        // Avoid pointless re-assignment when the DataManager already produced
+        // this exact array (it re-emits after every mutation).
+        if (dataManager.tasks !== root.tasks)
+            dataManager.tasks = root.tasks;
         updateMaps();
         updateFilteredModel();
     }
@@ -170,8 +174,17 @@ FocusScope {
         }
     }
 
-    // ── Search is handled by visible, NOT by rebuilding model ──
-    // onSearchQueryChanged: updateFilteredModel()  ← REMOVE THIS!
+    // ── Reset selection on filter change ──
+    onStatusFilterChanged: {
+        root.selectedIndex = filteredModel.count > 0 ? 0 : -1;
+        root.selectedSubtaskIndex = -1;
+    }
+
+    onSearchQueryChanged: {
+        updateFilteredModel();
+        root.selectedIndex = filteredModel.count > 0 ? 0 : -1;
+        root.selectedSubtaskIndex = -1;
+    }
 
     readonly property int visibleTaskCount: {
         var count = 0;
@@ -179,12 +192,10 @@ FocusScope {
         for (var i = 0; i < filteredModel.count; i++) {
             var task = root.taskMap[filteredModel.get(i).todoId];
             if (!task) continue;
-            
-            // Status filter
+
             if (root.statusFilter === "active" && task.done) continue;
             if (root.statusFilter === "done" && !task.done) continue;
-            
-            // Search filter (same as TaskCard.visible)
+
             if (q) {
                 var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
                 var matchSubtask = false;
@@ -198,7 +209,7 @@ FocusScope {
                 }
                 if (!matchTitle && !matchSubtask) continue;
             }
-            
+
             count++;
         }
         return count;
@@ -209,6 +220,9 @@ FocusScope {
     property int selectedIndex: -1
     property int selectedSubtaskIndex: -1
     focus: true
+
+    // ── Reset subtask selection when the task changes ──
+    onSelectedIndexChanged: root.selectedSubtaskIndex = -1
 
     function selectedCard() {
         return selectedIndex >= 0 ? taskRepeater.itemAt(selectedIndex) : null;
@@ -222,11 +236,12 @@ FocusScope {
 
     function toggleSelected() {
         var card = selectedCard();
-        if (!card || card.nSub > 0 && root.selectedSubtaskIndex < 0)
+        if (!card)
             return;
-        if (selectedSubtaskIndex >= 0)
-            dataManager.toggleSubtask(card.taskIndex, selectedSubtaskIndex);
-        else dataManager.toggleTask(card.taskIndex);
+        if (root.selectedSubtaskIndex >= 0)
+            dataManager.toggleSubtask(card.taskIndex, root.selectedSubtaskIndex);
+        else
+            dataManager.toggleTask(card.taskIndex);
     }
 
     function keepSelectedVisible(card) {
@@ -245,49 +260,52 @@ FocusScope {
         var nextIndex = root.selectedIndex;
         if (event.key === Qt.Key_Down) {
             var downCard = root.selectedCard();
-            if (downCard && downCard.expanded && downCard.nSub > 0 && root.selectedSubtaskIndex < downCard.nSub - 1) {
-                root.selectedSubtaskIndex = Math.max(0, root.selectedSubtaskIndex + 1);
+            if (downCard && downCard.expanded && downCard.nSub > 0) {
+                root.selectedSubtaskIndex = root.selectedSubtaskIndex < 0
+                    ? 0
+                    : (root.selectedSubtaskIndex + 1) % downCard.nSub;
                 root.keepSelectedVisible(downCard);
                 event.accepted = true;
                 return;
             }
-            if (downCard && downCard.expanded && root.selectedSubtaskIndex < 0) {
-                root.selectedSubtaskIndex = 0;
-                event.accepted = true;
-                return;
+            // ── Circular: wrap from last → first ──
+            var count = filteredModel.count;
+            if (count > 0) {
+                var cur = root.selectedIndex;
+                nextIndex = (cur < 0) ? 0 : (cur + 1) % count;
             }
-            nextIndex = Math.min(filteredModel.count - 1, Math.max(0, nextIndex + 1));
             root.selectedSubtaskIndex = -1;
-        } else if (event.key === Qt.Key_Up) {
+        }else if (event.key === Qt.Key_Up) {
             var upCard = root.selectedCard();
-            if (upCard && root.selectedSubtaskIndex > 0) {
-                root.selectedSubtaskIndex--;
+            if (upCard && upCard.expanded && upCard.nSub > 0) {
+                root.selectedSubtaskIndex = root.selectedSubtaskIndex < 0
+                    ? upCard.nSub - 1
+                    : (root.selectedSubtaskIndex - 1 + upCard.nSub) % upCard.nSub;
                 root.keepSelectedVisible(upCard);
                 event.accepted = true;
                 return;
             }
-            if (upCard && root.selectedSubtaskIndex === 0) {
-                root.selectedSubtaskIndex = -1;
-                event.accepted = true;
-                return;
+            // ── Circular: wrap from first → last ──
+            var count = filteredModel.count;
+            if (count > 0) {
+                var cur = root.selectedIndex;
+                nextIndex = (cur <= 0) ? count - 1 : (cur - 1);
             }
-            nextIndex = nextIndex < 0 ? filteredModel.count - 1 : Math.max(0, nextIndex - 1);
             root.selectedSubtaskIndex = -1;
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
             var card = root.selectedCard();
-            if (!card)
-                return;
-            if (event.key === Qt.Key_Left && root.selectedSubtaskIndex >= 0) {
+            if (!card) return;
+            else if (event.key === Qt.Key_Left) {
                 root.selectedSubtaskIndex = -1;
-            } else if (event.key === Qt.Key_Left) {
                 card.expanded = false;
-            } else if (card.nSub > 0 && root.selectedSubtaskIndex < 0) {
+                // We keep the card expandable so a new subtask can be added.
+            } else if (root.selectedSubtaskIndex < 0) {
                 card.expanded = true;
-                root.selectedSubtaskIndex = 0;
+                if (card.nSub > 0) root.selectedSubtaskIndex = 0;
             }
             event.accepted = true;
             return;
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter ) {
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             root.toggleSelected();
             event.accepted = true;
             return;
@@ -323,8 +341,6 @@ FocusScope {
                     if (root.isHabitList) {
                         if (dataManager.ensureHabitFields(t))
                             migrated = true;
-                        // First install: a checked habit with no history counts as today
-                        // so we don't wipe a completion they already did this session.
                         var today = dataManager.habitDate();
                         if (t.done && Object.keys(t.completions).length === 0) {
                             dataManager.applyHabitCompletion(t, true);
@@ -337,7 +353,7 @@ FocusScope {
                 if (root.isHabitList)
                     dataManager.applyHabitDayRollover();
                 if (!Array.isArray(raw) || migrated)
-                    Qt.callLater(function() { root.save(); });
+                    root.requestSave();
             } catch (e) {
                 root.tasks = [];
             }
@@ -355,7 +371,10 @@ FocusScope {
         storage.setText(JSON.stringify(root.tasks, null, 2));
     }
 
-    // ── Counts (read `tasks` so QML bindings actually re-evaluate) ──
+    function requestSave() {
+        saveTimer.restart();
+    }
+
     readonly property int activeCount: {
         var count = 0;
         for (var i = 0; i < root.tasks.length; i++) {
@@ -393,7 +412,6 @@ FocusScope {
             height: implicitHeight
             spacing: Tokens.spacing.small
 
-            // Empty state
             Item {
                 Layout.fillWidth: true
                 implicitHeight: emptyState.implicitHeight + Tokens.padding.extraLarge * 2
@@ -437,7 +455,7 @@ FocusScope {
 
                     property var taskMap: root.taskMap
                     property var taskIndexMap: root.taskIndexMap
-                    
+
                     readonly property var task: (function() {
                         var t = taskMap[todoId];
                         if (t) return t;
@@ -459,13 +477,10 @@ FocusScope {
                         return idx !== undefined ? idx : -1;
                     })()
 
-                    // ── Status + Search Filter ──
                     visible: {
-                        // Status filter
                         if (root.statusFilter === "active" && task.done) return false;
                         if (root.statusFilter === "done" && !task.done) return false;
-                        
-                        // Search filter (INSTANT - no model rebuild!)
+
                         var q = root.searchQuery.trim().toLowerCase();
                         if (q) {
                             var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
@@ -480,25 +495,25 @@ FocusScope {
                             }
                             if (!matchTitle && !matchSubtask) return false;
                         }
-                        
+
                         return true;
                     }
 
                     readonly property var progressData: {
                         var subtasks = task.subtasks || [];
                         var total = subtasks.length;
-                        
+
                         if (total === 0) {
                             return { total: 0, done: 0, ratio: task.done ? 1 : 0 };
                         }
-                        
+
                         var done = 0;
                         for (var i = 0; i < subtasks.length; i++) {
                             if (subtasks[i].done) done++;
                         }
                         return { total: total, done: done, ratio: done / total };
                     }
-                    
+
                     taskData: task
                     taskIndex: absIdx
                     isEditing: root.editingTaskId === task.todoId
@@ -520,6 +535,19 @@ FocusScope {
 
                     editingSubId: root.editingSubId
 
+                    // ── Selection routing ──
+                    onSelectionRequested: function() {
+                        root.forceActiveFocus();
+                        root.selectTask(index);
+                    }
+
+                    onSubtaskSelectionRequested: function(subIdx) {
+                        root.forceActiveFocus();
+                        root.selectedIndex = index;
+                        root.selectedSubtaskIndex = subIdx;
+                        root.keepSelectedVisible(taskRepeater.itemAt(index));
+                    }
+
                     onToggleRequested: function(taskIdx) { dataManager.toggleTask(taskIdx); }
                     onRenameRequested: function(taskIdx, newTitle) { dataManager.renameTask(taskIdx, newTitle); }
                     onDeleteRequested: function(taskIdx) { dataManager.deleteTask(taskIdx); }
@@ -527,14 +555,19 @@ FocusScope {
                     onToggleSubtaskRequested: function(taskIdx, subIdx) { dataManager.toggleSubtask(taskIdx, subIdx); }
                     onDeleteSubtaskRequested: function(taskIdx, subIdx) { dataManager.deleteSubtask(taskIdx, subIdx); }
                     onRenameSubtaskRequested: function(taskIdx, subIdx, newTitle) { dataManager.renameSubtask(taskIdx, subIdx, newTitle); }
-                    onEditingStarted: function(taskId) { root.editingTaskId = taskId; }
+                    onEditingStarted: function(taskId) {
+                        root.editingSubId = "";
+                        root.editingTaskId = taskId;
+                    }
                     onEditingCancelled: function() { root.editingTaskId = ""; }
-                    onSubtaskEditingStarted: function(subtaskId) { root.editingSubId = subtaskId; }
+                    onSubtaskEditingStarted: function(subtaskId) {
+                        root.editingTaskId = "";
+                        root.editingSubId = subtaskId;
+                    }
                     onSubtaskEditingCancelled: function() { root.editingSubId = ""; }
                 }
             }
 
-            // Keep the last row clear of the viewport edge when scrolled to bottom.
             Item {
                 Layout.fillWidth: true
                 implicitHeight: Tokens.padding.medium
@@ -542,9 +575,8 @@ FocusScope {
         }
     }
 
-    // ── Public API ──
     function addTask(title, icon) {
-        dataManager.addTask(title, root.isHabitList ? (icon || "") : null);
+        dataManager.addTask(title, root.isHabitList ? (icon || "") : "");
     }
 
     function addHabit(title, icon) {

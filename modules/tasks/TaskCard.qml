@@ -12,9 +12,8 @@ import qs.components
 import qs.components.controls
 import qs.services
 import qs.utils as Utils
-
 /*
-data model used: for both tasks and habits
+data model used: for both tasks and habits // to keep for reference
 {
     todoId: string,
     title: string,
@@ -23,8 +22,7 @@ data model used: for both tasks and habits
     minutes: int,
     priority: int,
 
-    // habits only
-    completions: { "YYYY-MM-DD": [ids] },
+    completions: { "YYYY-MM-DD": [ids] }, // habits only field
     streak: int,
     bestStreak: int,
     lastCompleted: string | null,
@@ -35,29 +33,30 @@ data model used: for both tasks and habits
             title: string,
             done: bool,
             minutes: int
+            completions: { "YYYY-MM-DD": [ids] }, // habits only field future add
         },
         ...
     ]
 }
 */ 
+
 Item {
     id: root
 
     // ── Required Properties ─────────────────────────────────────
-    required property var taskData        // The task object
-    required property int taskIndex       // Index in tasks array
-    required property bool isEditing      // Whether task is being edited
-    property bool expanded: false        // Independent per-card state
-    required property bool isSelected     // Whether task is selected
+    required property var taskData
+    required property int taskIndex
+    required property bool isEditing
+    property bool expanded: false
+    required property bool isSelected
     property int selectedSubtaskIndex: -1
-    required property int nSub            // Number of subtasks
-    required property int dSub            // Number of done subtasks
-    required property var subOrder        // Ordered list of subtask IDs
-    required property real prog           // Progress (0-1)
+    required property int nSub
+    required property int dSub
+    required property var subOrder
+    required property real prog
 
-    // ── Additional Property for Subtask Editing ──────────────
-    property string editingSubId: ""      // ID of subtask being edited (passed from parent)
-    property bool showStreak: false       // Habits: show fire + streak count
+    property string editingSubId: ""
+    property bool showStreak: false
 
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
@@ -71,16 +70,18 @@ Item {
     signal editingCancelled()
     signal subtaskEditingStarted(string subtaskId)
     signal subtaskEditingCancelled()
+    signal selectionRequested(int taskIdx)
+    signal subtaskSelectionRequested(int subIdx)
 
     // ── Layout ──────────────────────────────────────────────────
     Layout.fillWidth: true
     implicitHeight: rowBg.implicitHeight
-    height: implicitHeight
 
     // ── Internal State ──────────────────────────────────────────
     readonly property string taskId: root.taskData?.todoId ?? ""
     readonly property string taskTitle: root.taskData?.title ?? ""
     readonly property bool taskDone: root.taskData?.done ?? false
+    readonly property bool taskPartial: root.dSub > 0 && root.dSub < root.nSub
     readonly property var subtasks: root.taskData?.subtasks ?? []
 
     readonly property var subtaskMap: {
@@ -93,25 +94,38 @@ Item {
         return map;
     }
 
-    property string icon: ""  // If provided, show icon instead of checkbox
+    property string icon: ""
     readonly property int streak: root.taskData?.streak ?? 0
-    readonly property int bestStreak: root.taskData?.bestStreak ?? 0
 
     // ── Main Card ──────────────────────────────────────────────
     StyledRect {
         id: rowBg
         width: parent.width
         radius: Tokens.rounding.small
+
+        // ── Selection/Click catcher ─────────────────────
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            propagateComposedEvents: true
+            onClicked: function(mouse) {
+                root.selectionRequested(root.taskIndex)
+                mouse.accepted = false
+            }
+            onPressed: function(mouse) {
+                mouse.accepted = false
+            }
+        }
+        // ── Background color states ──
         color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh
              : rowHover.hovered ? Colours.tPalette.m3surfaceContainer
              : Colours.tPalette.m3surfaceContainerLow
-        border.width: root.isSelected ? 1 : 0
-        border.color: Colours.palette.m3primary
 
-        Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+        // ── Border ──
+        border.width: root.isSelected ? 1 : 0
+        border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
 
         implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
-        height: implicitHeight
         Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
         Behavior on color { CAnim {} }
 
@@ -119,7 +133,7 @@ Item {
 
         ColumnLayout {
             id: rowCol
-            anchors { 
+            anchors {
                 left: parent.left
                 right: parent.right
                 top: parent.top
@@ -135,39 +149,44 @@ Item {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
 
-
-                //expandable icon
+                // ── Expander (only when has subtasks) ──────────
                 MaterialIcon {
                     text: root.expanded ? "expand_more" : "chevron_right"
                     fontStyle: Tokens.font.icon.medium
                     color: Colours.palette.m3onSurfaceVariant
-                    visible: root.nSub > 0
-                    opacity: root.expanded ? 1 : 0.6
+                    opacity: root.expanded ? 1.0 : 0.6
                     Behavior on opacity { CAnim {} }
+                    Behavior on color { CAnim {} }
+
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: root.expanded = !root.expanded
+                        anchors.margins: -6
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.expanded = !root.expanded
+                            root.selectionRequested(root.taskIndex)
+                        }
                     }
                 }
-                // ── Icon or Checkbox ───────────────────────────
+
+                // ── Checkbox / Icon ─────────────────────────────
                 Item {
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
                     anchors.verticalCenter: parent.verticalCenter
-                    
+
                     MaterialIcon {
                         id: toggleIcon
                         anchors {
                             verticalCenter: parent.verticalCenter
                             left: parent.left
                         }
-                        visible: true
-                        
+
                         text: {
                             if (root.icon === "" || root.icon === null || root.icon === "block") {
                                 if (root.nSub > 0) {
                                     return root.taskDone ? "check_box"
-                                        : (root.dSub > 0 && root.dSub < root.nSub) ? "indeterminate_check_box"
+                                        : root.taskPartial ? "indeterminate_check_box"
                                         : "check_box_outline_blank"
                                 } else {
                                     return root.taskDone ? "check_circle" : "radio_button_unchecked"
@@ -176,22 +195,22 @@ Item {
                                 return root.icon
                             }
                         }
-                        
+
                         fill: root.taskDone ? 1 : 0
-                        
-                        fontStyle: root.icon !== "" ? Tokens.font.icon.medium : Tokens.font.icon.medium
+                        fontStyle: Tokens.font.icon.medium
+
+                        // ── FIXED: consistent color logic ──
                         color: {
                             if (root.icon !== "") {
-                                return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                            } else {
-                                // return root.taskDone ? Colours.palette.m3primary : Colours.palette.m3outline
-                                return root.dSub >0 ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                                return root.taskDone ? Colours.palette.m3primary
+                                                     : Colours.palette.m3onSurfaceVariant
                             }
+                            if (root.taskDone) return Colours.palette.m3primary
+                            if (root.taskPartial) return Colours.palette.m3secondary
+                            return Colours.palette.m3outline
                         }
-                        opacity: root.taskDone ? 0.5 : 8
-
                         Behavior on color { CAnim {} }
-                        
+
                         MouseArea {
                             anchors.fill: parent
                             anchors.margins: -4
@@ -200,13 +219,14 @@ Item {
                             onClicked: {
                                 if (root.nSub === 0) {
                                     root.toggleRequested(root.taskIndex)
+                                    root.selectionRequested(root.taskIndex)
                                 }
                             }
                         }
                     }
                 }
 
-                // ── Title ──────────────────────────────────────
+                // ── Title ───────────────────────────────────────
                 StyledText {
                     visible: !root.isEditing
                     Layout.fillWidth: true
@@ -214,17 +234,29 @@ Item {
                     font: Tokens.font.body.large
                     elide: Text.ElideRight
 
-                    color: Colours.palette.m3primary 
-                    opacity: root.taskDone ? 0.5 : 8
+                    // ── FIXED: proper done/undone colors ──
+                    color: root.taskDone ? Colours.palette.m3primary
+                                         : Colours.palette.m3onSurface
+                    opacity: root.taskDone ? 0.6 : 1.0
                     Behavior on color { CAnim {} }
+                    Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
+                    // ── Strikethrough (only when done) ──
                     StyledRect {
                         anchors.verticalCenter: parent.verticalCenter
                         width: root.taskDone ? Math.min(parent.contentWidth, parent.width) : 0
-                        height: 1
+                        height: 2
                         radius: Tokens.rounding.full
-                        color: Colours.palette.m3outline
+                        color: Colours.palette.m3primary
+                        opacity: root.taskDone ? 0.5 : 0
                         Behavior on width { Anim { type: Anim.FastSpatial } }
+                        Behavior on opacity { CAnim {} }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.selectionRequested(root.taskIndex)
                     }
                 }
 
@@ -234,80 +266,168 @@ Item {
                     Layout.fillWidth: true
                     text: root.taskTitle
                     font: Tokens.font.body.large
-                    
+                    property bool commitInProgress: false
+
                     background: Rectangle {
                         color: "transparent"
                         border.width: 0
                     }
-                    
+
                     leftPadding: 0
                     rightPadding: 0
                     topPadding: 0
                     bottomPadding: 0
                     verticalAlignment: Text.AlignVCenter
-                    
-                    onVisibleChanged: if (visible) { forceActiveFocus(); selectAll(); }
-                    onAccepted: root.renameRequested(root.taskIndex, text)
+
+                    function commit() {
+                        if (commitInProgress || !root.isEditing)
+                            return
+                        commitInProgress = true
+                        if (text.trim())
+                            root.renameRequested(root.taskIndex, text)
+                        else {
+                            text = root.taskTitle
+                            root.editingCancelled()
+                        }
+                    }
+
+                    onVisibleChanged: {
+                        if (visible) {
+                            commitInProgress = false
+                            forceActiveFocus()
+                            selectAll()
+                        }
+                    }
+                    onAccepted: commit()
                     Keys.onEscapePressed: {
+                        commitInProgress = true
                         root.editingCancelled()
                         text = root.taskTitle
                     }
-                    onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, text) }
+                    onFocusChanged: if (!focus) commit()
                 }
 
-                // ── Spacer to push streak and progress to the right ──
+                // ── Spacer ──────────────────────────────────────
                 Item { Layout.fillWidth: true }
 
+                // ── Progress ────────────────────────────────────
+                RowLayout {
+                    visible: root.nSub > 0 && !root.isEditing
+                    spacing: Tokens.spacing.small
+                        Layout.preferredWidth: 100
+                    Layout.alignment: Qt.AlignVCenter
 
+                    StyledText {
+                        text: `${root.dSub}/${root.nSub}`
+                        font: Tokens.font.body.small
+                        color: root.taskDone ? Colours.palette.m3primary
+                                             : Colours.palette.m3onSurfaceVariant
+                        opacity: 0.7
+                        Behavior on color { CAnim {} }
+                    }
+
+                    StyledRect {
+                        implicitWidth: 120
+                        implicitHeight: 4
+                        radius: Tokens.rounding.full
+                        color: Colours.tPalette.m3surfaceContainerHighest
+
+                        StyledRect {
+                            width: parent.width * root.prog
+                            height: parent.height
+                            radius: parent.radius
+                            color: root.taskDone ? Colours.palette.m3tertiary
+                                                 : Colours.palette.m3primary
+                            Behavior on width { Anim {} }
+                            Behavior on color { CAnim {} }
+                        }
+                    }
+                }
+
+                // ── Streak (habits only) ────────────────────────
+                RowLayout {
+                    id: streakBadge
+                    visible: root.showStreak && !root.isEditing
+                        Layout.preferredWidth: 48
+                    Layout.leftMargin: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 2
+
+                    MaterialIcon {
+                        text: "local_fire_department"
+                        fill: 1
+                        fontStyle: Tokens.font.icon.small
+                        color: {
+                            if (root.streak >= 20) return '#fe1d1d'
+                            if (root.streak >= 10) return "#FF8C00"
+                            if (root.streak >= 3)  return "#FFA500"
+                            if (root.streak >= 1)  return Colours.palette.m3primary
+                            return Colours.palette.m3outlineVariant
+                        }
+                        Behavior on color { CAnim { duration: 300 } }
+                    }
+                    StyledText {
+                        text: String(root.streak)
+                        font: Tokens.font.label.medium
+                        // font.weight: Font.Bold
+                        color: {
+                            if (root.streak >= 20) return '#fe1d1d'
+                            if (root.streak >= 10) return "#FF8C00"
+                            if (root.streak >= 3)  return "#FFA500"
+                            if (root.streak >= 1)  return Colours.palette.m3primary
+                            return Colours.palette.m3outlineVariant
+                        }
+                        Behavior on color { CAnim { duration: 300 } }
+                    }
+                }
 
                 // ── Actions ─────────────────────────────────────
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0
+                    Layout.preferredWidth: 48
+                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
                         icon: "edit"
-                        onClicked: root.editingStarted(root.taskId)
+                        onClicked: {
+                            root.selectionRequested(root.taskIndex)
+                            root.editingStarted(root.taskId)
+                        }
                     }
+
                     IconButton {
                         id: deleteButton
                         type: IconButton.Text
                         font: Tokens.font.icon.small
                         icon: "delete_outline"
-                        
+
                         property bool isShaking: false
-                        
+
                         onClicked: {
                             if (!isShaking) {
                                 isShaking = true
                                 shakeAnim.start()
                             }
+                            root.selectionRequested(root.taskIndex)
                         }
-                        
+
                         MouseArea {
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton
-                            
-                            onClicked: {
-                                deleteButton.clicked()
-                            }
-                            
-                            onDoubleClicked: {
-                                root.deleteRequested(root.taskIndex)
-                            }
+                            onClicked: deleteButton.clicked()
+                            onDoubleClicked: root.deleteRequested(root.taskIndex)
                         }
-                        
+
                         SequentialAnimation {
                             id: shakeAnim
                             onFinished: {
                                 deleteButton.isShaking = false
                                 deleteButton.rotation = 0
                             }
-                            
                             PropertyAnimation {
                                 target: deleteButton
                                 property: "rotation"
@@ -353,74 +473,15 @@ Item {
                         }
                     }
                 }
-
-
-                // ── Progress ────────────────────────────────────
-                RowLayout {
-                    visible: root.nSub > 0 && !root.isEditing
-                    spacing: Tokens.spacing.small
-                    Layout.alignment: Qt.AlignVCenter
-
-                    StyledText {
-                        text: `${root.dSub}/${root.nSub}`
-                        font: Tokens.font.body.small
-                        color: root.dSub === root.nSub ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                        opacity: 0.7
-                    }
-                    StyledRect {
-                        implicitWidth: 120
-                        implicitHeight: 4
-                        radius: Tokens.rounding.full
-                        color: Colours.tPalette.m3surfaceContainerHighest
-
-                        StyledRect {
-                            width: parent.width * root.prog
-                            height: parent.height
-                            radius: parent.radius
-                            color: Colours.palette.m3primary
-                            Behavior on width { Anim {} }
-                        }
-                    }
-                }
-
-                // ── Streak (habits) ─────────────────────────────
-                RowLayout {
-                    id: streakBadge
-                    visible: root.showStreak && !root.isEditing
-                    Layout.leftMargin: Tokens.spacing.small  // ← Add this
-
-                    Layout.alignment: Qt.AlignVCenter
-
-                    
-                    MaterialIcon {
-                        text: "local_fire_department"
-                        fill: 1
-                        color: root.streak >= 1 ? Colours.palette.m3primary : Colours.palette.m3outlineVariant   
-                        Behavior on color { CAnim { duration: 300 } }
-                    }
-                    StyledText {
-                        text: String(root.streak)
-                        font.pointSize: 12
-                        Layout.preferredWidth: 15  // ← Fixed width for the number
-                        color: root.streak >= 1 ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-                        Behavior on color { CAnim { duration: 300 } }
-                    }
-                }
-
-
-
-
-
             }
 
             // ── Subtasks ────────────────────────────────────────
             ColumnLayout {
                 visible: root.expanded
                 Layout.fillWidth: true
-                Layout.leftMargin:11
+                Layout.leftMargin: 11
                 spacing: 0
 
-                // ── Subtask Repeater ────────────────────────────
                 Repeater {
                     id: subRepeater
                     model: root.subOrder
@@ -432,13 +493,13 @@ Item {
                             id: modelData, title: "", done: false
                         }
                         readonly property int subIdx: index
-                        
+
                         taskData: root.taskData
                         taskIndex: root.taskIndex
                         subtaskData: sub
                         subtaskIndex: subIdx
                         subtaskId: modelData
-                        
+
                         isEditing: root.editingSubId === modelData
                         isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
 
@@ -450,21 +511,20 @@ Item {
                         onToggleRequested: (taskIdx, subIdx) => {
                             root.toggleSubtaskRequested(taskIdx, subIdx)
                         }
-
                         onDeleteRequested: (taskIdx, subIdx) => {
                             root.deleteSubtaskRequested(taskIdx, subIdx)
                         }
-
                         onRenameRequested: (taskIdx, subIdx, newTitle) => {
                             root.renameSubtaskRequested(taskIdx, subIdx, newTitle)
                         }
-
                         onEditingStarted: (subtaskId) => {
                             root.subtaskEditingStarted(subtaskId)
                         }
-
                         onEditingCancelled: {
                             root.subtaskEditingCancelled()
+                        }
+                        onSelectionRequested: (taskIdx, subIdx) => {
+                            root.subtaskSelectionRequested(subIdx)
                         }
                     }
                 }
@@ -473,7 +533,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.topMargin: 0
-                    
+
                     MaterialIcon {
                         text: "add_circle_outline"
                         fontStyle: Tokens.font.icon.small
@@ -482,7 +542,7 @@ Item {
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
                     }
-                    
+
                     StyledTextField {
                         placeholderFloats: false
                         Layout.fillWidth: true
@@ -492,16 +552,16 @@ Item {
                             body: Tokens.font.body.medium
                             pointSize: 11
                         }
-                        
+
                         placeholderText: qsTr("Add subtask…")
                         placeholderTextColor: Colours.palette.m3onSurfaceVariant
                         color: Colours.palette.m3onSurfaceVariant
-                        
+
                         background: Rectangle {
                             color: "transparent"
                             border.width: 0
                         }
-                        
+
                         topPadding: 2
                         bottomPadding: 2
                         leftPadding: 5
