@@ -25,7 +25,7 @@ Item {
     property bool hasChildren: false
     property int depth: 1
 
-    // ── Indent scaling by depth ─────────────────────────────────
+    // ── Indent scaling ──────────────────────────────────────────
     readonly property int indentUnit: 28
     readonly property int scaledIndent: root.depth * root.indentUnit
 
@@ -36,32 +36,10 @@ Item {
     signal editingCancelled()
     signal selectionRequested(int taskIdx, int subIdx)
 
-
     readonly property bool isDone: root.subtaskData?.done ?? false
     readonly property string title: root.subtaskData?.title ?? ""
-    readonly property int streak: root.subtaskData?.streak ?? 0
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
-
-    // ── Tree line color logic ───────────────────────────────────
-    readonly property color lineColor: {
-        if (root.isDone) return Colours.palette.m3primary
-        if (root.isSelected) return Colours.palette.m3secondary
-        return Colours.palette.m3outlineVariant
-    }
-    readonly property real lineOpacity: {
-        if (root.isDone) return 1.0
-        if (root.isSelected) return 0.6
-        return 0.3
-    }
-
-    // ── Content color logic ─────────────────────────────────────
-    readonly property color contentColor: {
-        if (root.isDone) return Colours.palette.m3primary
-        if (root.isSelected) return Colours.palette.m3secondary
-        return Colours.palette.m3onSurfaceVariant
-    }
-    readonly property real contentOpacity: root.isDone ? 0.6 : 1.0
 
     implicitHeight: subRow.implicitHeight
     Layout.fillWidth: true
@@ -78,7 +56,7 @@ Item {
         }
         width: root.scaledIndent + Tokens.spacing.small
 
-        // ── Vertical Line ──────────────────────────────────────
+        // ── Vertical Line ───────────────────────────────────────
         StyledRect {
             id: verticalLine
             anchors {
@@ -86,44 +64,43 @@ Item {
                 top: parent.top
                 bottom: parent.bottom
             }
-            width: 1
-            color: root.lineColor
-            opacity: root.lineOpacity
+            width: 2
+            color: Colours.palette.m3primary
             visible: !root.isFirst || !root.isLast
             anchors.topMargin: 0
             anchors.bottomMargin: root.isLast ? parent.height / 2 : 0
             Behavior on color { CAnim {} }
-            Behavior on opacity { CAnim {} }
         }
 
-        // ── Horizontal Line ────────────────────────────────────
+        // ── Horizontal Line ─────────────────────────────────────
         StyledRect {
             id: horizontalLine
             anchors {
                 left: verticalLine.right
                 verticalCenter: parent.verticalCenter
             }
-            width: Tokens.padding.extraLarge - Tokens.spacing.small
-            height: 1
-            color: root.lineColor
-            opacity: root.lineOpacity
+            width: Tokens.padding.extraLarge - Tokens.spacing.small+(root.isSelected?6:0)
+            height: 2
+            color: Colours.palette.m3primary
             Behavior on color { CAnim {} }
-            Behavior on opacity { CAnim {} }
+            Behavior on width { Anim { type: Anim.FastSpatial } }
         }
 
-        // ── Node Circle ────────────────────────────────────────
+        // ── Node Dot ────────────────────────────────────────────
         StyledRect {
+            id: nodeDot
             anchors {
                 left: horizontalLine.right
                 verticalCenter: parent.verticalCenter
             }
-            width: 6
-            height: 6
-            radius: 3
-            color: root.lineColor
-            opacity: root.lineOpacity
+            width: root.isSelected ? 12 : 6
+            height: root.isSelected ? 12 : 6
+            radius: root.isSelected ? Tokens.rounding.full : Tokens.rounding.small
+            color: Colours.palette.m3primary
+            opacity: 0.8
             Behavior on color { CAnim {} }
-            Behavior on opacity { CAnim {} }
+            Behavior on width { Anim { type: Anim.FastSpatial } }
+            Behavior on height { Anim { type: Anim.FastSpatial } }
         }
     }
 
@@ -131,21 +108,20 @@ Item {
     RowLayout {
         id: subRow
         anchors.left: treeContainer.right
+        anchors.leftMargin: root.isSelected ? 9 : 0
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         spacing: Tokens.spacing.small
 
+        Behavior on anchors.leftMargin { Anim { type: Anim.FastSpatial } }
         // ── Checkbox ────────────────────────────────────────────
         MaterialIcon {
             text: root.isDone ? "check_box" : "check_box_outline_blank"
             fill: root.isDone ? 1 : 0
             fontStyle: Tokens.font.icon.small
-            Layout.preferredWidth: 20
-            Layout.preferredHeight: 20
-            color: root.contentColor
-            opacity: root.isSelected || subRowHover.hovered ? 1.0 : (root.isDone ? 0.8 : 0.6)
+            color: Colours.palette.m3primary
+            opacity: root.isDone ? 0.5 : 1
             Behavior on color { CAnim {} }
-            Behavior on opacity { CAnim {} }
 
             MouseArea {
                 anchors.fill: parent
@@ -164,23 +140,20 @@ Item {
             Layout.fillWidth: true
             text: root.title
             font: Tokens.font.body.medium
-            color: root.contentColor
-            opacity: root.isSelected ? 1.0 : (subRowHover.hovered ? 0.85 : root.contentOpacity)
+            color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+            opacity: root.isDone ? 0.6 : 1
             elide: Text.ElideRight
             Behavior on color { CAnim {} }
-            Behavior on opacity { CAnim {} }
 
-            // Strikethrough
             StyledRect {
                 anchors.verticalCenter: parent.verticalCenter
                 width: root.isDone ? Math.min(parent.contentWidth, parent.width) : 0
-                height: 2
+                height: 1
                 radius: Tokens.rounding.full
                 color: Colours.palette.m3outline
                 Behavior on width { Anim { type: Anim.FastSpatial } }
             }
 
-            // Click to select
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -188,28 +161,31 @@ Item {
             }
         }
 
-        // ── Streak (subtasks can have streaks too) ──────────────
-        RowLayout {
-            visible: root.streak > 0 && !root.isEditing
-            Layout.preferredWidth: 48
-            spacing: Tokens.spacing.extraSmall
-            Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-            opacity: root.isSelected ? 1 : 0.8
+        // ── Dotted spacer (visible on hover/select) ─────────────
+        Item {
+            visible: !root.isEditing
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            Layout.leftMargin: 4
+            Layout.rightMargin: 4
+            opacity: (subRowHover.hovered || root.isSelected) ? 0.5 : 0
             Behavior on opacity { CAnim {} }
 
-            MaterialIcon {
-                text: "local_fire_department"
-                fontStyle: Tokens.font.icon.small
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
-                color: root.isSelected ? Colours.palette.m3secondary : Colours.palette.m3primary
-                Behavior on color { CAnim {} }
-            }
-            StyledText {
-                text: String(root.streak)
-                font: Tokens.font.label.small
-                color: root.isSelected ? Colours.palette.m3secondary : Colours.palette.m3primary
-                Behavior on color { CAnim {} }
+            Canvas {
+                anchors.fill: parent
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = root.isSelected
+                        ? Colours.palette.m3secondary
+                        : Colours.palette.m3outlineVariant
+                    ctx.lineWidth = 1
+                    ctx.setLineDash([2, 2])
+                    ctx.beginPath()
+                    ctx.moveTo(0, height / 2)
+                    ctx.lineTo(width, height / 2)
+                    ctx.stroke()
+                }
             }
         }
 
@@ -230,52 +206,41 @@ Item {
             topPadding: 0
             bottomPadding: 0
             verticalAlignment: Text.AlignVCenter
-            property bool commitInProgress: false
-
-            function commit() {
-                if (commitInProgress || !root.isEditing)
-                    return
-                commitInProgress = true
-                if (text.trim())
-                    root.renameRequested(root.taskIndex, root.subtaskIndex, text)
-                else {
-                    text = root.title
-                    root.editingCancelled()
-                }
-            }
 
             onVisibleChanged: {
                 if (visible) {
-                    commitInProgress = false
                     forceActiveFocus()
                     selectAll()
                 }
             }
 
-            onAccepted: commit()
+            onAccepted: {
+                if (text.trim()) {
+                    root.renameRequested(root.taskIndex, root.subtaskIndex, text)
+                } else {
+                    text = root.title
+                    root.editingCancelled()
+                }
+            }
 
             Keys.onEscapePressed: {
-                commitInProgress = true
                 root.editingCancelled()
                 text = root.title
             }
-            onFocusChanged: if (!focus) commit()
+            onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, root.subtaskIndex, text) }
         }
 
         // ── Action Buttons ──────────────────────────────────────
         RowLayout {
             visible: !root.isEditing
-            Layout.preferredWidth: 48
             spacing: 0
-            opacity: subRowHover.hovered || root.isSelected ? 1 : 0.3
+            opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
             IconButton {
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "edit"
-                Layout.preferredWidth: 20
-                Layout.preferredHeight: 20
                 onClicked: {
                     root.selectionRequested(root.taskIndex, root.subtaskIndex)
                     root.editingStarted(root.editId)
@@ -287,8 +252,6 @@ Item {
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "delete_outline"
-                Layout.preferredWidth: 20
-                Layout.preferredHeight: 20
 
                 property bool isShaking: false
 

@@ -153,7 +153,7 @@ Item {
                 MaterialIcon {
                     text: root.expanded ? "expand_more" : "chevron_right"
                     fontStyle: Tokens.font.icon.medium
-                    color: Colours.palette.m3onSurfaceVariant
+                    color: root.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                     opacity: root.expanded ? 1.0 : 0.6
                     Behavior on opacity { CAnim {} }
                     Behavior on color { CAnim {} }
@@ -347,7 +347,7 @@ Item {
                 // ── Streak (habits only) ────────────────────────
                 RowLayout {
                     id: streakBadge
-                    visible: root.showStreak && !root.isEditing
+                    visible: root.streak > 0 && !root.isEditing
                         Layout.preferredWidth: 48
                     Layout.leftMargin: Tokens.spacing.small
                     Layout.alignment: Qt.AlignVCenter
@@ -567,10 +567,13 @@ Item {
                         leftPadding: 5
                         rightPadding: 5
 
-                        onAccepted: {
-                            if (text.trim()) {
-                                root.addSubtaskRequested(root.taskIndex, text)
-                                clear()
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                if (text.trim()) {
+                                    root.addSubtaskRequested(root.taskIndex, text)
+                                    clear()
+                                }
+                                event.accepted = true
                             }
                         }
                         Keys.onEscapePressed: {
