@@ -7,8 +7,9 @@ QtObject {
     id: dataManager
 
     property var tasks: []
+    property var history: ({})
 
-    // When true, toggles write completions[], maintain streak/bestStreak,
+    // When true, maintains streak/bestStreak and applies the 2am habit reset.
     // and applyHabitDayRollover() unchecks leftover dones after the 2am cut.
     property bool habitMode: false
     property int resetHour: 2
@@ -26,6 +27,7 @@ QtObject {
     signal subtaskDeleted(string taskId, string subtaskId)
 
     signal habitDayRolledOver()
+    signal habitHistoryChanged()
 
     function copyTask(task, changes) {
         var newTask = {};
@@ -114,49 +116,63 @@ QtObject {
         return Math.max(0, next.getTime() - now.getTime());
     }
 
-    function dayCompleted(completions, date) {
-        if (!completions)
-            return false;
-        var v = completions[date];
-        if (v === true || v === 1)
-            return true;
-        if (typeof v === "number")
-            return v > 0;
-        if (typeof v === "string")
-            return v.length > 0;
-        if (v && v.length > 0)
-            return true;
-        return false;
+    function dayCompleted(dates, date) {
+        return Array.isArray(dates) && dates.indexOf(date) !== -1;
     }
 
-    function latestCompletionDate(completions) {
+    function latestCompletionDate(dates) {
         var latest = null;
-        if (!completions)
+        if (!Array.isArray(dates))
             return latest;
-        for (var k in completions) {
-            if (!completions.hasOwnProperty(k))
-                continue;
-            if (!dayCompleted(completions, k))
-                continue;
-            if (!latest || k > latest)
-                latest = k;
+        for (var i = 0; i < dates.length; i++) {
+            if (!latest || dates[i] > latest)
+                latest = dates[i];
         }
         return latest;
     }
 
-    function copyCompletions(src) {
-        var out = {};
-        if (!src)
-            return out;
-        for (var k in src) {
-            if (src.hasOwnProperty(k))
-                out[k] = src[k];
+    function copyDates(src) {
+        return Array.isArray(src) ? src.slice() : [];
+    }
+
+    function datesFor(task) {
+        return task && task.todoId ? copyDates(history[task.todoId]) : [];
+    }
+
+    function setDates(task, dates) {
+        if (!task || !task.todoId)
+            return;
+        var nextHistory = {};
+        for (var key in history) {
+            if (history.hasOwnProperty(key))
+                nextHistory[key] = copyDates(history[key]);
         }
-        return out;
+        nextHistory[task.todoId] = copyDates(dates);
+        history = nextHistory;
+        habitHistoryChanged();
+    }
+
+    function importLegacyCompletions(task) {
+        if (!task || !task.completions || typeof task.completions !== "object")
+            return false;
+
+        var dates = datesFor(task);
+        for (var date in task.completions) {
+            var value = task.completions[date];
+            var completed = value === true || value === 1
+                || (typeof value === "number" && value > 0)
+                || (typeof value === "string" && value.length > 0)
+                || (value && value.length > 0);
+            if (task.completions.hasOwnProperty(date) && completed && dates.indexOf(date) === -1)
+                dates.push(date);
+        }
+        setDates(task, dates);
+        delete task.completions;
+        return true;
     }
 
     function computeStreak(task, today) {
-        var completions = task && task.completions ? task.completions : {};
+        var completions = datesFor(task);
         var cursor = today || habitDate();
         if (!dayCompleted(completions, cursor)) {
             cursor = addDays(cursor, -1);
@@ -176,16 +192,13 @@ QtObject {
         task.streak = s;
         var best = task.bestStreak || 0;
         task.bestStreak = best > s ? best : s;
+        task.lastCompletedDate = latestCompletionDate(datesFor(task));
     }
 
     function ensureSubtaskFields(subtask) {
         var mutated = false;
-        if (!subtask.completions || typeof subtask.completions !== "object" || Array.isArray(subtask.completions)) {
-            subtask.completions = {};
-            mutated = true;
-        }
         if (typeof subtask.streak !== "number" || subtask.streak < 0) {
-            subtask.streak = computeStreak(subtask);
+            subtask.streak = 0;
             mutated = true;
         }
         if (typeof subtask.bestStreak !== "number" || subtask.bestStreak < 0) {
@@ -197,48 +210,25 @@ QtObject {
 
     function updateSubtaskStreak(subtask, isDone) {
         ensureSubtaskFields(subtask);
-        var completions = copyCompletions(subtask.completions);
-        var today = habitDate();
-        if (isDone)
-            completions[today] = true;
-        else if (completions.hasOwnProperty(today))
-            delete completions[today];
-        subtask.completions = completions;
-        updateStreaks(subtask);
     }
 
     function applyHabitCompletion(task, isDone) {
         var today = habitDate();
-        var completions = copyCompletions(task.completions);
+        var completions = datesFor(task);
 
         if (isDone) {
-            var ids = [];
-            if (task.subtasks && task.subtasks.length > 0) {
-                for (var i = 0; i < task.subtasks.length; i++) {
-                    if (task.subtasks[i].done)
-                        ids.push(task.subtasks[i].id);
-                }
-            } else {
-                ids = [task.todoId];
-            }
-            completions[today] = ids;
-            task.lastCompleted = today;
-        } else {
-            if (completions.hasOwnProperty(today))
-                delete completions[today];
-            task.lastCompleted = latestCompletionDate(completions);
+            if (completions.indexOf(today) === -1)
+                completions.push(today);
+        } else if (completions.indexOf(today) !== -1) {
+            completions.splice(completions.indexOf(today), 1);
         }
 
-        task.completions = completions;
+        setDates(task, completions);
         updateStreaks(task);
     }
 
     function ensureHabitFields(t) {
         var mutated = false;
-        if (!t.completions || typeof t.completions !== "object" || Array.isArray(t.completions)) {
-            t.completions = {};
-            mutated = true;
-        }
         if (typeof t.streak !== "number" || t.streak < 0) {
             t.streak = 0;
             mutated = true;
@@ -247,8 +237,10 @@ QtObject {
             t.bestStreak = 0;
             mutated = true;
         }
-        if (t.lastCompleted === undefined) {
-            t.lastCompleted = null;
+        if (t.lastCompletedDate === undefined) {
+            t.lastCompletedDate = t.lastCompleted === undefined ? null : t.lastCompleted;
+            if (t.lastCompleted !== undefined)
+                delete t.lastCompleted;
             mutated = true;
         }
         return mutated;
@@ -261,6 +253,7 @@ QtObject {
             return false;
 
         var today = habitDate();
+        var dayChanged = currentHabitDay !== today;
         var newTasks = [];
         var changed = false;
 
@@ -269,11 +262,11 @@ QtObject {
             if (ensureHabitFields(t))
                 changed = true;
 
-            var completedToday = dayCompleted(t.completions, today);
+            var completedToday = dayCompleted(datesFor(t), today);
             var newDone = t.done;
             var newSubtasks = t.subtasks;
 
-            if (t.done && !completedToday) {
+            if (dayChanged && !completedToday) {
                 newDone = false;
                 newSubtasks = [];
                 for (var j = 0; j < (t.subtasks || []).length; j++) {
@@ -282,7 +275,9 @@ QtObject {
                         id: s.id,
                         title: s.title,
                         done: false,
-                        minutes: s.minutes || 0
+                        minutes: s.minutes || 0,
+                        streak: s.streak || 0,
+                        bestStreak: s.bestStreak || 0
                     });
                 }
                 changed = true;
@@ -291,9 +286,8 @@ QtObject {
             var newTask = copyTask(t, { done: newDone, subtasks: newSubtasks });
             var oldStreak = t.streak || 0;
             var oldBest = t.bestStreak || 0;
-            var oldLast = t.lastCompleted;
             updateStreaks(newTask);
-            if (newTask.streak !== oldStreak || newTask.bestStreak !== oldBest || newTask.lastCompleted !== oldLast)
+            if (newTask.streak !== oldStreak || newTask.bestStreak !== oldBest || newTask.lastCompletedDate !== t.lastCompletedDate || newDone !== t.done || newSubtasks !== t.subtasks)
                 changed = true;
             newTasks.push(newTask);
         }
@@ -322,10 +316,9 @@ QtObject {
         };
 
         if (habitMode) {
-            newTask.completions = {};
             newTask.streak = 0;
             newTask.bestStreak = 0;
-            newTask.lastCompleted = null;
+            newTask.lastCompletedDate = null;
         }
 
         var newTasks = [newTask];
@@ -351,7 +344,6 @@ QtObject {
                 title: s.title,
                 done: newDone,
                 minutes: s.minutes || 0,
-                completions: copyCompletions(s.completions),
                 streak: s.streak || 0,
                 bestStreak: s.bestStreak || 0
             };
@@ -407,7 +399,6 @@ QtObject {
             title: title.trim(),
             done: false,
             minutes: 0,
-            completions: {},
             streak: 0,
             bestStreak: 0
         };
@@ -436,7 +427,6 @@ QtObject {
             title: sub.title,
             done: !sub.done,
             minutes: sub.minutes || 0,
-            completions: copyCompletions(sub.completions),
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0
         };
@@ -462,7 +452,6 @@ QtObject {
             title: title.trim(),
             done: sub.done,
             minutes: sub.minutes || 0,
-            completions: copyCompletions(sub.completions),
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0
         };

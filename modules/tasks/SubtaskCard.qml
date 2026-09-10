@@ -161,33 +161,6 @@ Item {
             }
         }
 
-        // ── Dotted spacer (visible on hover/select) ─────────────
-        Item {
-            visible: !root.isEditing
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            Layout.leftMargin: 4
-            Layout.rightMargin: 4
-            opacity: (subRowHover.hovered || root.isSelected) ? 0.5 : 0
-            Behavior on opacity { CAnim {} }
-
-            Canvas {
-                anchors.fill: parent
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    ctx.strokeStyle = root.isSelected
-                        ? Colours.palette.m3secondary
-                        : Colours.palette.m3outlineVariant
-                    ctx.lineWidth = 1
-                    ctx.setLineDash([2, 2])
-                    ctx.beginPath()
-                    ctx.moveTo(0, height / 2)
-                    ctx.lineTo(width, height / 2)
-                    ctx.stroke()
-                }
-            }
-        }
 
         // ── Edit Field ──────────────────────────────────────────
         StyledTextField {

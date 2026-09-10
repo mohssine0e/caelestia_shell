@@ -22,10 +22,9 @@ data model used: for both tasks and habits // to keep for reference
     minutes: int,
     priority: int,
 
-    completions: { "YYYY-MM-DD": [ids] }, // habits only field
     streak: int,
     bestStreak: int,
-    lastCompleted: string | null,
+    lastCompletedDate: string | null,
     
     subtasks: [
         {
@@ -33,7 +32,6 @@ data model used: for both tasks and habits // to keep for reference
             title: string,
             done: bool,
             minutes: int
-            completions: { "YYYY-MM-DD": [ids] }, // habits only field future add
         },
         ...
     ]
@@ -348,10 +346,8 @@ Item {
                 RowLayout {
                     id: streakBadge
                     visible: root.streak > 0 && !root.isEditing
-                        Layout.preferredWidth: 48
                     Layout.leftMargin: Tokens.spacing.small
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 2
 
                     MaterialIcon {
                         text: "local_fire_department"
@@ -369,7 +365,6 @@ Item {
                     StyledText {
                         text: String(root.streak)
                         font: Tokens.font.label.medium
-                        // font.weight: Font.Bold
                         color: {
                             if (root.streak >= 20) return '#fe1d1d'
                             if (root.streak >= 10) return "#FF8C00"
@@ -385,7 +380,6 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    Layout.preferredWidth: 48
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 

@@ -21,6 +21,7 @@ FocusScope {
     property string searchQuery: ""
 
     readonly property string dataPath: `/home/mohssine/${root.dataType}.json`
+    readonly property string historyPath: "/home/mohssine/habits_history.json"
     readonly property string emptyStateText: root.dataType === "habits" ? qsTr("No habits yet") : qsTr("No tasks yet")
     readonly property real listMinHeight: 440
     readonly property real listMaxHeight: 640
@@ -30,6 +31,8 @@ FocusScope {
 
     property var tasks: []
     property bool loaded: false
+    property bool tasksLoaded: false
+    property bool historyLoaded: !root.isHabitList
     property var taskMap: ({})
     property var taskIndexMap: ({})
 
@@ -103,6 +106,11 @@ FocusScope {
             root.tasks = dataManager.tasks;
             root.updateMaps();
             root.requestSave();
+        }
+
+        onHabitHistoryChanged: {
+            if (root.loaded)
+                root.requestSave();
         }
     }
 
@@ -253,6 +261,38 @@ FocusScope {
             scroller.contentY = card.y + card.height - scroller.height;
     }
 
+    function finishLoad() {
+        if (!root.tasksLoaded || !root.historyLoaded)
+            return;
+
+        var migrated = false;
+        for (var i = 0; i < root.tasks.length; i++) {
+            var task = root.tasks[i];
+            if (root.isHabitList) {
+                if (dataManager.importLegacyCompletions(task))
+                    migrated = true;
+                if (dataManager.ensureHabitFields(task))
+                    migrated = true;
+                dataManager.updateStreaks(task);
+            }
+            for (var j = 0; j < (task.subtasks || []).length; j++) {
+                if (dataManager.ensureSubtaskFields(task.subtasks[j]))
+                    migrated = true;
+                if (task.subtasks[j].completions !== undefined) {
+                    delete task.subtasks[j].completions;
+                    migrated = true;
+                }
+            }
+            dataManager.syncDone(task);
+        }
+
+        if (root.isHabitList)
+            dataManager.applyHabitDayRollover();
+        root.loaded = true;
+        if (migrated)
+            root.requestSave();
+    }
+
     Keys.onPressed: event => {
         if (root.editingTaskId !== "" || root.editingSubId !== "")
             return;
@@ -333,42 +373,56 @@ FocusScope {
                     var t = parsed[i];
                     if (!t.subtasks) t.subtasks = [];
                     for (var j = 0; j < t.subtasks.length; j++) {
-                        if (dataManager.ensureSubtaskFields(t.subtasks[j]))
-                            migrated = true;
+                        if (!t.subtasks[j].id)
+                            t.subtasks[j].id = String(Date.now() + "-" + j);
                     }
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
-                    if (root.isHabitList) {
-                        if (dataManager.ensureHabitFields(t))
-                            migrated = true;
-                        var today = dataManager.habitDate();
-                        if (t.done && Object.keys(t.completions).length === 0) {
-                            dataManager.applyHabitCompletion(t, true);
-                            migrated = true;
-                        }
-                    }
-                    dataManager.syncDone(t);
                 }
                 root.tasks = parsed;
-                if (root.isHabitList)
-                    dataManager.applyHabitDayRollover();
-                if (!Array.isArray(raw) || migrated)
-                    root.requestSave();
+                root.tasksLoaded = true;
+                root.finishLoad();
             } catch (e) {
                 root.tasks = [];
+                root.tasksLoaded = true;
+                root.finishLoad();
             }
-            root.loaded = true;
         }
         onLoadFailed: function(err) {
             root.tasks = [];
-            root.loaded = true;
+            root.tasksLoaded = true;
             if (err === FileViewError.FileNotFound)
                 Qt.callLater(function() { storage.setText("[]"); });
+            root.finishLoad();
+        }
+    }
+
+    FileView {
+        id: historyStorage
+        path: root.historyPath
+        onLoaded: {
+            try {
+                var raw = JSON.parse(text());
+                dataManager.history = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+            } catch (e) {
+                dataManager.history = {};
+            }
+            root.historyLoaded = true;
+            root.finishLoad();
+        }
+        onLoadFailed: function(err) {
+            dataManager.history = {};
+            root.historyLoaded = true;
+            if (err === FileViewError.FileNotFound)
+                Qt.callLater(function() { historyStorage.setText("{}"); });
+            root.finishLoad();
         }
     }
 
     function save() {
         storage.setText(JSON.stringify(root.tasks, null, 2));
+        if (root.isHabitList)
+            historyStorage.setText(JSON.stringify(dataManager.history, null, 2));
     }
 
     function requestSave() {
