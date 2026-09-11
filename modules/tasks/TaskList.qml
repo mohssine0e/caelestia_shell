@@ -146,7 +146,9 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        var filteredIds = dataManager.getFilteredTasks(statusFilter, searchQuery);
+        // Keep search filtering in each delegate's visible binding so typing
+        // does not rebuild the model on every character.
+        var filteredIds = dataManager.getFilteredTasks(statusFilter, "");
 
         if (filteredModel.count === filteredIds.length) {
             var same = true;
@@ -181,12 +183,12 @@ FocusScope {
     }
 
     onStatusFilterChanged: {
+        updateFilteredModel();
         root.selectedIndex = filteredModel.count > 0 ? 0 : -1;
         root.selectedSubtaskIndex = -1;
     }
 
     onSearchQueryChanged: {
-        updateFilteredModel();
         root.selectedIndex = filteredModel.count > 0 ? 0 : -1;
         root.selectedSubtaskIndex = -1;
     }
