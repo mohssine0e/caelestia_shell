@@ -70,7 +70,7 @@ Item {
         captureField.forceActiveFocus()
     }
 
-    readonly property bool iconPickerVisible: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
+    readonly property bool showHabitControls: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
 
     ColumnLayout {
         id: headerColumn
@@ -108,7 +108,7 @@ Item {
             // ── Habit Type Switcher (daily only) ───────────────
             BtnSwitcher {
                 id: habitTypeSwitch
-                visible: root.activePage === "daily"
+                visible: root.showHabitControls
                 Layout.fillHeight: true
                 model: [
                     { icon: "build", text: qsTr("Build"), value: "build" },
@@ -144,9 +144,9 @@ Item {
         // ── Bottom Row: Icon Picker ─────────────────────────────
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: root.iconPickerVisible ? pageSwitch.implicitHeight : 0
-            visible: root.iconPickerVisible
-            opacity: root.iconPickerVisible ? 1 : 0
+            Layout.preferredHeight: root.showHabitControls ? pageSwitch.implicitHeight : 0
+            visible: root.showHabitControls
+            opacity: root.showHabitControls ? 1 : 0
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
             Behavior on Layout.preferredHeight { Anim { type: Anim.FastSpatial } }
 
