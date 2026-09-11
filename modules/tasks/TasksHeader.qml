@@ -18,6 +18,7 @@ Item {
 
     signal pageChanged(string page)
     signal captureAccepted(string text)
+    signal escapePressed()
     signal habitIconSelected(string icon)
     signal habitTypeSelected(string type)
 
@@ -100,6 +101,7 @@ Item {
                 Keys.onEscapePressed: {
                     clear()
                     focus = false
+                    root.escapePressed()
                 }
             }
 

@@ -11,25 +11,53 @@ import qs.services
 
 FocusScope {
     id: root
+    focus: true
     width: 1040
     height: 720
     implicitWidth: 1040
     implicitHeight: 720
 
     signal closeRequested() // this is handled by the popout wrapper, not this component itself 
+    Shortcut {
+        sequence: "Escape"
+        enabled: !root.inputActive
+        onActivated: root.closeRequested()
+    }
+
     Keys.onEscapePressed: {
         root.closeRequested();
         event.accepted = true;
     }
     // "/" set focus to the capture field, unless a text field is already active (so you can type "/" in a search box)
-    Keys.onPressed: event => {
-        if (event.key === Qt.Key_Slash && !inputActive) {
-            tasksHeader.focusCapture()
-            event.accepted = true;
-        } else {
-            event.accepted = false;
-        }
+Keys.onPressed: event => {
+    const onlyAlt = (event.modifiers & Qt.AltModifier)
+                     && !(event.modifiers & Qt.ControlModifier)
+                     && !(event.modifiers & Qt.ShiftModifier)
+                     && !(event.modifiers & Qt.MetaModifier)
+                     && !(event.modifiers & Qt.GroupSwitchModifier)
+
+    if (onlyAlt && event.key === Qt.Key_1) {
+        root.activePage = "tasks"
+        taskList.forceActiveFocus()
+        event.accepted = true
+        return
     }
+
+    if (onlyAlt && event.key === Qt.Key_2) {
+        root.activePage = "daily"
+        dailyHabitsList.forceActiveFocus()
+        event.accepted = true
+        return
+    }
+
+    if (event.key === Qt.Key_Slash && !inputActive) {
+        tasksHeader.focusCapture()
+        event.accepted = true
+        return
+    }
+
+    event.accepted = false
+}
     MouseArea {
         anchors.fill: parent
         onPressed: {
@@ -104,6 +132,9 @@ FocusScope {
                 root.activePage = page
             }
             onHabitIconSelected: icon => root.habitIcon = icon
+            onEscapePressed: {
+                (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
+            }
 
             onCaptureAccepted: text => {
                 if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon, root.habitType)
@@ -191,7 +222,11 @@ FocusScope {
                 placeholderText: root.activePage === "daily" ? qsTr("Search habits") : qsTr("Search tasks")
                 text: root.searchQuery
                 onTextChanged: root.searchQuery = text
-                Keys.onEscapePressed: { clear(); focus = false; }
+                Keys.onEscapePressed: {
+                    clear()
+                    focus = false
+                    (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
+                }
             }
         }
 

@@ -163,45 +163,56 @@ Item {
 
 
         // ── Edit Field ──────────────────────────────────────────
-        StyledTextField {
-            visible: root.isEditing
-            Layout.fillWidth: true
-            text: root.title
-            font: Tokens.font.body.medium
+       StyledTextField {
+    visible: root.isEditing
+    Layout.fillWidth: true
+    text: root.title
+    font: Tokens.font.body.medium
+    property bool commitInProgress: false
 
-            background: Rectangle {
-                color: "transparent"
-                border.width: 0
-            }
+    background: Rectangle {
+        color: "transparent"
+        border.width: 0
+    }
 
-            leftPadding: 0
-            rightPadding: 0
-            topPadding: 0
-            bottomPadding: 0
-            verticalAlignment: Text.AlignVCenter
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
+    verticalAlignment: Text.AlignVCenter
 
-            onVisibleChanged: {
-                if (visible) {
-                    forceActiveFocus()
-                    selectAll()
-                }
-            }
-
-            onAccepted: {
-                if (text.trim()) {
-                    root.renameRequested(root.taskIndex, root.subtaskIndex, text)
-                } else {
-                    text = root.title
-                    root.editingCancelled()
-                }
-            }
-
-            Keys.onEscapePressed: {
-                root.editingCancelled()
-                text = root.title
-            }
-            onFocusChanged: if (!focus && root.isEditing) { root.renameRequested(root.taskIndex, root.subtaskIndex, text) }
+    function commit() {
+        if (commitInProgress || !root.isEditing)
+            return
+        commitInProgress = true
+        focus = false   // ← release focus BEFORE emitting
+        if (text.trim())
+            root.renameRequested(root.taskIndex, root.subtaskIndex, text)
+        else {
+            text = root.title
+            root.editingCancelled()
         }
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            commitInProgress = false
+            forceActiveFocus()
+            selectAll()
+        }
+    }
+    onAccepted: commit()
+    Keys.onEscapePressed: {
+        commitInProgress = true
+        focus = false
+        root.editingCancelled()
+        text = root.title
+    }
+    onFocusChanged: {
+        if (!focus && root.isEditing && !commitInProgress)
+            commit()
+    }
+}
 
         // ── Action Buttons ──────────────────────────────────────
         RowLayout {
@@ -214,9 +225,15 @@ Item {
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "edit"
-                onClicked: {
-                    root.selectionRequested(root.taskIndex, root.subtaskIndex)
-                    root.editingStarted(root.editId)
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                        root.editingStarted(root.editId)
+                    }
                 }
             }
 

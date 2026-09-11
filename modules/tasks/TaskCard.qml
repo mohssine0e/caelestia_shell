@@ -103,17 +103,10 @@ Item {
         width: parent.width
         radius: Tokens.rounding.small
 
-        // ── Selection/Click catcher ─────────────────────
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            propagateComposedEvents: true
-            onClicked: function(mouse) {
+        // ── Full-card selection ─────────────────────────
+        TapHandler {
+            onTapped: {
                 root.selectionRequested(root.taskIndex)
-                mouse.accepted = false
-            }
-            onPressed: function(mouse) {
-                mouse.accepted = false
             }
         }
         // ── Background color states ──
@@ -261,51 +254,56 @@ Item {
                 }
 
                 // ── Edit Field ──────────────────────────────────
-                StyledTextField {
-                    visible: root.isEditing
-                    Layout.fillWidth: true
-                    text: root.taskTitle
-                    font: Tokens.font.body.large
-                    property bool commitInProgress: false
+               StyledTextField {
+    visible: root.isEditing
+    Layout.fillWidth: true
+    text: root.taskTitle
+    font: Tokens.font.body.large
+    property bool commitInProgress: false
 
-                    background: Rectangle {
-                        color: "transparent"
-                        border.width: 0
-                    }
+    background: Rectangle {
+        color: "transparent"
+        border.width: 0
+    }
 
-                    leftPadding: 0
-                    rightPadding: 0
-                    topPadding: 0
-                    bottomPadding: 0
-                    verticalAlignment: Text.AlignVCenter
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
+    verticalAlignment: Text.AlignVCenter
 
-                    function commit() {
-                        if (commitInProgress || !root.isEditing)
-                            return
-                        commitInProgress = true
-                        if (text.trim())
-                            root.renameRequested(root.taskIndex, text)
-                        else {
-                            text = root.taskTitle
-                            root.editingCancelled()
-                        }
-                    }
+    function commit() {
+        if (commitInProgress || !root.isEditing)
+            return
+        commitInProgress = true
+        focus = false   // ← release focus BEFORE emitting
+        if (text.trim())
+            root.renameRequested(root.taskIndex, text)
+        else {
+            text = root.taskTitle
+            root.editingCancelled()
+        }
+    }
 
-                    onVisibleChanged: {
-                        if (visible) {
-                            commitInProgress = false
-                            forceActiveFocus()
-                            selectAll()
-                        }
-                    }
-                    onAccepted: commit()
-                    Keys.onEscapePressed: {
-                        commitInProgress = true
-                        root.editingCancelled()
-                        text = root.taskTitle
-                    }
-                    onFocusChanged: if (!focus) commit()
-                }
+    onVisibleChanged: {
+        if (visible) {
+            commitInProgress = false
+            forceActiveFocus()
+            selectAll()
+        }
+    }
+    onAccepted: commit()
+    Keys.onEscapePressed: {
+        commitInProgress = true
+        focus = false
+        root.editingCancelled()
+        text = root.taskTitle
+    }
+    onFocusChanged: {
+        if (!focus && root.isEditing && !commitInProgress)
+            commit()
+    }
+}
 
                 // ── Spacer ──────────────────────────────────────
                 Item { Layout.fillWidth: true }
@@ -496,7 +494,7 @@ Item {
                         subtaskIndex: subIdx
                         subtaskId: modelData
 
-                        isEditing: root.editingSubId === modelData
+                        isEditing: root.editingSubId === `${root.taskData.todoId}__${modelData}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
 
                         isFirst: index === 0
