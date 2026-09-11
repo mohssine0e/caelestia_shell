@@ -45,6 +45,9 @@ FocusScope {
     property string statusFilter: "all" // "all" | "active" | "done"
     property string searchQuery: ""
 
+    property string habitType: "build"
+
+
     property var timeUntilReset: ({ hours: 0, mins: 0 })
     
     function updateTimeLeft() {
@@ -91,6 +94,8 @@ FocusScope {
         TasksHeader{
             id: tasksHeader
 
+            habitType: root.habitType
+            onHabitTypeSelected: type => root.habitType = type
             Layout.fillWidth: true
             activePage: root.activePage
             habitIcon: root.habitIcon
@@ -101,7 +106,7 @@ FocusScope {
             onHabitIconSelected: icon => root.habitIcon = icon
 
             onCaptureAccepted: text => {
-                if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon)
+                if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon, root.habitType)
                 else taskList.addTask(text)
             }
         }

@@ -172,15 +172,34 @@ QtObject {
     }
 
     function computeStreak(task, today) {
-        var completions = datesFor(task);
+        var stored = datesFor(task);
+        var isAvoid = task.type === "avoid";
         var cursor = today || habitDate();
-        if (!dayCompleted(completions, cursor)) {
+        var firstDay = isAvoid && task.createdAt ? habitDate(task.createdAt) : null;
+
+        // Without a creation date, an empty relapse archive can only prove
+        // that the current habit day is safe.
+        if (isAvoid && !firstDay && stored.length === 0)
+            return 1;
+
+        function countsFor(dateStr) {
+            var inHistory = dayCompleted(stored, dateStr);
+            return isAvoid ? !inHistory : inHistory;
+        }
+
+        if (isAvoid && firstDay && cursor < firstDay)
+            return 0;
+
+        if (!countsFor(cursor)) {
+            if (isAvoid)
+                return 0;
             cursor = addDays(cursor, -1);
-            if (!dayCompleted(completions, cursor))
+            if ((firstDay && cursor < firstDay) || !countsFor(cursor))
                 return 0;
         }
+
         var streak = 0;
-        while (dayCompleted(completions, cursor)) {
+        while (countsFor(cursor) && (!firstDay || cursor >= firstDay)) {
             streak++;
             cursor = addDays(cursor, -1);
         }
@@ -215,13 +234,17 @@ QtObject {
     function applyHabitCompletion(task, isDone) {
         var today = habitDate();
         var completions = datesFor(task);
+        var idx = completions.indexOf(today);
 
-        if (isDone) {
-            if (completions.indexOf(today) === -1)
-                completions.push(today);
-        } else if (completions.indexOf(today) !== -1) {
-            completions.splice(completions.indexOf(today), 1);
-        }
+
+        // For BUILD: isDone=true → add today, isDone=false → remove today
+        // For AVOID: isDone=true → remove today (not relapsed), isDone=false → add today (relapsed)
+        var shouldBeInHistory = (task.type === "avoid") ? !isDone : isDone;
+
+        if (shouldBeInHistory && idx === -1)
+            completions.push(today);
+        else if (!shouldBeInHistory && idx !== -1)
+            completions.splice(idx, 1);
 
         setDates(task, completions);
         updateStreaks(task);
@@ -249,65 +272,83 @@ QtObject {
     // Uncheck leftovers from a previous habit-day, recompute streaks.
     // Returns true if anything changed (caller should persist).
     function applyHabitDayRollover() {
-        if (!habitMode)
-            return false;
+    if (!habitMode)
+        return false;
 
-        var today = habitDate();
-        var dayChanged = currentHabitDay !== today;
-        var newTasks = [];
-        var changed = false;
+    var today = habitDate();
+    var yesterday = addDays(today, -1);
+    var dayChanged = currentHabitDay !== today;
+    var newTasks = [];
+    var changed = false;
 
-        for (var i = 0; i < tasks.length; i++) {
-            var t = tasks[i];
-            if (ensureHabitFields(t))
-                changed = true;
+    for (var i = 0; i < tasks.length; i++) {
+        var t = tasks[i];
+        if (ensureHabitFields(t))
+            changed = true;
 
-            var completedToday = dayCompleted(datesFor(t), today);
-            var newDone = t.done;
-            var newSubtasks = t.subtasks;
+        var completedToday = dayCompleted(datesFor(t), today);
+        var newDone = t.done;
+        var newSubtasks = t.subtasks;
 
-            if (dayChanged && !completedToday) {
-                newDone = false;
-                newSubtasks = [];
-                for (var j = 0; j < (t.subtasks || []).length; j++) {
-                    var s = t.subtasks[j];
-                    newSubtasks.push({
-                        id: s.id,
-                        title: s.title,
-                        done: false,
-                        minutes: s.minutes || 0,
-                        streak: s.streak || 0,
-                        bestStreak: s.bestStreak || 0
-                    });
+        // ── Handle day rollover ──────────────────────────────
+        if (dayChanged) {
+            // For AVOID: if yesterday was still "safe" (done), mark it as completed
+            if (t.type === "avoid") {
+                // A recorded relapse must remain visible for the current day.
+                newDone = !completedToday;
+            } else {
+                // BUILD: if yesterday not completed, reset done
+                if (!completedToday) {
+                    newDone = false;
+                    newSubtasks = [];
+                    for (var j = 0; j < (t.subtasks || []).length; j++) {
+                        var s = t.subtasks[j];
+                        newSubtasks.push({
+                            id: s.id,
+                            title: s.title,
+                            done: false,
+                            minutes: s.minutes || 0,
+                            streak: s.streak || 0,
+                            bestStreak: s.bestStreak || 0
+                        });
+                    }
+                    changed = true;
                 }
-                changed = true;
             }
-
-            var newTask = copyTask(t, { done: newDone, subtasks: newSubtasks });
-            var oldStreak = t.streak || 0;
-            var oldBest = t.bestStreak || 0;
-            updateStreaks(newTask);
-            if (newTask.streak !== oldStreak || newTask.bestStreak !== oldBest || newTask.lastCompletedDate !== t.lastCompletedDate || newDone !== t.done || newSubtasks !== t.subtasks)
-                changed = true;
-            newTasks.push(newTask);
         }
 
-        currentHabitDay = today;
-        if (changed) {
-            tasks = newTasks;
-            habitDayRolledOver();
+        var newTask = copyTask(t, { done: newDone, subtasks: newSubtasks });
+        var oldStreak = t.streak || 0;
+        var oldBest = t.bestStreak || 0;
+        updateStreaks(newTask);
+        if (newTask.streak !== oldStreak ||
+            newTask.bestStreak !== oldBest ||
+            newTask.lastCompletedDate !== t.lastCompletedDate ||
+            newDone !== t.done) {
+            changed = true;
         }
-        return changed;
+        newTasks.push(newTask);
     }
 
+    currentHabitDay = today;
+    if (changed) {
+        tasks = newTasks;
+        habitDayRolledOver();
+    }
+    return changed;
+}
+
     // ── Task CRUD ──
-    function addTask(title, icon) {
+    function addTask(title, icon, type) {
         if (!title || !title.trim()) return;
+        var isAvoid = type === "avoid";
+        var habitType = isAvoid ? "avoid" : "build";
 
         var newTask = {
             todoId: Date.now() + "-" + Math.floor(Math.random() * 1e6),
             title: title.trim(),
-            done: false,
+            done: isAvoid ? true : false,
+            type: habitType,
             minutes: 0,
             icon: icon || null,
             priority: null,
@@ -316,9 +357,9 @@ QtObject {
         };
 
         if (habitMode) {
-            newTask.streak = 0;
-            newTask.bestStreak = 0;
-            newTask.lastCompletedDate = null;
+            newTask.streak = isAvoid ? 1 : 0;
+            newTask.bestStreak = isAvoid ? 1 : 0;
+            newTask.lastCompletedDate = isAvoid ? habitDate() : null;
         }
 
         var newTasks = [newTask];
@@ -478,6 +519,12 @@ QtObject {
         updateTask(taskIndex, newTask);
         subtaskDeleted(taskId, subId);
     }
+
+function isDoneToday(task) {
+    var today = habitDate();
+    var inHistory = dayCompleted(datesFor(task), today);
+    return task.type === "avoid" ? !inHistory : inHistory;
+}
 
     // ── Statistics ──
     function getActiveCount() {

@@ -629,11 +629,11 @@ FocusScope {
         }
     }
 
-    function addTask(title, icon) {
-        dataManager.addTask(title, root.isHabitList ? (icon || "") : "");
+    function addTask(title, icon, type) {
+        dataManager.addTask(title, root.isHabitList ? (icon || "") : "", type);
     }
 
-    function addHabit(title, icon) {
-        dataManager.addTask(title, icon);
+    function addHabit(title, icon, type) {
+        dataManager.addTask(title, icon, type);
     }
 }

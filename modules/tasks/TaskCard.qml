@@ -17,8 +17,10 @@ data model used: for both tasks and habits // to keep for reference
 {
     todoId: string,
     title: string,
-    done: bool,
+    done: bool,           // avoid type initiliazed to true 
     icon: string | null, // optional
+    "type": "avoid",    //string : "build" | "avoid"
+
     minutes: int,
     priority: int,
 
@@ -532,12 +534,15 @@ Item {
                         text: "add_circle_outline"
                         fontStyle: Tokens.font.icon.small
                         color: Colours.palette.m3primary
-                        opacity: 0.6
+                        opacity: addSubtaskField.focus ? 1 : 0.5
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
+
+                        Behavior on opacity { CAnim {} }
                     }
 
                     StyledTextField {
+                        id: addSubtaskField
                         placeholderFloats: false
                         Layout.fillWidth: true
                         Layout.preferredHeight: 28
