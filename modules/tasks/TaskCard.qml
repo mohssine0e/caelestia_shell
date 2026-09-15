@@ -148,7 +148,7 @@ Item {
                     text: root.expanded ? "expand_more" : "chevron_right"
                     fontStyle: Tokens.font.icon.medium
                     color: root.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                    opacity: root.expanded ? 1 : 0.6
+                    opacity: root.expanded ? 1 : 0.5
                     Behavior on opacity { CAnim {} }
                     Behavior on color { CAnim {} }
 
@@ -193,7 +193,6 @@ Item {
                         fill: root.taskDone ? 1 : 0
                         fontStyle: Tokens.font.icon.medium
 
-                        // ── FIXED: consistent color logic ──
                         color: {
                             if (root.icon !== "") {
                                 return root.taskDone ? Colours.palette.m3primary
@@ -203,7 +202,7 @@ Item {
                             if (root.taskPartial) return Colours.palette.m3secondary
                             return Colours.palette.m3outline
                         }
-                        opacity: root.isDone ? 0.5 : 1
+                        opacity: root.taskDone ? 0.5 : 1
                         
                         Behavior on color { CAnim {} }
 
@@ -231,8 +230,8 @@ Item {
                     font: Tokens.font.body.large
                     elide: Text.ElideRight
 
-                    color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
-                    opacity: root.isDone ? 0.6 : 1
+                    color: root.taskDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    opacity: root.taskDone ? 0.6 : 1
                     Behavior on color { CAnim {} }
 
                     // ── Strikethrough WHEN DONE ──
