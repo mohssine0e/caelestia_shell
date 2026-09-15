@@ -3,6 +3,36 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 
+
+/*
+data model used: for both tasks and habits // to keep for reference
+{
+    todoId: string,
+    title: string,
+    done: bool,                   // avoid type initiliazed to true 
+    icon: string | null,         // optional
+    "type": "avoid",            //string : "build" | "avoid"
+
+    minutes: int,
+    priority: int,             1,2,3
+
+    streak: int,
+    bestStreak: int,
+    lastCompletedDate: string | null,           // for normal habits
+    lastRelapseDate: string | null,             // for avoid habits
+    
+    subtasks: [
+        {
+            id: string,
+            title: string,
+            done: bool,
+            minutes: int
+        },
+        ...
+    ]
+}
+
+*/ 
 QtObject {
     id: dataManager
 

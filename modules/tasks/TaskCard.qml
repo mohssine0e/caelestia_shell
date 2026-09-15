@@ -58,6 +58,9 @@ Item {
     property string editingSubId: ""
     property bool showStreak: false
 
+    property string icon: ""
+    readonly property int streak: root.taskData?.streak ?? 0
+    readonly property int bestStreak: root.taskData?.bestStreak ?? 0
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
     signal renameRequested(int taskIdx, string newTitle)
@@ -94,8 +97,6 @@ Item {
         return map;
     }
 
-    property string icon: ""
-    readonly property int streak: root.taskData?.streak ?? 0
 
     // ── Main Card ──────────────────────────────────────────────
     StyledRect {
@@ -142,18 +143,18 @@ Item {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
 
-                // ── Expander (only when has subtasks) ──────────
+                // ── Expander / Collapser ─────────────────────────
                 MaterialIcon {
                     text: root.expanded ? "expand_more" : "chevron_right"
                     fontStyle: Tokens.font.icon.medium
                     color: root.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                    opacity: root.expanded ? 1.0 : 0.6
+                    opacity: root.expanded ? 1 : 0.6
                     Behavior on opacity { CAnim {} }
                     Behavior on color { CAnim {} }
 
                     MouseArea {
                         anchors.fill: parent
-                        anchors.margins: -6
+                        anchors.margins: -4
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             root.expanded = !root.expanded
@@ -202,6 +203,8 @@ Item {
                             if (root.taskPartial) return Colours.palette.m3secondary
                             return Colours.palette.m3outline
                         }
+                        opacity: root.isDone ? 0.5 : 1
+                        
                         Behavior on color { CAnim {} }
 
                         MouseArea {
@@ -223,25 +226,23 @@ Item {
                 StyledText {
                     visible: !root.isEditing
                     Layout.fillWidth: true
+
                     text: root.taskTitle
                     font: Tokens.font.body.large
                     elide: Text.ElideRight
 
-                    // ── FIXED: proper done/undone colors ──
-                    color: root.taskDone ? Colours.palette.m3primary
-                                         : Colours.palette.m3onSurface
-                    opacity: root.taskDone ? 0.6 : 1.0
+                    color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    opacity: root.isDone ? 0.6 : 1
                     Behavior on color { CAnim {} }
-                    Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
-                    // ── Strikethrough (only when done) ──
+                    // ── Strikethrough WHEN DONE ──
                     StyledRect {
                         anchors.verticalCenter: parent.verticalCenter
                         width: root.taskDone ? Math.min(parent.contentWidth, parent.width) : 0
                         height: 2
                         radius: Tokens.rounding.full
-                        color: Colours.palette.m3primary
-                        opacity: root.taskDone ? 0.5 : 0
+                        color:  Colours.palette.m3outline
+                        opacity: root.taskDone ? 0.6 : 0
                         Behavior on width { Anim { type: Anim.FastSpatial } }
                         Behavior on opacity { CAnim {} }
                     }
@@ -254,56 +255,63 @@ Item {
                 }
 
                 // ── Edit Field ──────────────────────────────────
-               StyledTextField {
-    visible: root.isEditing
-    Layout.fillWidth: true
-    text: root.taskTitle
-    font: Tokens.font.body.large
-    property bool commitInProgress: false
+                StyledTextField {
+                    visible: root.isEditing
+                    Layout.fillWidth: true
+                    text: root.taskTitle
+                    font: Tokens.font.body.large
+                    property bool commitInProgress: false
 
-    background: Rectangle {
-        color: "transparent"
-        border.width: 0
-    }
+                    background: Rectangle {
+                        color: "transparent"
+                        border.width: 0
+                    }
 
-    leftPadding: 0
-    rightPadding: 0
-    topPadding: 0
-    bottomPadding: 0
-    verticalAlignment: Text.AlignVCenter
+                    leftPadding: 0
+                    rightPadding: 0
+                    topPadding: 0
+                    bottomPadding: 0
+                    verticalAlignment: Text.AlignVCenter
 
-    function commit() {
-        if (commitInProgress || !root.isEditing)
-            return
-        commitInProgress = true
-        focus = false   // ← release focus BEFORE emitting
-        if (text.trim())
-            root.renameRequested(root.taskIndex, text)
-        else {
-            text = root.taskTitle
-            root.editingCancelled()
-        }
-    }
+                    function commit() {
+                        if (commitInProgress || !root.isEditing)
+                            return
+                        commitInProgress = true
+                        focus = false   // ← release focus BEFORE emitting
+                        if (text.trim())
+                            root.renameRequested(root.taskIndex, text)
+                        else {
+                            text = root.taskTitle
+                            root.editingCancelled()
+                        }
+                    }
 
-    onVisibleChanged: {
-        if (visible) {
-            commitInProgress = false
-            forceActiveFocus()
-            selectAll()
-        }
-    }
-    onAccepted: commit()
-    Keys.onEscapePressed: {
-        commitInProgress = true
-        focus = false
-        root.editingCancelled()
-        text = root.taskTitle
-    }
-    onFocusChanged: {
-        if (!focus && root.isEditing && !commitInProgress)
-            commit()
-    }
-}
+                    onVisibleChanged: {
+                        if (visible) {
+                            commitInProgress = false
+                            forceActiveFocus()
+                            selectAll()
+                        }
+                    }
+
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            commit()
+                            event.accepted = true
+                        }
+                    }
+
+                    Keys.onEscapePressed: {
+                        commitInProgress = true
+                        focus = false
+                        root.editingCancelled()
+                        text = root.taskTitle
+                    }
+                    onFocusChanged: {
+                        if (!focus && root.isEditing && !commitInProgress)
+                            commit()
+                    }
+                }
 
                 // ── Spacer ──────────────────────────────────────
                 Item { Layout.fillWidth: true }
@@ -319,7 +327,7 @@ Item {
                         text: `${root.dSub}/${root.nSub}`
                         font: Tokens.font.body.small
                         color: root.taskDone ? Colours.palette.m3primary
-                                             : Colours.palette.m3onSurfaceVariant
+                                                : Colours.palette.m3onSurfaceVariant
                         opacity: 0.7
                         Behavior on color { CAnim {} }
                     }
@@ -335,44 +343,68 @@ Item {
                             height: parent.height
                             radius: parent.radius
                             color: root.taskDone ? Colours.palette.m3tertiary
-                                                 : Colours.palette.m3primary
+                                                    : Colours.palette.m3primary
                             Behavior on width { Anim {} }
                             Behavior on color { CAnim {} }
                         }
                     }
                 }
 
-                // ── Streak (habits only) ────────────────────────
+               // ── Streak (habits only) ────────────────────────
                 RowLayout {
                     id: streakBadge
-                    visible: root.streak > 0 && !root.isEditing
+                    visible: (root.streak > 0 || root.bestStreak > 0) && !root.isEditing
                     Layout.leftMargin: Tokens.spacing.small
                     Layout.alignment: Qt.AlignVCenter
+                    spacing: 4
 
-                    MaterialIcon {
-                        text: "local_fire_department"
-                        fill: 1
-                        fontStyle: Tokens.font.icon.small
-                        color: {
-                            if (root.streak >= 20) return '#fe1d1d'
-                            if (root.streak >= 10) return "#FF8C00"
-                            if (root.streak >= 3)  return "#FFA500"
-                            if (root.streak >= 1)  return Colours.palette.m3primary
-                            return Colours.palette.m3outlineVariant
+                    // Current Streak Indicator
+                    RowLayout {
+                        spacing: 2
+                        MaterialIcon {
+                            text: "local_fire_department"
+                            fill: 1
+                            fontStyle: Tokens.font.icon.small
+                            color: {
+                                if (root.streak >= 20) return '#fe1d1d'
+                                if (root.streak >= 10) return "#FF8C00"
+                                if (root.streak >= 3)  return "#FFA500"
+                                if (root.streak >= 1)  return Colours.palette.m3primary
+                                return Colours.palette.m3outlineVariant
+                            }
+                            Behavior on color { CAnim { duration: 300 } }
                         }
-                        Behavior on color { CAnim { duration: 300 } }
+                        StyledText {
+                            text: String(root.streak)
+                            font: Tokens.font.label.medium
+                            color: {
+                                if (root.streak >= 20) return '#fe1d1d'
+                                if (root.streak >= 10) return "#FF8C00"
+                                if (root.streak >= 3)  return "#FFA500"
+                                if (root.streak >= 1)  return Colours.palette.m3primary
+                                return Colours.palette.m3outlineVariant
+                            }
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
                     }
-                    StyledText {
-                        text: String(root.streak)
-                        font: Tokens.font.label.medium
-                        color: {
-                            if (root.streak >= 20) return '#fe1d1d'
-                            if (root.streak >= 10) return "#FF8C00"
-                            if (root.streak >= 3)  return "#FFA500"
-                            if (root.streak >= 1)  return Colours.palette.m3primary
-                            return Colours.palette.m3outlineVariant
+
+                    // Best Streak Target Badge (shows when bestStreak exceeds current streak)
+                    RowLayout {
+                        visible: root.bestStreak > root.streak
+                        spacing: 1
+                        opacity: 0.65
+
+                        MaterialIcon {
+                            text: "emoji_events" // Trophy icon for best record target
+                            fontStyle: Tokens.font.icon.small
+                            color: Colours.palette.m3onSurfaceVariant
                         }
-                        Behavior on color { CAnim { duration: 300 } }
+
+                        StyledText {
+                            text: String(root.bestStreak)
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
                     }
                 }
 
@@ -380,7 +412,7 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
+                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3// Trophy icon for best record target
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     IconButton {
@@ -467,8 +499,8 @@ Item {
                         }
                     }
                 }
-            }
-
+            }       
+            
             // ── Subtasks ────────────────────────────────────────
             ColumnLayout {
                 visible: root.expanded
@@ -581,5 +613,6 @@ Item {
                 }
             }
         }
+        
     }
 }
