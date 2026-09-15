@@ -9,7 +9,7 @@ data model used: for both tasks and habits // to keep for reference
 {
     todoId: string,
     title: string,
-    done: bool,                   // avoid type initiliazed to true 
+    done: bool,           // avoid type initialized to true 
     icon: string | null,         // optional
     "type": "avoid",            //string : "build" | "avoid"
 
@@ -33,11 +33,12 @@ data model used: for both tasks and habits // to keep for reference
 }
 
 */ 
-QtObject {
-    id: dataManager
+    // ── Data Layer ──
+    QtObject {
+        id: dataManager
 
-    property var tasks: []
-    property var history: ({})
+        property var tasks: []
+        property var history: ({})
 
     // When true, maintains streak/bestStreak and applies the 2am habit reset.
     // and applyHabitDayRollover() unchecks leftover dones after the 2am cut.
@@ -59,21 +60,12 @@ QtObject {
     signal habitDayRolledOver()
     signal habitHistoryChanged()
 
+    // ── Task Cloning ──
     function copyTask(task, changes) {
-        var newTask = {};
-        for (var key in task) {
-            if (task.hasOwnProperty(key)) {
-                newTask[key] = task[key];
-            }
-        }
-        for (var changeKey in changes) {
-            if (changes.hasOwnProperty(changeKey)) {
-                newTask[changeKey] = changes[changeKey];
-            }
-        }
-        return newTask;
+        return Object.assign({}, task, changes);
     }
 
+    // ── Task Updates ──
     function updateTask(index, newTask) {
         var newTasks = [];
         for (var i = 0; i < tasks.length; i++) {
@@ -82,6 +74,7 @@ QtObject {
         tasks = newTasks;
     }
 
+    // ── Subtask Updates ──
     function updateSubtask(taskIndex, subtaskIndex, newSubtask) {
         var task = tasks[taskIndex];
         if (!task) return;
@@ -245,6 +238,7 @@ QtObject {
     }
 
     function ensureSubtaskFields(subtask) {
+        if (!subtask) return false;
         var mutated = false;
         if (typeof subtask.streak !== "number" || subtask.streak < 0) {
             subtask.streak = 0;
@@ -299,74 +293,73 @@ QtObject {
         return mutated;
     }
 
-    // Uncheck leftovers from a previous habit-day, recompute streaks.
-    // Returns true if anything changed (caller should persist).
+    // ── Habit Day Rollover ──
     function applyHabitDayRollover() {
-    if (!habitMode)
-        return false;
+        if (!habitMode)
+            return false;
 
-    var today = habitDate();
-    var yesterday = addDays(today, -1);
-    var dayChanged = currentHabitDay !== today;
-    var newTasks = [];
-    var changed = false;
+        var today = habitDate();
+        var yesterday = addDays(today, -1);
+        var dayChanged = currentHabitDay !== today;
+        var newTasks = [];
+        var changed = false;
 
-    for (var i = 0; i < tasks.length; i++) {
-        var t = tasks[i];
-        if (ensureHabitFields(t))
-            changed = true;
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
+            if (ensureHabitFields(t))
+                changed = true;
 
-        var completedToday = dayCompleted(datesFor(t), today);
-        var newDone = t.done;
-        var newSubtasks = t.subtasks;
+            var completedToday = dayCompleted(datesFor(t), today);
+            var newDone = t.done;
+            var newSubtasks = t.subtasks;
 
-        // ── Handle day rollover ──────────────────────────────
-        if (dayChanged) {
-            // For AVOID: if yesterday was still "safe" (done), mark it as completed
-            if (t.type === "avoid") {
-                // A recorded relapse must remain visible for the current day.
-                newDone = !completedToday;
-            } else {
-                // BUILD: if yesterday not completed, reset done
-                if (!completedToday) {
-                    newDone = false;
-                    newSubtasks = [];
-                    for (var j = 0; j < (t.subtasks || []).length; j++) {
-                        var s = t.subtasks[j];
-                        newSubtasks.push({
-                            id: s.id,
-                            title: s.title,
-                            done: false,
-                            minutes: s.minutes || 0,
-                            streak: s.streak || 0,
-                            bestStreak: s.bestStreak || 0
-                        });
+            // ── Handle day rollover ──────────────────────
+            if (dayChanged) {
+                // For AVOID: if yesterday was still "safe" (done), mark it as completed
+                if (t.type === "avoid") {
+                    // A recorded relapse must remain visible for the current day.
+                    newDone = !completedToday;
+                } else {
+                    // BUILD: if yesterday not completed, reset done
+                    if (!completedToday) {
+                        newDone = false;
+                        newSubtasks = [];
+                        for (var j = 0; j < (t.subtasks || []).length; j++) {
+                            var s = t.subtasks[j];
+                            newSubtasks.push({
+                                id: s.id,
+                                title: s.title,
+                                done: false,
+                                minutes: s.minutes || 0,
+                                streak: s.streak || 0,
+                                bestStreak: s.bestStreak || 0
+                            });
+                        }
+                        changed = true;
                     }
-                    changed = true;
                 }
             }
+
+            var newTask = copyTask(t, { done: newDone, subtasks: newSubtasks });
+            var oldStreak = t.streak || 0;
+            var oldBest = t.bestStreak || 0;
+            updateStreaks(newTask);
+            if (newTask.streak !== oldStreak ||
+                newTask.bestStreak !== oldBest ||
+                newTask.lastCompletedDate !== t.lastCompletedDate ||
+                newDone !== t.done) {
+                changed = true;
+            }
+            newTasks.push(newTask);
         }
 
-        var newTask = copyTask(t, { done: newDone, subtasks: newSubtasks });
-        var oldStreak = t.streak || 0;
-        var oldBest = t.bestStreak || 0;
-        updateStreaks(newTask);
-        if (newTask.streak !== oldStreak ||
-            newTask.bestStreak !== oldBest ||
-            newTask.lastCompletedDate !== t.lastCompletedDate ||
-            newDone !== t.done) {
-            changed = true;
+        currentHabitDay = today;
+        if (changed) {
+            tasks = newTasks;
+            habitDayRolledOver();
         }
-        newTasks.push(newTask);
+        return changed;
     }
-
-    currentHabitDay = today;
-    if (changed) {
-        tasks = newTasks;
-        habitDayRolledOver();
-    }
-    return changed;
-}
 
     // ── Task CRUD ──
     function addTask(title, icon, type) {
@@ -392,10 +385,8 @@ QtObject {
             newTask.lastCompletedDate = isAvoid ? habitDate() : null;
         }
 
-        var newTasks = [newTask];
-        for (var i = 0; i < tasks.length; i++) {
-            newTasks[i + 1] = tasks[i];
-        }
+        var newTasks = tasks.slice();
+        newTasks.unshift(newTask);
         tasks = newTasks;
         taskAdded(newTask.todoId, newTask);
     }

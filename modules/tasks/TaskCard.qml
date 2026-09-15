@@ -272,7 +272,7 @@ Item {
                     bottomPadding: 0
                     verticalAlignment: Text.AlignVCenter
 
-                    function commit() {
+                    function commitEdit() {
                         if (commitInProgress || !root.isEditing)
                             return
                         commitInProgress = true
@@ -295,7 +295,7 @@ Item {
 
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                            commit()
+                            commitEdit()
                             event.accepted = true
                         }
                     }
@@ -308,7 +308,7 @@ Item {
                     }
                     onFocusChanged: {
                         if (!focus && root.isEditing && !commitInProgress)
-                            commit()
+                            commitEdit()
                     }
                 }
 
@@ -411,7 +411,8 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3// Trophy icon for best record target
+                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
+                    // Trophy icon for best record target
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     IconButton {
@@ -511,11 +512,11 @@ Item {
                     id: subRepeater
                     model: root.subOrder
                     delegate: SubtaskCard {
-                        required property string modelData
+                        required property string id
                         required property int index
 
-                        readonly property var sub: root.subtaskMap[modelData] ?? {
-                            id: modelData, title: "", done: false
+                        readonly property var sub: root.subtaskMap[id] ?? {
+                            id: id, title: "", done: false
                         }
                         readonly property int subIdx: index
 
@@ -523,9 +524,9 @@ Item {
                         taskIndex: root.taskIndex
                         subtaskData: sub
                         subtaskIndex: subIdx
-                        subtaskId: modelData
+                        subtaskId: id
 
-                        isEditing: root.editingSubId === `${root.taskData.todoId}__${modelData}`
+                        isEditing: root.editingSubId === `${root.taskData.todoId}__${id}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
 
                         isFirst: index === 0

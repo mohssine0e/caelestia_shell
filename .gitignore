@@ -6,3 +6,5 @@ build/
 logs
 
 docs/*
+fresh_build.sh
+.kilo

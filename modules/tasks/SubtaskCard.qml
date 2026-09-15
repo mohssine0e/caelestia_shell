@@ -183,7 +183,7 @@ Item {
             bottomPadding: 0
             verticalAlignment: Text.AlignVCenter
 
-            function commit() {
+            function commitEdit() {
                 if (commitInProgress || !root.isEditing)
                     return
                 commitInProgress = true
@@ -203,7 +203,7 @@ Item {
                     selectAll()
                 }
             }
-            onAccepted: commit()
+            onAccepted: commitEdit()
             Keys.onEscapePressed: {
                 commitInProgress = true
                 focus = false
@@ -212,7 +212,7 @@ Item {
             }
             onFocusChanged: {
                 if (!focus && root.isEditing && !commitInProgress)
-                    commit()
+                    commitEdit()
             }
         }
 

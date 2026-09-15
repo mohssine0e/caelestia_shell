@@ -33,7 +33,7 @@ Item {
             color: "transparent"
             radius: Tokens.rounding.small
             border.width: 1
-            border.color: root.Colours.palette.m3secondary
+            border.color: Colours.palette.m3secondary
         }
 
         Repeater {

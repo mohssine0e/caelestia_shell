@@ -22,8 +22,8 @@ FocusScope {
     property string statusFilter: "all"
     property string searchQuery: ""
 
-    readonly property string dataPath: `/home/mohssine/${list.dataType}.json`
-    readonly property string historyPath: "/home/mohssine/habits_history.json"
+    readonly property string dataPath: Paths.home + "/" + list.dataType + ".json"
+    readonly property string historyPath: Paths.home + "/habits_history.json"
     
     readonly property string emptyStateText: list.dataType === "habits" ? qsTr("No habits yet") : qsTr("No tasks yet")
     
@@ -39,7 +39,7 @@ FocusScope {
     property var taskMap: ({})
     property var taskIndexMap: ({})
 
-    // ── DataManager ──
+    // ── Data Layer (DataManager bridge) ──
     DataManager {
         id: dataManager
         tasks: list.tasks
@@ -49,7 +49,7 @@ FocusScope {
             filteredModel.insert(0, { todoId: taskId });
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onTaskDeleted: (taskId) => {
@@ -64,13 +64,11 @@ FocusScope {
             }
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onTaskToggled: (taskId, newState) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
@@ -78,19 +76,19 @@ FocusScope {
             list.updateMaps();
             list.editingTaskId = "";
             list.restoreKeyboardFocus();
-            list.requestSave();
+            list.refresh();
         }
 
         onSubtaskAdded: (taskId, subtaskId) => {
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onSubtaskToggled: (taskId, subtaskId, newState) => {
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onSubtaskRenamed: (taskId, subtaskId, oldTitle, newTitle) => {
@@ -98,24 +96,24 @@ FocusScope {
             list.updateMaps();
             list.editingSubId = "";
             list.restoreKeyboardFocus();
-            list.requestSave();
+            list.refresh();
         }
 
         onSubtaskDeleted: (taskId, subtaskId) => {
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onHabitDayRolledOver: () => {
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.requestSave();
+            list.refresh();
         }
 
         onHabitHistoryChanged: {
             if (list.loaded)
-                list.requestSave();
+                list.refresh();
         }
     }
 
@@ -143,6 +141,7 @@ FocusScope {
         id: filteredModel
     }
 
+    // ── Controller (filtering, selection, navigation) ──
     function updateMaps() {
         taskMap = dataManager.getTaskMap();
         taskIndexMap = dataManager.getTaskIndexMap();
@@ -170,23 +169,30 @@ FocusScope {
         }
     }
 
+    function refresh() {
+        list.tasks = dataManager.tasks;
+        list.updateMaps();
+        list.updateFilteredModel();
+        list.requestSave();
+    }
+
     onTasksChanged: {
         if (dataManager.tasks !== list.tasks)
             dataManager.tasks = list.tasks;
-        updateMaps();
-        updateFilteredModel();
+        list.updateMaps();
+        list.updateFilteredModel();
     }
 
     onLoadedChanged: {
         if (loaded) {
             dataManager.tasks = list.tasks;
-            updateMaps();
-            updateFilteredModel();
+            list.updateMaps();
+            list.updateFilteredModel();
         }
     }
 
     onStatusFilterChanged: {
-        updateFilteredModel();
+        list.updateFilteredModel();
         list.selectedIndex = filteredModel.count > 0 ? 0 : -1;
         list.selectedSubtaskIndex = -1;
     }
@@ -395,6 +401,7 @@ FocusScope {
         event.accepted = true;
     }
 
+    // ── Persistence (load/save) ──
     FileView {
         id: storage
         path: list.dataPath
@@ -462,6 +469,7 @@ FocusScope {
         saveTimer.restart();
     }
 
+    // ── View (repeater, delegates, empty state) ──
     readonly property int activeCount: {
         var count = 0;
         for (var i = 0; i < list.tasks.length; i++) {
@@ -612,7 +620,7 @@ FocusScope {
                         var order = [];
                         var subs = (task && task.subtasks) ? task.subtasks : [];
                         for (var i = 0; i < subs.length; i++) {
-                            order.push(subs[i].id);
+                            order.push({ id: subs[i].id });
                         }
                         return order;
                     }
