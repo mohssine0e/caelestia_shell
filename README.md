@@ -228,7 +228,7 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
 >
 > - `appearance`: `anim.*`, `transparency.*`
 > - `bar.tray`: `hiddenIcons`, `iconSubs`
-> - `bar.workspaces`: `ignoredTags`, `windowIcons`
+> - `bar.workspaces`: `ignoredTags`, `specialWorkspaceIcons`, `windowIcons`, `workspaceIcons`
 > - `dashboard`: `mediaUpdateInterval`, `resourceUpdateInterval`
 > - `general`: `apps.*`, `battery.*`, `idle.*`, `logo`
 > - `launcher`: `actionPrefix`, `actions`, `enableDangerousActions`, `favouriteApps`, `hiddenApps`, `specialPrefix`, `useFuzzy.*`, `vimKeybinds`
@@ -236,9 +236,8 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
 > - `nexus`: `networkRescanInterval`
 > - `notifs`: `actionOnClick`, `defaultExpireTimeout`, `expire`, `fullscreen`, `fullscreenExpireTimeout`
 > - `paths`: `lyricsDir`, `wallpaperDir`
-> - `services`: `audioIncrement`, `brightnessIncrement`, `dataUnits`, `defaultPlayer`, `gpuType`, `lyricsBackend`, `maxVolume`, `playerAliases`, `sensorUnits`, `smartScheme`, `useTwelveHourClock`, `visualiserBars`, `weatherLocation`, `weatherUnits`
-> - `utilities.toasts`: all except `fullscreen`
-> - `utilities.vpn`: `enabled`, `provider`, `selectedProvider`
+> - `services`: `audioIncrement`, `brightnessIncrement`, `clockFormat`, `dataUnits`, `defaultPlayer`, `gpuType`, `lyricsBackend`, `maxVolume`, `playerAliases`, `sensorUnits`, `smartScheme`, `visualiserBars`, `weatherLocation`, `weatherUnits`
+> - `utilities`: `toasts.*`, `vpn.*`
 >
 > </details>
 
@@ -741,10 +740,10 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
     },
     "services": {
         "weatherLocation": "",
-        "weatherUnits": "Celsius",
+        "weatherUnits": "Auto",
         "sensorUnits": "Celsius",
         "dataUnits": "Binary",
-        "useTwelveHourClock": false,
+        "clockFormat": "Auto",
         "gpuType": "Auto",
         "visualiserBars": 60,
         "audioIncrement": 0.1,

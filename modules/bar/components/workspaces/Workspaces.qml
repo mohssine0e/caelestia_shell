@@ -23,12 +23,13 @@ StyledClippingRect {
     readonly property int shown: Math.max(1, Config.bar.workspaces.shown)
 
     readonly property var wsIds: {
-        if (root.Config.bar.workspaces.showUnoccupied)
+        if (Config.bar.workspaces.showUnoccupied)
             return Array.from({
                 length: shown
             }, (_, i) => i + 1);
 
-        const workspaces = Hypr.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor && (w.id === activeWsId || w.toplevels.values.some(t => !Hypr.isToplevelIgnored(t))));
+        const ignoredTags = GlobalConfig.bar.workspaces.ignoredTags;
+        const workspaces = Hypr.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor && (w.id === activeWsId || w.toplevels.values.some(t => !Hypr.isToplevelIgnored(t, ignoredTags))));
         const currentIdx = workspaces.findIndex(w => w.id === activeWsId);
         if (currentIdx < 0)
             return [];
@@ -124,7 +125,7 @@ StyledClippingRect {
 
                 displayType: Config.bar.workspaces.displayType
                 showWindows: Config.bar.workspaces.showWindows
-                iconRules: Config.bar.workspaces.workspaceIcons
+                iconRules: GlobalConfig.bar.workspaces.workspaceIcons
                 activeLabel: Config.bar.workspaces.activeLabel
                 occupiedLabel: Config.bar.workspaces.occupiedLabel
                 label: Config.bar.workspaces.label
