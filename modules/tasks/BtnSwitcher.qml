@@ -47,7 +47,7 @@ Item {
                 type: ButtonBase.Tonal
 
                 activeColour: Colours.palette.m3primary
-                
+
                 inactiveColour: "transparent"
                 inactiveOnColour: Colours.palette.m3onSurfaceVariant
 

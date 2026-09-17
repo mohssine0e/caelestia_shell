@@ -2,6 +2,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import "TitleParse.js" as TitleParse
 
 
 /*
@@ -13,7 +14,7 @@ data model used: for both tasks and habits // to keep for reference
     icon: string | null,         // optional
     "type": "avoid",            //string : "build" | "avoid"
 
-    minutes: int,
+    minutes: int,              // estimated time in minutes, 0 = unset
     priority: int,             1,2,3
 
     streak: int,
@@ -38,7 +39,6 @@ data model used: for both tasks and habits // to keep for reference
         id: dataManager
 
         property var tasks: []
-        property var history: ({})
 
     // When true, maintains streak/bestStreak and applies the 2am habit reset.
     // and applyHabitDayRollover() unchecks leftover dones after the 2am cut.
@@ -58,7 +58,6 @@ data model used: for both tasks and habits // to keep for reference
     signal subtaskDeleted(string taskId, string subtaskId)
 
     signal habitDayRolledOver()
-    signal habitHistoryChanged()
 
     // ── Task Cloning ──
     function copyTask(task, changes) {
@@ -109,6 +108,12 @@ data model used: for both tasks and habits // to keep for reference
         return n < 10 ? "0" + n : "" + n;
     }
 
+    // Delegates to the shared TitleParse helper so every component
+    // (cards, capture fields) agrees on how "@minutes" is parsed.
+    function parseCapturePrefix(text) {
+        return TitleParse.parseCapturePrefix(text);
+    }
+
     function formatDay(d) {
         return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
     }
@@ -154,44 +159,8 @@ data model used: for both tasks and habits // to keep for reference
         return latest;
     }
 
-    function copyDates(src) {
-        return Array.isArray(src) ? src.slice() : [];
-    }
-
     function datesFor(task) {
-        return task && task.todoId ? copyDates(history[task.todoId]) : [];
-    }
-
-    function setDates(task, dates) {
-        if (!task || !task.todoId)
-            return;
-        var nextHistory = {};
-        for (var key in history) {
-            if (history.hasOwnProperty(key))
-                nextHistory[key] = copyDates(history[key]);
-        }
-        nextHistory[task.todoId] = copyDates(dates);
-        history = nextHistory;
-        habitHistoryChanged();
-    }
-
-    function importLegacyCompletions(task) {
-        if (!task || !task.completions || typeof task.completions !== "object")
-            return false;
-
-        var dates = datesFor(task);
-        for (var date in task.completions) {
-            var value = task.completions[date];
-            var completed = value === true || value === 1
-                || (typeof value === "number" && value > 0)
-                || (typeof value === "string" && value.length > 0)
-                || (value && value.length > 0);
-            if (task.completions.hasOwnProperty(date) && completed && dates.indexOf(date) === -1)
-                dates.push(date);
-        }
-        setDates(task, dates);
-        delete task.completions;
-        return true;
+        return task && task.completionDates ? task.completionDates.slice() : [];
     }
 
     function computeStreak(task, today) {
@@ -254,11 +223,11 @@ data model used: for both tasks and habits // to keep for reference
     function updateSubtaskStreak(subtask, isDone) {
         ensureSubtaskFields(subtask);
     }
-
     function applyHabitCompletion(task, isDone) {
         var today = habitDate();
-        var completions = datesFor(task);
+        var completions = task.completionDates ? task.completionDates.slice() : [];
         var idx = completions.indexOf(today);
+
 
 
         // For BUILD: isDone=true → add today, isDone=false → remove today
@@ -270,7 +239,7 @@ data model used: for both tasks and habits // to keep for reference
         else if (!shouldBeInHistory && idx !== -1)
             completions.splice(idx, 1);
 
-        setDates(task, completions);
+        task.completionDates = completions;
         updateStreaks(task);
     }
 
@@ -282,6 +251,10 @@ data model used: for both tasks and habits // to keep for reference
         }
         if (typeof t.bestStreak !== "number" || t.bestStreak < 0) {
             t.bestStreak = 0;
+            mutated = true;
+        }
+        if (!Array.isArray(t.completionDates)) {
+            t.completionDates = [];
             mutated = true;
         }
         if (t.lastCompletedDate === undefined) {
@@ -369,15 +342,21 @@ data model used: for both tasks and habits // to keep for reference
 
         var newTask = {
             todoId: Date.now() + "-" + Math.floor(Math.random() * 1e6),
-            title: title.trim(),
+            title: "",
             done: isAvoid ? true : false,
             type: habitType,
             minutes: 0,
             icon: icon || null,
             priority: null,
             createdAt: Date.now(),
-            subtasks: []
+            subtasks: [],
+            completionDates: []
         };
+
+        var parsed = parseCapturePrefix(title);
+        if (!parsed.title) return;   // "@15" alone is not a task title
+        newTask.title = parsed.title;
+        newTask.minutes = parsed.minutes;
 
         if (habitMode) {
             newTask.streak = isAvoid ? 1 : 0;
@@ -425,15 +404,28 @@ data model used: for both tasks and habits // to keep for reference
         var task = tasks[i];
         if (!task) return;
 
+        // The edit field shows "title @minutes" for tasks without subtasks;
+        // parse the suffix back out on submit so the estimate round-trips.
+        var parsed = parseCapturePrefix(newTitle);
+        if (!parsed.title) return;
+
+        var changes = {
+            title: parsed.title,
+            subtasks: task.subtasks ? task.subtasks.slice() : []
+        };
+
+        // Only round-trip minutes for subtask-less tasks: their edit field
+        // displays "@minutes". Parents show the subtask sum instead, so a
+        // rename must not overwrite their stored estimate.
+        if (!task.subtasks || task.subtasks.length === 0)
+            changes.minutes = parsed.minutes;
+
         var taskId = task.todoId;
         var oldTitle = task.title;
-        var newTask = copyTask(task, {
-            title: newTitle.trim(),
-            subtasks: task.subtasks ? task.subtasks.slice() : []
-        });
+        var newTask = copyTask(task, changes);
 
         updateTask(i, newTask);
-        taskRenamed(taskId, oldTitle, newTitle.trim());
+        taskRenamed(taskId, oldTitle, parsed.title);
     }
 
     function deleteTask(i) {
@@ -456,11 +448,13 @@ data model used: for both tasks and habits // to keep for reference
         if (!task) return;
         var taskId = task.todoId;
 
+        var parsed = parseCapturePrefix(title);
+        if (!parsed.title) return;   // "@10" alone is not a subtask title
         var newSubtask = {
             id: Date.now() + "-" + Math.floor(Math.random() * 1e6),
-            title: title.trim(),
+            title: parsed.title,
             done: false,
-            minutes: 0,
+            minutes: parsed.minutes,
             streak: 0,
             bestStreak: 0
         };
@@ -509,17 +503,20 @@ data model used: for both tasks and habits // to keep for reference
         if (!sub) return;
         var oldTitle = sub.title;
 
+        var parsed = parseCapturePrefix(title);
+        if (!parsed.title) return;
+
         var newSub = {
             id: sub.id,
-            title: title.trim(),
+            title: parsed.title,
             done: sub.done,
-            minutes: sub.minutes || 0,
+            minutes: parsed.minutes,
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0
         };
 
         updateSubtask(taskIndex, subtaskIndex, newSub);
-        subtaskRenamed(taskId, sub.id, oldTitle, title.trim());
+        subtaskRenamed(taskId, sub.id, oldTitle, parsed.title);
     }
 
     function deleteSubtask(taskIndex, subtaskIndex) {
@@ -558,15 +555,6 @@ function isDoneToday(task) {
 
     function getDoneCount() {
         return tasks.length - getActiveCount();
-    }
-
-    function getTotalActiveMinutes() {
-        var sum = 0;
-        for (var i = 0; i < tasks.length; i++) {
-            var t = tasks[i];
-            if (!t.done && t.minutes > 0) sum += t.minutes;
-        }
-        return sum;
     }
 
     function getTaskMap() {

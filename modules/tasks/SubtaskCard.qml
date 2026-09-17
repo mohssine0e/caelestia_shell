@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
 import qs.components
@@ -18,6 +19,7 @@ Item {
     required property string subtaskId
     required property bool isEditing
     property bool isSelected: false
+    property bool isHabitList: false
 
     // ── Tree line properties ────────────────────────────────────
     property bool isFirst: false
@@ -40,6 +42,9 @@ Item {
     readonly property string title: root.subtaskData?.title ?? ""
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
+
+    // Edit field shows "title @minutes" so the estimate round-trips on submit
+    readonly property string editPrefill: `${root.title} @${root.subtaskData?.minutes || 0}`
 
     implicitHeight: subRow.implicitHeight
     Layout.fillWidth: true
@@ -168,7 +173,7 @@ Item {
         StyledTextField {
             visible: root.isEditing
             Layout.fillWidth: true
-            text: root.title
+            text: root.editPrefill
             font: Tokens.font.body.medium
             property bool commitInProgress: false
 
@@ -188,10 +193,12 @@ Item {
                     return
                 commitInProgress = true
                 focus = false   // ← release focus BEFORE emitting
-                if (text.trim())
+                // An empty *title* cancels the edit: the "@minutes" tail
+                // must not count as one (e.g. text "@5" alone).
+                if (TitleParse.hasTitle(text))
                     root.renameRequested(root.taskIndex, root.subtaskIndex, text)
                 else {
-                    text = root.title
+                    text = root.editPrefill
                     root.editingCancelled()
                 }
             }
@@ -199,16 +206,31 @@ Item {
             onVisibleChanged: {
                 if (visible) {
                     commitInProgress = false
+                    text = root.editPrefill
                     forceActiveFocus()
-                    selectAll()
+                    // Pre-select only the title part so a quick retype
+                    // keeps the "@minutes" tail that gets parsed on submit.
+                    if (root.title.length > 0 && text.length > root.title.length)
+                        select(0, root.title.length)
+                    else
+                        selectAll()
                 }
             }
             onAccepted: commitEdit()
-            Keys.onEscapePressed: {
+            Keys.onPressed: event => {
+                // Consume Return/Enter so commit doesn't let the same key
+                // bubble up to TaskList and toggle the task.
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    commitEdit()
+                    event.accepted = true
+                }
+            }
+            Keys.onEscapePressed: event => {
                 commitInProgress = true
                 focus = false
                 root.editingCancelled()
-                text = root.title
+                text = root.editPrefill
+                event.accepted = true   // don't bubble Escape to the root
             }
             onFocusChanged: {
                 if (!focus && root.isEditing && !commitInProgress)
@@ -216,7 +238,30 @@ Item {
             }
         }
 
-        // ── Action Buttons ──────────────────────────────────────
+        // ── Estimated time chip ─────────────────────
+        // Right-aligned before the actions; hidden while editing
+        // (the estimate is inline in the edit field) and when unset.
+        RowLayout {
+            visible: !root.isHabitList && !root.isEditing && (root.subtaskData?.minutes || 0) > 0
+            Layout.alignment: Qt.AlignVCenter
+
+            StyledRect {
+                implicitHeight: 20
+                implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
+                radius: Tokens.rounding.full
+                color: Colours.palette.m3surfaceContainerHighest
+
+                StyledText {
+                    id: subMinutesLabel
+                    anchors.centerIn: parent
+                    text: `${root.subtaskData?.minutes || 0}m`
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3onSurfaceVariant
+                }
+            }
+        }
+
+        // ── Action Buttons ──────────────────────────
         RowLayout {
             visible: !root.isEditing
             spacing: 0

@@ -6,6 +6,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as QC
 import QtQuick.Layouts
+import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
 import qs.components
@@ -21,7 +22,7 @@ data model used: for both tasks and habits // to keep for reference
     icon: string | null, // optional
     "type": "avoid",    //string : "build" | "avoid"
 
-    minutes: int,
+    minutes: int,       // estimated time in minutes, 0 = unset
     priority: int,
 
     streak: int,
@@ -96,6 +97,27 @@ Item {
         }
         return map;
     }
+
+    // Displayed estimate: subtask sum for parents, own minutes for
+    // subtask-less tasks. The "@minutes" suffix itself only ever shows
+    // in the edit field (see editPrefill), never in the title row.
+    readonly property int taskDuration: {
+        if (root.nSub > 0) {
+            var sum = 0;
+            var subs = root.taskData?.subtasks || [];
+            for (var i = 0; i < subs.length; i++)
+                sum += (subs[i].minutes || 0);
+            return sum;
+        }
+        return root.taskData?.minutes || 0;
+    }
+
+    // Prefill for the title edit field. Subtask-less tasks carry their
+    // estimate inline as "@minutes" (even when it is 0); the submitted
+    // text is parsed back into title + minutes by DataManager.renameTask.
+    readonly property string editPrefill: root.nSub === 0 && !list.isHabitList
+        ? `${root.taskTitle} @${root.taskData?.minutes || 0}`
+        : root.taskTitle
 
 
     // ── Main Card ──────────────────────────────────────────────
@@ -257,7 +279,7 @@ Item {
                 StyledTextField {
                     visible: root.isEditing
                     Layout.fillWidth: true
-                    text: root.taskTitle
+                    text: root.editPrefill
                     font: Tokens.font.body.large
                     property bool commitInProgress: false
 
@@ -277,10 +299,12 @@ Item {
                             return
                         commitInProgress = true
                         focus = false   // ← release focus BEFORE emitting
-                        if (text.trim())
+                        // An empty *title* cancels the edit: the "@minutes" tail
+                        // must not count as one (e.g. text "@5" alone).
+                        if (TitleParse.hasTitle(text))
                             root.renameRequested(root.taskIndex, text)
                         else {
-                            text = root.taskTitle
+                            text = root.editPrefill
                             root.editingCancelled()
                         }
                     }
@@ -288,23 +312,32 @@ Item {
                     onVisibleChanged: {
                         if (visible) {
                             commitInProgress = false
+                            text = root.editPrefill
                             forceActiveFocus()
-                            selectAll()
+                            // Pre-select only the title part so a quick retype
+                            // keeps the "@minutes" tail that gets parsed on submit.
+                            if (root.nSub === 0 && !list.isHabitList && root.taskTitle.length > 0 && text.length > root.taskTitle.length)
+                                select(0, root.taskTitle.length)
+                            else
+                                selectAll()
                         }
                     }
 
                     Keys.onPressed: event => {
+                        // Consume Return/Enter so commit doesn't let the same
+                        // key bubble up to TaskList and toggle the task.
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             commitEdit()
                             event.accepted = true
                         }
                     }
 
-                    Keys.onEscapePressed: {
+                    Keys.onEscapePressed: event => {
                         commitInProgress = true
                         focus = false
                         root.editingCancelled()
-                        text = root.taskTitle
+                        text = root.editPrefill
+                        event.accepted = true   // don't bubble Escape to the root
                     }
                     onFocusChanged: {
                         if (!focus && root.isEditing && !commitInProgress)
@@ -314,6 +347,32 @@ Item {
 
                 // ── Spacer ──────────────────────────────────────
                 Item { Layout.fillWidth: true }
+
+                // ── Estimated time chip (tasks only) ────────────
+                // Right-aligned with the progress/streak cluster. Hidden
+                // for habits, while editing a subtask-less task (the
+                // estimate is inline in the edit field) and when unset.
+                RowLayout {
+                    visible: !list.isHabitList
+                        && root.taskDuration > 0
+                        && !(root.nSub === 0 && root.isEditing)
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledRect {
+                        implicitHeight: 20
+                        implicitWidth: minutesLabel.implicitWidth + Tokens.padding.small * 2
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHighest
+
+                        StyledText {
+                            id: minutesLabel
+                            anchors.centerIn: parent
+                            text: `${root.taskDuration}m`
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
+                    }
+                }
 
                 // ── Progress ────────────────────────────────────
                 RowLayout {
@@ -352,7 +411,7 @@ Item {
                // ── Streak (habits only) ────────────────────────
                 RowLayout {
                     id: streakBadge
-                    visible: (root.streak > 0 || root.bestStreak > 0) && !root.isEditing
+                    visible: root.showStreak && (root.streak > 0 || root.bestStreak > 0) && !root.isEditing
                     Layout.leftMargin: Tokens.spacing.small
                     Layout.alignment: Qt.AlignVCenter
                     spacing: 4
@@ -526,6 +585,7 @@ Item {
                         subtaskIndex: subIdx
                         subtaskId: id
 
+                        isHabitList: list.isHabitList
                         isEditing: root.editingSubId === `${root.taskData.todoId}__${id}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
 
@@ -598,7 +658,8 @@ Item {
 
                         Keys.onPressed: event => {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                if (text.trim()) {
+                                // Ignore pure "@minutes" input — it has no title.
+                                if (TitleParse.hasTitle(text)) {
                                     root.addSubtaskRequested(root.taskIndex, text)
                                     clear()
                                 }

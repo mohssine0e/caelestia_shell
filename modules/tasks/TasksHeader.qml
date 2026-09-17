@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
 import qs.components
@@ -95,8 +96,11 @@ Item {
                         : qsTr("Add a habit"))
                     : qsTr("Capture a task")
                 onAccepted: {
-                    root.captureAccepted(text)
-                    clear()
+                    // Ignore pure "@minutes" input — it has no title.
+                    if (TitleParse.hasTitle(text)) {
+                        root.captureAccepted(text)
+                        clear()
+                    }
                 }
                 Keys.onEscapePressed: {
                     clear()

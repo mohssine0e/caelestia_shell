@@ -23,7 +23,6 @@ FocusScope {
     property string searchQuery: ""
 
     readonly property string dataPath: Paths.home + "/" + list.dataType + ".json"
-    readonly property string historyPath: Paths.home + "/habits_history.json"
     
     readonly property string emptyStateText: list.dataType === "habits" ? qsTr("No habits yet") : qsTr("No tasks yet")
     
@@ -35,7 +34,6 @@ FocusScope {
     property var tasks: []
     property bool loaded: false
     property bool tasksLoaded: false
-    property bool historyLoaded: !list.isHabitList
     property var taskMap: ({})
     property var taskIndexMap: ({})
 
@@ -75,6 +73,8 @@ FocusScope {
             list.tasks = dataManager.tasks;
             list.updateMaps();
             list.editingTaskId = "";
+            list.renameJustCommitted = true;
+            renameCommitGuard.restart();
             list.restoreKeyboardFocus();
             list.refresh();
         }
@@ -95,6 +95,8 @@ FocusScope {
             list.tasks = dataManager.tasks;
             list.updateMaps();
             list.editingSubId = "";
+            list.renameJustCommitted = true;
+            renameCommitGuard.restart();
             list.restoreKeyboardFocus();
             list.refresh();
         }
@@ -109,11 +111,6 @@ FocusScope {
             list.tasks = dataManager.tasks;
             list.updateMaps();
             list.refresh();
-        }
-
-        onHabitHistoryChanged: {
-            if (list.loaded)
-                list.refresh();
         }
     }
 
@@ -148,9 +145,10 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        // Keep search filtering in each delegate's visible binding so typing
-        // does not rebuild the model on every character.
-        var filteredIds = dataManager.getFilteredTasks(statusFilter, "");
+        // Keep BOTH search and status filtering in each delegate's visible
+        // binding so switching filters (like typing) never rebuilds the
+        // model — the model only changes when the set of task ids does.
+        var filteredIds = dataManager.getFilteredTasks("", "");
 
         if (filteredModel.count === filteredIds.length) {
             var same = true;
@@ -169,10 +167,72 @@ FocusScope {
         }
     }
 
+    // Mirrors the delegates' visible binding (status filter + search).
+    function isTaskVisible(index) {
+        var entry = filteredModel.get(index);
+        var task = entry ? list.taskMap[entry.todoId] : null;
+        if (!task) return false;
+
+        if (list.statusFilter === "active" && task.done) return false;
+        if (list.statusFilter === "done" && !task.done) return false;
+
+        var q = list.searchQuery.trim().toLowerCase();
+        if (q) {
+            var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
+            var matchSub = false;
+            var subs = task.subtasks || [];
+            for (var j = 0; j < subs.length; j++) {
+                if (subs[j].title && subs[j].title.toLowerCase().indexOf(q) !== -1) {
+                    matchSub = true;
+                    break;
+                }
+            }
+            if (!matchTitle && !matchSub) return false;
+        }
+        return true;
+    }
+
+    // Nearest visible index searching from `from` in `dir` (+1 / -1) with
+    // wrap-around; -1 when nothing is visible.
+    function nextVisibleIndex(from, dir) {
+        var count = filteredModel.count;
+        for (var step = 1; step <= count; step++) {
+            var idx = ((from + dir * step) % count + count) % count;
+            if (list.isTaskVisible(idx)) return idx;
+        }
+        return -1;
+    }
+
+    function firstVisibleIndex() {
+        for (var i = 0; i < filteredModel.count; i++)
+            if (list.isTaskVisible(i)) return i;
+        return -1;
+    }
+
+    function lastVisibleIndex() {
+        for (var i = filteredModel.count - 1; i >= 0; i--)
+            if (list.isTaskVisible(i)) return i;
+        return -1;
+    }
+
+    // Keep the selection on a visible task after data changes (e.g. a task
+    // toggled away under the "active" filter).
+    function ensureSelectionVisible() {
+        if (filteredModel.count === 0) {
+            list.selectedIndex = -1;
+            return;
+        }
+        if (list.selectedIndex >= filteredModel.count)
+            list.selectedIndex = filteredModel.count - 1;
+        if (list.selectedIndex >= 0 && !list.isTaskVisible(list.selectedIndex))
+            list.selectedIndex = list.nextVisibleIndex(list.selectedIndex, 1);
+    }
+
     function refresh() {
         list.tasks = dataManager.tasks;
         list.updateMaps();
         list.updateFilteredModel();
+        list.ensureSelectionVisible();
         list.requestSave();
     }
 
@@ -192,13 +252,14 @@ FocusScope {
     }
 
     onStatusFilterChanged: {
-        list.updateFilteredModel();
-        list.selectedIndex = filteredModel.count > 0 ? 0 : -1;
+        // Instant: the delegates hide/show via their visible bindings,
+        // no model rebuild — just move the selection to a visible task.
         list.selectedSubtaskIndex = -1;
+        list.selectedIndex = list.firstVisibleIndex();
     }
 
     onSearchQueryChanged: {
-        list.selectedIndex = filteredModel.count > 0 ? 0 : -1;
+        list.selectedIndex = list.firstVisibleIndex();
         list.selectedSubtaskIndex = -1;
     }
 
@@ -235,6 +296,15 @@ FocusScope {
     property string editingSubId: ""
     property int selectedIndex: -1
     property int selectedSubtaskIndex: -1
+    // Set when a rename commit returns focus to the list: the Enter key
+    // that triggered the commit must not then toggle the task.
+    property bool renameJustCommitted: false
+
+    Timer {
+        id: renameCommitGuard
+        interval: 0
+        onTriggered: list.renameJustCommitted = false
+    }
     focus: true
 
     onSelectedIndexChanged: list.selectedSubtaskIndex = -1
@@ -296,15 +366,13 @@ FocusScope {
     }
 
     function finishLoad() {
-        if (!list.tasksLoaded || !list.historyLoaded)
+        if (!list.tasksLoaded)
             return;
 
         var migrated = false;
         for (var i = 0; i < list.tasks.length; i++) {
             var task = list.tasks[i];
             if (list.isHabitList) {
-                if (dataManager.importLegacyCompletions(task))
-                    migrated = true;
                 if (dataManager.ensureHabitFields(task))
                     migrated = true;
                 dataManager.updateStreaks(task);
@@ -316,6 +384,10 @@ FocusScope {
                     delete task.subtasks[j].completions;
                     migrated = true;
                 }
+            }
+            if (!task.completionDates) {
+                task.completionDates = [];
+                migrated = true;
             }
             dataManager.syncDone(task);
         }
@@ -350,8 +422,7 @@ FocusScope {
             }
             var count = filteredModel.count;
             if (count > 0) {
-                var cur = list.selectedIndex;
-                nextIndex = (cur < 0) ? 0 : (cur + 1) % count;
+                nextIndex = list.nextVisibleIndex(list.selectedIndex, 1);
             }
             list.selectedSubtaskIndex = -1;
         } else if (event.key === Qt.Key_Up) {
@@ -367,7 +438,7 @@ FocusScope {
             var count = filteredModel.count;
             if (count > 0) {
                 var cur = list.selectedIndex;
-                nextIndex = (cur <= 0) ? count - 1 : (cur - 1);
+                nextIndex = (cur < 0) ? list.lastVisibleIndex() : list.nextVisibleIndex(cur, -1);
             }
             list.selectedSubtaskIndex = -1;
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
@@ -377,7 +448,7 @@ FocusScope {
                 return;
             } else if (event.key === Qt.Key_Left) {
                 list.selectedSubtaskIndex = -1;
-            restoreKeyboardFocus()
+                restoreKeyboardFocus()
                 card.expanded = false;
             } else if (list.selectedSubtaskIndex < 0) {
                 card.expanded = true;
@@ -386,6 +457,13 @@ FocusScope {
             event.accepted = true;
             return;
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            // Swallow the Enter that triggered a rename commit so it
+            // doesn't also toggle the just-edited item.
+            if (list.renameJustCommitted) {
+                list.renameJustCommitted = false
+                event.accepted = true
+                return
+            }
             list.toggleSelected();
             event.accepted = true;
             return;
@@ -437,32 +515,8 @@ FocusScope {
         }
     }
 
-    FileView {
-        id: historyStorage
-        path: list.historyPath
-        onLoaded: {
-            try {
-                var raw = JSON.parse(text());
-                dataManager.history = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-            } catch (e) {
-                dataManager.history = {};
-            }
-            list.historyLoaded = true;
-            list.finishLoad();
-        }
-        onLoadFailed: function(err) {
-            dataManager.history = {};
-            list.historyLoaded = true;
-            if (err === FileViewError.FileNotFound)
-                Qt.callLater(function() { historyStorage.setText("{}"); });
-            list.finishLoad();
-        }
-    }
-
     function save() {
         storage.setText(JSON.stringify(list.tasks, null, 2));
-        if (list.isHabitList)
-            historyStorage.setText(JSON.stringify(dataManager.history, null, 2));
     }
 
     function requestSave() {
@@ -478,14 +532,6 @@ FocusScope {
         return count;
     }
     readonly property int doneCount: Math.max(0, list.tasks.length - activeCount)
-    readonly property int totalActiveMinutes: {
-        var sum = 0;
-        for (var i = 0; i < list.tasks.length; i++) {
-            var t = list.tasks[i];
-            if (!t.done && t.minutes > 0) sum += t.minutes;
-        }
-        return sum;
-    }
     readonly property string habitDay: dataManager.currentHabitDay
 
     StyledFlickable {
@@ -560,7 +606,6 @@ FocusScope {
                             title: "",
                             done: false,
                             priority: null,
-                            minutes: null,
                             subtasks: [],
                             streak: 0,
                             bestStreak: 0
