@@ -36,6 +36,77 @@ FocusScope {
     property bool tasksLoaded: false
     property var taskMap: ({})
     property var taskIndexMap: ({})
+    // P-A3 memoized derived per-task (progress, duration, subtask maps) — single cache per todoId,
+    // invalidated only when that task object identity changes (DataManager keeps refs for unchanged tasks)
+    property var _progressCache: ({})
+    property var _subtaskMapCache: ({})
+    property var _taskDurationCache: ({})
+    property var _subOrderCache: ({})
+
+    function getProgressData(todoId) {
+        var task = taskMap[todoId]
+        if (!task) return { total: 0, done: 0, ratio: 0 }
+        var cached = _progressCache[todoId]
+        if (cached && cached.task === task) return cached.value
+        var subs = task.subtasks || []
+        var total = subs.length
+        var res
+        if (total === 0) {
+            res = { total: 0, done: 0, ratio: task.done ? 1 : 0 }
+        } else {
+            var done = 0
+            for (var i = 0; i < subs.length; i++) if (subs[i].done) done++
+            res = { total: total, done: done, ratio: done / total }
+        }
+        // replace-on-write to keep binding cheap (only this key changes)
+        var next = Object.assign({}, _progressCache)
+        next[todoId] = { task: task, value: res }
+        _progressCache = next
+        return res
+    }
+    function getSubtaskMapCached(todoId) {
+        var task = taskMap[todoId]
+        if (!task) return {}
+        var cached = _subtaskMapCache[todoId]
+        if (cached && cached.task === task) return cached.value
+        var map = {}
+        var subs = task.subtasks || []
+        for (var i = 0; i < subs.length; i++) map[subs[i].id] = subs[i]
+        var next = Object.assign({}, _subtaskMapCache)
+        next[todoId] = { task: task, value: map }
+        _subtaskMapCache = next
+        return map
+    }
+    function getTaskDuration(todoId) {
+        var task = taskMap[todoId]
+        if (!task) return 0
+        var cached = _taskDurationCache[todoId]
+        if (cached && cached.task === task) return cached.value
+        var subs = task.subtasks || []
+        var val = 0
+        if (subs.length > 0) {
+            for (var i = 0; i < subs.length; i++) val += (subs[i].minutes || 0)
+        } else {
+            val = task.minutes || 0
+        }
+        var next = Object.assign({}, _taskDurationCache)
+        next[todoId] = { task: task, value: val }
+        _taskDurationCache = next
+        return val
+    }
+    function getSubOrder(todoId) {
+        var task = taskMap[todoId]
+        if (!task) return []
+        var cached = _subOrderCache[todoId]
+        if (cached && cached.task === task) return cached.value
+        var order = []
+        var subs = task.subtasks || []
+        for (var i = 0; i < subs.length; i++) order.push({ id: subs[i].id })
+        var next = Object.assign({}, _subOrderCache)
+        next[todoId] = { task: task, value: order }
+        _subOrderCache = next
+        return order
+    }
 
     // ── Data Layer (DataManager bridge) ──
     DataManager {
@@ -66,45 +137,47 @@ FocusScope {
         }
 
         onTaskToggled: (taskId, newState) => {
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
         }
 
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.editingTaskId = "";
-            list.renameJustCommitted = true;
-            renameCommitGuard.restart();
-            list.restoreKeyboardFocus();
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.editingTaskId = ""
+            list.renameJustCommitted = true
+            renameCommitGuard.restart()
+            list.restoreKeyboardFocus()
+            list.requestSave()
         }
 
         onSubtaskAdded: (taskId, subtaskId) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
         }
 
         onSubtaskToggled: (taskId, subtaskId, newState) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
         }
 
         onSubtaskRenamed: (taskId, subtaskId, oldTitle, newTitle) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.editingSubId = "";
-            list.renameJustCommitted = true;
-            renameCommitGuard.restart();
-            list.restoreKeyboardFocus();
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.editingSubId = ""
+            list.renameJustCommitted = true
+            renameCommitGuard.restart()
+            list.restoreKeyboardFocus()
+            list.requestSave()
         }
 
         onSubtaskDeleted: (taskId, subtaskId) => {
-            list.tasks = dataManager.tasks;
-            list.updateMaps();
-            list.refresh();
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
         }
 
         onHabitDayRolledOver: () => {
@@ -114,7 +187,7 @@ FocusScope {
         }
     }
 
-    // ── 2am habit-day rollover ──
+    // ── 2am habit-day rollover ── (P-C1: single-shot to next reset, lighter idle CPU)
     Timer {
         id: habitResetTimer
         running: list.isHabitList && list.loaded
@@ -122,16 +195,29 @@ FocusScope {
         interval: 60000
         triggeredOnStart: true
         onTriggered: {
-            dataManager.applyHabitDayRollover();
-            var ms = dataManager.msUntilNextReset();
-            interval = Math.max(1000, Math.min(ms + 250, 60000));
+            var changed = dataManager.applyHabitDayRollover()
+            var ms = dataManager.msUntilNextReset()
+            // Sleep until next 2am (not every 60s) — only wake once per day when idle
+            interval = Math.max(1000, ms + 250)
+            // If nothing changed and not habits, we could stop, but keep running for day change
+            if (!changed && !list.isHabitList) interval = 60000
         }
     }
 
     Timer {
         id: saveTimer
-        interval: 100
+        interval: 400 // coalesced: rapid toggles (5 subs) → 1 stringify, lighter CPU (P-A4)
         onTriggered: list.save()
+    }
+
+    // Debounce search so typing "lab" doesn't do 3× O(n*m) scans in quick succession (P-A5)
+    Timer {
+        id: searchDebounce
+        interval: 80
+        onTriggered: {
+            list.selectedIndex = list.firstVisibleIndex()
+            list.selectedSubtaskIndex = -1
+        }
     }
 
     ListModel {
@@ -142,6 +228,42 @@ FocusScope {
     function updateMaps() {
         taskMap = dataManager.getTaskMap();
         taskIndexMap = dataManager.getTaskIndexMap();
+    }
+    // P-A2 incremental: update only one taskId (lighter than full O(n) rebuild) — keeps taskIndexMap as is when index unchanged
+    function updateMapsForTask(taskId) {
+        var fresh = dataManager.getTaskMap()[taskId]
+        if (fresh) {
+            var nextMap = Object.assign({}, taskMap)
+            nextMap[taskId] = fresh
+            taskMap = nextMap
+            // invalidate per-task caches for this id only
+            if (_progressCache[taskId]) { var n = Object.assign({}, _progressCache); delete n[taskId]; _progressCache = n }
+            if (_subtaskMapCache[taskId]) { var n2 = Object.assign({}, _subtaskMapCache); delete n2[taskId]; _subtaskMapCache = n2 }
+            if (_taskDurationCache[taskId]) { var n3 = Object.assign({}, _taskDurationCache); delete n3[taskId]; _taskDurationCache = n3 }
+            if (_subOrderCache[taskId]) { var n4 = Object.assign({}, _subOrderCache); delete n4[taskId]; _subOrderCache = n4 }
+            if (_titleLowerCache[taskId]) { var n5 = Object.assign({}, _titleLowerCache); delete n5[taskId]; _titleLowerCache = n5 }
+        } else {
+            // deleted — remove from maps (index map will be rebuilt lazily via full updateMaps when needed)
+            if (taskMap[taskId] !== undefined) {
+                var nm = Object.assign({}, taskMap); delete nm[taskId]; taskMap = nm
+            }
+            if (_progressCache[taskId]) { var nc = Object.assign({}, _progressCache); delete nc[taskId]; _progressCache = nc }
+            if (_titleLowerCache[taskId]) { var nt = Object.assign({}, _titleLowerCache); delete nt[taskId]; _titleLowerCache = nt }
+        }
+    }
+    // P-B cached lower search (avoid per-task toLower per frame)
+    readonly property string searchLower: searchQuery.trim().toLowerCase()
+    property var _titleLowerCache: ({})
+    function getTitleLower(todoId) {
+        var task = taskMap[todoId]
+        if (!task) return ""
+        var cached = _titleLowerCache[todoId]
+        if (cached && cached.task === task) return cached.value
+        var v = task.title ? task.title.toLowerCase() : ""
+        var next = Object.assign({}, _titleLowerCache)
+        next[todoId] = { task: task, value: v }
+        _titleLowerCache = next
+        return v
     }
 
     function updateFilteredModel() {
@@ -167,7 +289,7 @@ FocusScope {
         }
     }
 
-    // Mirrors the delegates' visible binding (status filter + search).
+    // Mirrors the delegates' visible binding (status filter + search). P-B: uses cached searchLower + titleLower
     function isTaskVisible(index) {
         var entry = filteredModel.get(index);
         var task = entry ? list.taskMap[entry.todoId] : null;
@@ -176,20 +298,20 @@ FocusScope {
         if (list.statusFilter === "active" && task.done) return false;
         if (list.statusFilter === "done" && !task.done) return false;
 
-        var q = list.searchQuery.trim().toLowerCase();
+        var q = list.searchLower
         if (q) {
-            var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
-            var matchSub = false;
-            var subs = task.subtasks || [];
+            var matchTitle = getTitleLower(entry.todoId).indexOf(q) !== -1
+            var matchSub = false
+            var subs = task.subtasks || []
             for (var j = 0; j < subs.length; j++) {
                 if (subs[j].title && subs[j].title.toLowerCase().indexOf(q) !== -1) {
-                    matchSub = true;
-                    break;
+                    matchSub = true
+                    break
                 }
             }
-            if (!matchTitle && !matchSub) return false;
+            if (!matchTitle && !matchSub) return false
         }
-        return true;
+        return true
     }
 
     // Nearest visible index searching from `from` in `dir` (+1 / -1) with
@@ -258,38 +380,36 @@ FocusScope {
         list.selectedIndex = list.firstVisibleIndex();
     }
 
-    onSearchQueryChanged: {
-        list.selectedIndex = list.firstVisibleIndex();
-        list.selectedSubtaskIndex = -1;
-    }
+    onSearchQueryChanged: searchDebounce.restart()
 
     readonly property int visibleTaskCount: {
-        var count = 0;
-        var q = list.searchQuery.trim().toLowerCase();
+        var count = 0
+        var q = list.searchLower
         for (var i = 0; i < filteredModel.count; i++) {
-            var task = list.taskMap[filteredModel.get(i).todoId];
-            if (!task) continue;
+            var todoId = filteredModel.get(i).todoId
+            var task = list.taskMap[todoId]
+            if (!task) continue
 
-            if (list.statusFilter === "active" && task.done) continue;
-            if (list.statusFilter === "done" && !task.done) continue;
+            if (list.statusFilter === "active" && task.done) continue
+            if (list.statusFilter === "done" && !task.done) continue
 
             if (q) {
-                var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
-                var matchSubtask = false;
+                var matchTitle = getTitleLower(todoId).indexOf(q) !== -1
+                var matchSubtask = false
                 if (task.subtasks) {
                     for (var j = 0; j < task.subtasks.length; j++) {
                         if (task.subtasks[j].title && task.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
-                            matchSubtask = true;
-                            break;
+                            matchSubtask = true
+                            break
                         }
                     }
                 }
-                if (!matchTitle && !matchSubtask) continue;
+                if (!matchTitle && !matchSubtask) continue
             }
 
-            count++;
+            count++
         }
-        return count;
+        return count
     }
 
     property string editingTaskId: ""
@@ -310,7 +430,7 @@ FocusScope {
     onSelectedIndexChanged: list.selectedSubtaskIndex = -1
 
     function selectedCard() {
-        return selectedIndex >= 0 ? taskRepeater.itemAt(selectedIndex) : null;
+        return selectedIndex >= 0 ? scroller.itemAtIndex(selectedIndex) : null;
     }
 
     function restoreKeyboardFocus() {
@@ -357,12 +477,17 @@ FocusScope {
     }
 
     function keepSelectedVisible(card) {
-        if (!card)
+        if (card) {
+            if (card.y < scroller.contentY)
+                scroller.contentY = card.y;
+            else if (card.y + card.height > scroller.contentY + scroller.height)
+                scroller.contentY = card.y + card.height - scroller.height;
             return;
-        if (card.y < scroller.contentY)
-            scroller.contentY = card.y;
-        else if (card.y + card.height > scroller.contentY + scroller.height)
-            scroller.contentY = card.y + card.height - scroller.height;
+        }
+        // Virtualized case: delegate not instantiated (offscreen) — ask ListView to bring it into view
+        if (selectedIndex >= 0 && scroller.positionViewAtIndex) {
+            scroller.positionViewAtIndex(selectedIndex, ListView.Contain);
+        }
     }
 
     function finishLoad() {
@@ -380,8 +505,9 @@ FocusScope {
             for (var j = 0; j < (task.subtasks || []).length; j++) {
                 if (dataManager.ensureSubtaskFields(task.subtasks[j]))
                     migrated = true;
+                // P-C2: avoid `delete` (de-optimizes QML/JS object shapes) — set to undefined instead
                 if (task.subtasks[j].completions !== undefined) {
-                    delete task.subtasks[j].completions;
+                    task.subtasks[j].completions = undefined;
                     migrated = true;
                 }
             }
@@ -516,7 +642,8 @@ FocusScope {
     }
 
     function save() {
-        storage.setText(JSON.stringify(list.tasks, null, 2));
+        // Compact JSON (no pretty) → ~30% smaller & faster, less main-thread block (P-A4)
+        storage.setText(JSON.stringify(list.tasks));
     }
 
     function requestSave() {
@@ -534,188 +661,167 @@ FocusScope {
     readonly property int doneCount: Math.max(0, list.tasks.length - activeCount)
     readonly property string habitDay: dataManager.currentHabitDay
 
-    StyledFlickable {
+    // ── Optimized View: virtualized ListView (P-A1) — only visible delegates instantiated
+    // Replaces StyledFlickable+ColumnLayout+Repeater (which created all delegates) with
+    // ListView reuseItems. Keeps emptyState as overlay, not as delegate, so hidden filtered
+    // tasks don't reserve space. CacheBuffer 500 keeps scroll smooth.
+    ListView {
         id: scroller
         anchors.fill: parent
         clip: true
-        flickableDirection: Flickable.VerticalFlick
+        model: filteredModel
+        spacing: Tokens.spacing.small
+        cacheBuffer: 500
+        reuseItems: true
         interactive: contentHeight > height
-        contentHeight: col.implicitHeight
+        flickableDirection: Flickable.VerticalFlick
         focus: false
 
         StyledScrollBar.vertical: StyledScrollBar {
             flickable: scroller
         }
 
+        delegate: TaskCard {
+            required property string todoId
+            required property int index
+
+            width: ListView.view ? ListView.view.width : parent ? parent.width : 0
+            // Collapse hidden filtered items to 0 height so they don't reserve space in ListView
+            height: visible ? implicitHeight : 0
+            visible: {
+                var t = task
+                if (!t) return false
+                if (list.statusFilter === "active" && t.done) return false
+                if (list.statusFilter === "done" && !t.done) return false
+                var q = list.searchLower
+                if (q) {
+                    var matchTitle = list.getTitleLower(todoId).indexOf(q) !== -1
+                    var matchSubtask = false
+                    if (t.subtasks) {
+                        for (var j = 0; j < t.subtasks.length; j++) {
+                            if (t.subtasks[j].title && t.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
+                                matchSubtask = true
+                                break
+                            }
+                        }
+                    }
+                    if (!matchTitle && !matchSubtask) return false
+                }
+                return true
+            }
+
+            property var taskMap: list.taskMap
+            property var taskIndexMap: list.taskIndexMap
+
+            readonly property var task: (function() {
+                var t = taskMap[todoId]
+                if (t) return t
+                return {
+                    todoId: todoId,
+                    icon: null,
+                    title: "",
+                    done: false,
+                    priority: null,
+                    subtasks: [],
+                    streak: 0,
+                    bestStreak: 0
+                }
+            })()
+
+            readonly property int absIdx: (function() {
+                var idx = taskIndexMap[todoId]
+                return idx !== undefined ? idx : -1
+            })()
+
+            // P-A3 memoized: single cache per todoId, not per-delegate loop
+            readonly property var progressData: list.getProgressData(todoId)
+
+            taskData: task
+            taskIndex: absIdx
+            isEditing: list.editingTaskId === task.todoId
+            isSelected: list.selectedIndex === index
+            selectedSubtaskIndex: list.selectedIndex === index ? list.selectedSubtaskIndex : -1
+            nSub: progressData.total
+            dSub: progressData.done
+            subOrder: list.getSubOrder(todoId)
+            prog: progressData.ratio
+            icon: list.isHabitList ? (task.icon || "") : ""
+            showStreak: list.isHabitList
+
+            editingSubId: list.editingSubId
+
+            onSelectionRequested: function() {
+                list.forceActiveFocus()
+                list.selectTask(index)
+            }
+
+            onSubtaskSelectionRequested: function(subIdx) {
+                list.forceActiveFocus()
+                list.selectedIndex = index
+                list.selectedSubtaskIndex = subIdx
+                list.keepSelectedVisible(scroller.itemAtIndex(index))
+            }
+
+            onToggleRequested: function(taskIdx) { dataManager.toggleTask(taskIdx) }
+            onRenameRequested: function(taskIdx, newTitle) { dataManager.renameTask(taskIdx, newTitle) }
+            onDeleteRequested: function(taskIdx) { dataManager.deleteTask(taskIdx) }
+            onAddSubtaskRequested: function(taskIdx, title) { dataManager.addSubtask(taskIdx, title) }
+            onToggleSubtaskRequested: function(taskIdx, subIdx) { dataManager.toggleSubtask(taskIdx, subIdx) }
+            onDeleteSubtaskRequested: function(taskIdx, subIdx) { dataManager.deleteSubtask(taskIdx, subIdx) }
+            onRenameSubtaskRequested: function(taskIdx, subIdx, newTitle) { dataManager.renameSubtask(taskIdx, subIdx, newTitle) }
+            onEditingStarted: function(taskId) {
+                list.editingSubId = ""
+                list.editingTaskId = taskId
+            }
+            onEditingCancelled: function() {
+                list.editingTaskId = ""
+                list.restoreKeyboardFocus()
+            }
+            onSubtaskEditingStarted: function(subtaskId) {
+                list.editingTaskId = ""
+                list.editingSubId = subtaskId
+            }
+            onSubtaskEditingCancelled: function() {
+                list.editingSubId = ""
+                list.restoreKeyboardFocus()
+            }
+        }
+
+        footer: Item {
+            width: 1
+            height: Tokens.padding.medium
+        }
+    }
+
+    // Empty state overlay (visible when no tasks match filter/search, not part of ListView model)
+    Item {
+        anchors.fill: parent
+        visible: list.loaded && list.visibleTaskCount === 0
         ColumnLayout {
-            id: col
-            width: parent.width
-            height: implicitHeight
+            id: emptyState
+            anchors.centerIn: parent
             spacing: Tokens.spacing.small
 
-            Item {
-                Layout.fillWidth: true
-                implicitHeight: emptyState.implicitHeight + Tokens.padding.extraLarge * 2
-                visible: list.loaded && list.visibleTaskCount === 0
-                ColumnLayout {
-                    id: emptyState
-                    anchors.centerIn: parent
-                    spacing: Tokens.spacing.small
-
-                    MaterialIcon {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: list.searchQuery.trim().length > 0 ? "search_off"
-                            : list.statusFilter === "done" ? "sentiment_satisfied" : "check_circle"
-                        fontStyle: Tokens.font.icon.builders.extraLarge.build()
-                        color: Colours.palette.m3outlineVariant
-                    }
-                    StyledText {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: {
-                            if (list.searchQuery.trim().length > 0) {
-                                return qsTr('No matches for "%1"').arg(list.searchQuery.trim());
-                            }
-                            if (list.statusFilter === "done") return qsTr("Nothing completed yet");
-                            if (list.statusFilter === "active") return qsTr("All caught up!");
-                            return list.emptyStateText;
-                        }
-                        color: Colours.palette.m3outlineVariant
-                        elide: Text.ElideRight
-                        Layout.maximumWidth: list.width - Tokens.padding.extraLarge * 2
-                    }
-                }
+            MaterialIcon {
+                Layout.alignment: Qt.AlignHCenter
+                text: list.searchQuery.trim().length > 0 ? "search_off"
+                    : list.statusFilter === "done" ? "sentiment_satisfied" : "check_circle"
+                fontStyle: Tokens.font.icon.builders.extraLarge.build()
+                color: Colours.palette.m3outlineVariant
             }
-
-            Repeater {
-                id: taskRepeater
-                model: filteredModel
-
-                delegate: TaskCard {
-                    required property string todoId
-                    required property int index
-
-                    property var taskMap: list.taskMap
-                    property var taskIndexMap: list.taskIndexMap
-
-                    readonly property var task: (function() {
-                        var t = taskMap[todoId];
-                        if (t) return t;
-                        return {
-                            todoId: todoId,
-                            icon: null,
-                            title: "",
-                            done: false,
-                            priority: null,
-                            subtasks: [],
-                            streak: 0,
-                            bestStreak: 0
-                        };
-                    })()
-
-                    readonly property int absIdx: (function() {
-                        var idx = taskIndexMap[todoId];
-                        return idx !== undefined ? idx : -1;
-                    })()
-
-                    visible: {
-                        if (list.statusFilter === "active" && task.done) return false;
-                        if (list.statusFilter === "done" && !task.done) return false;
-
-                        var q = list.searchQuery.trim().toLowerCase();
-                        if (q) {
-                            var matchTitle = task.title ? task.title.toLowerCase().indexOf(q) !== -1 : false;
-                            var matchSubtask = false;
-                            if (task.subtasks) {
-                                for (var j = 0; j < task.subtasks.length; j++) {
-                                    if (task.subtasks[j].title && task.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
-                                        matchSubtask = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (!matchTitle && !matchSubtask) return false;
-                        }
-
-                        return true;
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                text: {
+                    if (list.searchQuery.trim().length > 0) {
+                        return qsTr('No matches for "%1"').arg(list.searchQuery.trim())
                     }
-
-                    readonly property var progressData: {
-                        var subtasks = task.subtasks || [];
-                        var total = subtasks.length;
-
-                        if (total === 0) {
-                            return { total: 0, done: 0, ratio: task.done ? 1 : 0 };
-                        }
-
-                        var done = 0;
-                        for (var i = 0; i < subtasks.length; i++) {
-                            if (subtasks[i].done) done++;
-                        }
-                        return { total: total, done: done, ratio: done / total };
-                    }
-
-                    taskData: task
-                    taskIndex: absIdx
-                    isEditing: list.editingTaskId === task.todoId
-                    isSelected: list.selectedIndex === index
-                    selectedSubtaskIndex: list.selectedIndex === index ? list.selectedSubtaskIndex : -1
-                    nSub: progressData.total
-                    dSub: progressData.done
-                    subOrder: {
-                        var order = [];
-                        var subs = (task && task.subtasks) ? task.subtasks : [];
-                        for (var i = 0; i < subs.length; i++) {
-                            order.push({ id: subs[i].id });
-                        }
-                        return order;
-                    }
-                    prog: progressData.ratio
-                    icon: list.isHabitList ? (task.icon || "") : ""
-                    showStreak: list.isHabitList
-
-                    editingSubId: list.editingSubId
-
-                    onSelectionRequested: function() {
-                        list.forceActiveFocus();
-                        list.selectTask(index);
-                    }
-
-                    onSubtaskSelectionRequested: function(subIdx) {
-                        list.forceActiveFocus();
-                        list.selectedIndex = index;
-                        list.selectedSubtaskIndex = subIdx;
-                        list.keepSelectedVisible(taskRepeater.itemAt(index));
-                    }
-
-                    onToggleRequested: function(taskIdx) { dataManager.toggleTask(taskIdx); }
-                    onRenameRequested: function(taskIdx, newTitle) { dataManager.renameTask(taskIdx, newTitle); }
-                    onDeleteRequested: function(taskIdx) { dataManager.deleteTask(taskIdx); }
-                    onAddSubtaskRequested: function(taskIdx, title) { dataManager.addSubtask(taskIdx, title); }
-                    onToggleSubtaskRequested: function(taskIdx, subIdx) { dataManager.toggleSubtask(taskIdx, subIdx); }
-                    onDeleteSubtaskRequested: function(taskIdx, subIdx) { dataManager.deleteSubtask(taskIdx, subIdx); }
-                    onRenameSubtaskRequested: function(taskIdx, subIdx, newTitle) { dataManager.renameSubtask(taskIdx, subIdx, newTitle); }
-                    onEditingStarted: function(taskId) {
-                        list.editingSubId = "";
-                        list.editingTaskId = taskId;
-                    }
-                    onEditingCancelled: function() {
-                        list.editingTaskId = "";
-                        list.restoreKeyboardFocus();
-                    }
-                    onSubtaskEditingStarted: function(subtaskId) {
-                        list.editingTaskId = "";
-                        list.editingSubId = subtaskId;
-                    }
-                    onSubtaskEditingCancelled: function() {
-                        list.editingSubId = "";
-                        list.restoreKeyboardFocus();
-                    }
+                    if (list.statusFilter === "done") return qsTr("Nothing completed yet")
+                    if (list.statusFilter === "active") return qsTr("All caught up!")
+                    return list.emptyStateText
                 }
-            }
-
-            Item {
-                Layout.fillWidth: true
-                implicitHeight: Tokens.padding.medium
+                color: Colours.palette.m3outlineVariant
+                elide: Text.ElideRight
+                Layout.maximumWidth: list.width - Tokens.padding.extraLarge * 2
             }
         }
     }

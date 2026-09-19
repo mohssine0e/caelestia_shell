@@ -88,28 +88,40 @@ Item {
     readonly property bool taskPartial: root.dSub > 0 && root.dSub < root.nSub
     readonly property var subtasks: root.taskData?.subtasks ?? []
 
+    // P-A3 memoized via TaskList cache — single lookup per taskId, not per-card loop
     readonly property var subtaskMap: {
-        const map = {};
+        // Prefer list cache when available (virtualized delegate), fallback to local loop
+        if (typeof list !== "undefined" && list.getSubtaskMapCached) {
+            var cached = list.getSubtaskMapCached(taskId)
+            if (cached && Object.keys(cached).length > 0) return cached
+        }
+        const map = {}
         if (taskData && taskData.subtasks) {
             for (const sub of taskData.subtasks) {
-                map[sub.id] = sub;
+                map[sub.id] = sub
             }
         }
-        return map;
+        return map
     }
 
     // Displayed estimate: subtask sum for parents, own minutes for
     // subtask-less tasks. The "@minutes" suffix itself only ever shows
     // in the edit field (see editPrefill), never in the title row.
     readonly property int taskDuration: {
-        if (root.nSub > 0) {
-            var sum = 0;
-            var subs = root.taskData?.subtasks || [];
-            for (var i = 0; i < subs.length; i++)
-                sum += (subs[i].minutes || 0);
-            return sum;
+        if (typeof list !== "undefined" && list.getTaskDuration) {
+            var cachedDur = list.getTaskDuration(taskId)
+            // getTaskDuration returns leaf sum for parents, minutes for leaf tasks — matches spec
+            // but we need to keep original logic where nSub===0 uses task minutes, else leaf sum
+            // getTaskDuration already does that, so use it when cache has value
+            if (cachedDur !== undefined) return cachedDur
         }
-        return root.taskData?.minutes || 0;
+        if (root.nSub > 0) {
+            var sum = 0
+            var subs = root.taskData?.subtasks || []
+            for (var i = 0; i < subs.length; i++) sum += (subs[i].minutes || 0)
+            return sum
+        }
+        return root.taskData?.minutes || 0
     }
 
     // Prefill for the title edit field. Subtask-less tasks carry their
