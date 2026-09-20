@@ -78,6 +78,10 @@ Item {
     signal toggleSubtaskRequested(int taskIdx, int subIdx)
     signal deleteSubtaskRequested(int taskIdx, int subIdx)
     signal renameSubtaskRequested(int taskIdx, int subIdx, string newTitle)
+    signal addNestedSubtaskRequested(int taskIdx, int subIdx, string title)
+    signal toggleNestedSubtaskRequested(int taskIdx, int subIdx, int nestedIdx)
+    signal deleteNestedSubtaskRequested(int taskIdx, int subIdx, int nestedIdx)
+    signal renameNestedSubtaskRequested(int taskIdx, int subIdx, int nestedIdx, string newTitle)
     signal editingStarted(string taskId)
     signal editingCancelled()
     signal subtaskEditingStarted(string subtaskId)
@@ -586,8 +590,9 @@ Item {
 
                         isFirst: index === 0
                         isLast: index === subRepeater.count - 1
-                        hasChildren: false
+                        hasChildren: (sub.children?.length ?? 0) > 0
                         depth: 1
+                        editingNestedId: root.editingSubId
 
                         onToggleRequested: (taskIdx, subIdx) => {
                             root.toggleSubtaskRequested(taskIdx, subIdx)
@@ -603,6 +608,24 @@ Item {
                         }
                         onEditingCancelled: {
                             root.subtaskEditingCancelled()
+                        }
+                        onNestedEditingStarted: (nestedId) => {
+                            root.subtaskEditingStarted(nestedId)
+                        }
+                        onNestedEditingCancelled: {
+                            root.subtaskEditingCancelled()
+                        }
+                        onAddChildRequested: (taskIdx, subIdx, title) => {
+                            root.addNestedSubtaskRequested(taskIdx, subIdx, title)
+                        }
+                        onToggleNestedRequested: (taskIdx, subIdx, nestedIdx) => {
+                            root.toggleNestedSubtaskRequested(taskIdx, subIdx, nestedIdx)
+                        }
+                        onDeleteNestedRequested: (taskIdx, subIdx, nestedIdx) => {
+                            root.deleteNestedSubtaskRequested(taskIdx, subIdx, nestedIdx)
+                        }
+                        onRenameNestedRequested: (taskIdx, subIdx, nestedIdx, newTitle) => {
+                            root.renameNestedSubtaskRequested(taskIdx, subIdx, nestedIdx, newTitle)
                         }
                         onSelectionRequested: (taskIdx, subIdx) => {
                             root.subtaskSelectionRequested(subIdx)

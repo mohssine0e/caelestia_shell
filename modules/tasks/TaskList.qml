@@ -99,7 +99,11 @@ FocusScope {
         if (cached && cached.task === task) return cached.text
         var parts = [task.title || ""]
         var subs = task.subtasks || []
-        for (var i = 0; i < subs.length; i++) parts.push(subs[i].title || "")
+        for (var i = 0; i < subs.length; i++) {
+            parts.push(subs[i].title || "")
+            var kids = subs[i].children || []
+            for (var k = 0; k < kids.length; k++) parts.push(kids[k].title || "")
+        }
         var text = parts.join("\n").toLowerCase()
         _searchCache[todoId] = { task: task, text: text }
         return text
@@ -186,6 +190,34 @@ FocusScope {
         }
 
         onSubtaskDeleted: (taskId, subtaskId) => {
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
+        }
+
+        onNestedSubtaskAdded: (taskId, subtaskId, nestedId) => {
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
+        }
+
+        onNestedSubtaskToggled: (taskId, subtaskId, nestedId, newState) => {
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.requestSave()
+        }
+
+        onNestedSubtaskRenamed: (taskId, subtaskId, nestedId, oldTitle, newTitle) => {
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.editingSubId = ""
+            list.renameJustCommitted = true
+            renameCommitGuard.restart()
+            list.restoreKeyboardFocus()
+            list.requestSave()
+        }
+
+        onNestedSubtaskDeleted: (taskId, subtaskId, nestedId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
             list.requestSave()
@@ -699,6 +731,10 @@ FocusScope {
             onToggleSubtaskRequested: function(taskIdx, subIdx) { dataManager.toggleSubtask(taskIdx, subIdx) }
             onDeleteSubtaskRequested: function(taskIdx, subIdx) { dataManager.deleteSubtask(taskIdx, subIdx) }
             onRenameSubtaskRequested: function(taskIdx, subIdx, newTitle) { dataManager.renameSubtask(taskIdx, subIdx, newTitle) }
+            onAddNestedSubtaskRequested: function(taskIdx, subIdx, title) { dataManager.addNestedSubtask(taskIdx, subIdx, title) }
+            onToggleNestedSubtaskRequested: function(taskIdx, subIdx, nestedIdx) { dataManager.toggleNestedSubtask(taskIdx, subIdx, nestedIdx) }
+            onDeleteNestedSubtaskRequested: function(taskIdx, subIdx, nestedIdx) { dataManager.deleteNestedSubtask(taskIdx, subIdx, nestedIdx) }
+            onRenameNestedSubtaskRequested: function(taskIdx, subIdx, nestedIdx, newTitle) { dataManager.renameNestedSubtask(taskIdx, subIdx, nestedIdx, newTitle) }
             onEditingStarted: function(taskId) {
                 list.editingSubId = ""
                 list.editingTaskId = taskId

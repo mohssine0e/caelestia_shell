@@ -57,6 +57,11 @@ data model used: for both tasks and habits // to keep for reference
     signal subtaskRenamed(string taskId, string subtaskId, string oldTitle, string newTitle)
     signal subtaskDeleted(string taskId, string subtaskId)
 
+    signal nestedSubtaskAdded(string taskId, string subtaskId, string nestedId)
+    signal nestedSubtaskToggled(string taskId, string subtaskId, string nestedId, bool newState)
+    signal nestedSubtaskRenamed(string taskId, string subtaskId, string nestedId, string oldTitle, string newTitle)
+    signal nestedSubtaskDeleted(string taskId, string subtaskId, string nestedId)
+
     signal habitDayRolledOver()
 
     // ── Task Cloning ──
@@ -77,6 +82,9 @@ data model used: for both tasks and habits // to keep for reference
     function updateSubtask(taskIndex, subtaskIndex, newSubtask) {
         var task = tasks[taskIndex];
         if (!task) return;
+
+        if (newSubtask.children === undefined && task.subtasks[subtaskIndex])
+            newSubtask.children = task.subtasks[subtaskIndex].children || [];
 
         var newSubtasks = [];
         for (var i = 0; i < task.subtasks.length; i++) {
@@ -217,6 +225,35 @@ data model used: for both tasks and habits // to keep for reference
             subtask.bestStreak = subtask.streak;
             mutated = true;
         }
+        if (!Array.isArray(subtask.children)) {
+            subtask.children = [];
+            mutated = true;
+        } else {
+            for (var k = 0; k < subtask.children.length; k++) {
+                if (ensureNestedFields(subtask.children[k]))
+                    mutated = true;
+                if (subtask.children[k].completions !== undefined) {
+                    subtask.children[k].completions = undefined;
+                    mutated = true;
+                }
+            }
+        }
+        return mutated;
+    }
+
+    // One level only: a nested child is a leaf (no deeper UI), but keep a
+    // children array so the shape stays forward-compatible and lookups stay
+    // uniform.
+    function ensureNestedFields(n) {
+        if (!n || typeof n !== "object") return false;
+        var mutated = false;
+        if (typeof n.title !== "string") { n.title = ""; mutated = true; }
+        if (typeof n.done !== "boolean") { n.done = false; mutated = true; }
+        if (typeof n.minutes !== "number") { n.minutes = 0; mutated = true; }
+        if (typeof n.streak !== "number" || n.streak < 0) { n.streak = 0; mutated = true; }
+        if (typeof n.bestStreak !== "number" || n.bestStreak < 0) { n.bestStreak = n.streak; mutated = true; }
+        if (!n.id) { n.id = Date.now() + "-" + Math.floor(Math.random() * 1e6); mutated = true; }
+        if (!Array.isArray(n.children)) { n.children = []; mutated = true; }
         return mutated;
     }
 
@@ -305,7 +342,10 @@ data model used: for both tasks and habits // to keep for reference
                                 done: false,
                                 minutes: s.minutes || 0,
                                 streak: s.streak || 0,
-                                bestStreak: s.bestStreak || 0
+                                bestStreak: s.bestStreak || 0,
+                                children: (s.children || []).map(function(c) {
+                                    return Object.assign({}, c, { done: false, children: [] });
+                                })
                             });
                         }
                         changed = true;
@@ -386,7 +426,10 @@ data model used: for both tasks and habits // to keep for reference
                 done: newDone,
                 minutes: s.minutes || 0,
                 streak: s.streak || 0,
-                bestStreak: s.bestStreak || 0
+                bestStreak: s.bestStreak || 0,
+                children: (s.children || []).map(function(c) {
+                    return Object.assign({}, c, { done: newDone, children: [] });
+                })
             };
             updateSubtaskStreak(newSubtasks[j], newDone);
         }
@@ -456,7 +499,8 @@ data model used: for both tasks and habits // to keep for reference
             done: false,
             minutes: parsed.minutes,
             streak: 0,
-            bestStreak: 0
+            bestStreak: 0,
+            children: []
         };
 
         var newSubtasks = task.subtasks.slice();
@@ -484,7 +528,10 @@ data model used: for both tasks and habits // to keep for reference
             done: !sub.done,
             minutes: sub.minutes || 0,
             streak: sub.streak || 0,
-            bestStreak: sub.bestStreak || 0
+            bestStreak: sub.bestStreak || 0,
+            children: (sub.children || []).map(function(c) {
+                return Object.assign({}, c, { done: !sub.done, children: [] });
+            })
         };
         updateSubtaskStreak(newSub, newSub.done);
 
@@ -512,7 +559,8 @@ data model used: for both tasks and habits // to keep for reference
             done: sub.done,
             minutes: parsed.minutes,
             streak: sub.streak || 0,
-            bestStreak: sub.bestStreak || 0
+            bestStreak: sub.bestStreak || 0,
+            children: sub.children || []
         };
 
         updateSubtask(taskIndex, subtaskIndex, newSub);
@@ -536,6 +584,100 @@ data model used: for both tasks and habits // to keep for reference
             applyHabitCompletion(newTask, newTask.done);
         updateTask(taskIndex, newTask);
         subtaskDeleted(taskId, subId);
+    }
+
+    // ── Nested (depth-2, one level) CRUD ──
+    // Only one level: subtask.children[]. A nested child is always a leaf.
+    function addNestedSubtask(taskIndex, subtaskIndex, title) {
+        if (!title || !title.trim()) return;
+        var task = tasks[taskIndex];
+        if (!task) return;
+        var sub = task.subtasks[subtaskIndex];
+        if (!sub) return;
+
+        var parsed = parseCapturePrefix(title);
+        if (!parsed.title) return;
+        var newNested = {
+            id: Date.now() + "-" + Math.floor(Math.random() * 1e6),
+            title: parsed.title,
+            done: false,
+            minutes: parsed.minutes,
+            streak: 0,
+            bestStreak: 0,
+            children: []
+        };
+
+        var newChildren = (sub.children || []).slice();
+        newChildren.push(newNested);
+        var newSub = Object.assign({}, sub, { children: newChildren });
+        updateSubtask(taskIndex, subtaskIndex, newSub);
+        nestedSubtaskAdded(task.todoId, sub.id, newNested.id);
+    }
+
+    function toggleNestedSubtask(taskIndex, subtaskIndex, nestedIndex) {
+        var task = tasks[taskIndex];
+        if (!task) return;
+        var sub = task.subtasks[subtaskIndex];
+        if (!sub || !sub.children) return;
+        var nested = sub.children[nestedIndex];
+        if (!nested) return;
+
+        var newNested = Object.assign({}, nested, {
+            done: !nested.done,
+            minutes: nested.minutes || 0,
+            streak: nested.streak || 0,
+            bestStreak: nested.bestStreak || 0,
+            children: []
+        });
+        updateSubtaskStreak(newNested, newNested.done);
+
+        var newChildren = sub.children.slice();
+        newChildren[nestedIndex] = newNested;
+        var newSub = Object.assign({}, sub, { children: newChildren });
+        updateSubtask(taskIndex, subtaskIndex, newSub);
+        nestedSubtaskToggled(task.todoId, sub.id, nested.id, newNested.done);
+    }
+
+    function renameNestedSubtask(taskIndex, subtaskIndex, nestedIndex, title) {
+        if (!title || !title.trim()) return;
+        var task = tasks[taskIndex];
+        if (!task) return;
+        var sub = task.subtasks[subtaskIndex];
+        if (!sub || !sub.children) return;
+        var nested = sub.children[nestedIndex];
+        if (!nested) return;
+
+        var parsed = parseCapturePrefix(title);
+        if (!parsed.title) return;
+        var oldTitle = nested.title;
+
+        var newNested = Object.assign({}, nested, {
+            title: parsed.title,
+            minutes: parsed.minutes,
+            children: []
+        });
+        var newChildren = sub.children.slice();
+        newChildren[nestedIndex] = newNested;
+        var newSub = Object.assign({}, sub, { children: newChildren });
+        updateSubtask(taskIndex, subtaskIndex, newSub);
+        nestedSubtaskRenamed(task.todoId, sub.id, nested.id, oldTitle, parsed.title);
+    }
+
+    function deleteNestedSubtask(taskIndex, subtaskIndex, nestedIndex) {
+        var task = tasks[taskIndex];
+        if (!task) return;
+        var sub = task.subtasks[subtaskIndex];
+        if (!sub || !sub.children) return;
+        var nested = sub.children[nestedIndex];
+        if (!nested) return;
+
+        var newChildren = [];
+        for (var i = 0; i < sub.children.length; i++) {
+            if (i !== nestedIndex) newChildren.push(sub.children[i]);
+        }
+        var newSub = Object.assign({}, sub, { children: newChildren });
+        updateSubtask(taskIndex, subtaskIndex, newSub);
+        nestedSubtaskDeleted(task.todoId, sub.id, nested.id);
     }
 
 function isDoneToday(task) {
@@ -599,6 +741,14 @@ function isDoneToday(task) {
                             matchSubtask = true;
                             break;
                         }
+                        var kids = s.children || [];
+                        for (var k = 0; k < kids.length; k++) {
+                            if (kids[k].title && kids[k].title.toLowerCase().indexOf(q) !== -1) {
+                                matchSubtask = true;
+                                break;
+                            }
+                        }
+                        if (matchSubtask) break;
                     }
                 }
                 if (!matchTitle && !matchSubtask) continue;

@@ -18,6 +18,7 @@ Item {
     required property int subtaskIndex
     required property string subtaskId
     required property bool isEditing
+    property string editingNestedId: ""
     property bool isSelected: false
     property bool isHabitList: false
 
@@ -32,14 +33,19 @@ Item {
     property bool addingChild: false
 
     signal addChildRequested(int taskIdx, int subIdx, string title)
+    signal toggleNestedRequested(int taskIdx, int subIdx, int nestedIdx)
+    signal deleteNestedRequested(int taskIdx, int subIdx, int nestedIdx)
+    signal renameNestedRequested(int taskIdx, int subIdx, int nestedIdx, string newTitle)
+    signal nestedEditingStarted(string nestedId)
+    signal nestedEditingCancelled()
 
-    // In preview every row has 2 fake children, so hasChildren is effectively true
-    readonly property bool previewNested: true
-    readonly property int previewChildCount: 2
+    // Dynamic: show the section when there is real data or a pending add field.
+    // (Previously a static 2-row preview.)
+    readonly property var nestedChildren: root.subtaskData?.children ?? []
     readonly property bool effectiveHasChildren:
-        root.previewNested || root.hasChildren
+        root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
     readonly property int visibleChildCount:
-        (root.effectiveHasChildren && root.expanded) ? root.previewChildCount : 0
+        (root.effectiveHasChildren && root.expanded) ? Math.max(root.nestedChildren.length, root.addingChild ? 1 : 0) : 0
 
     // ╔════════════════════════════════════════════════════════════╗
     // ║  TREE STYLE                                                ║
@@ -51,7 +57,7 @@ Item {
         readonly property real elbowLength: 24
         readonly property real contentGap: 6
         readonly property real dotSize: 6
-        readonly property real dotOpacity: 0.8
+        readonly property real dotOpacity: 1
         readonly property color color: Colours.palette.m3primary
         readonly property real selectedContentShift: 10
     }
@@ -74,6 +80,10 @@ Item {
 
     readonly property bool isDone: root.subtaskData?.done ?? false
     readonly property string title: root.subtaskData?.title ?? ""
+
+    onSubtaskIdChanged: {
+        root.addingChild = false
+    }
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
     readonly property string editPrefill: `${root.title} @${root.subtaskData?.minutes || 0}`
@@ -341,7 +351,7 @@ Item {
             }
         }
 
-        // ── NESTED ROWS ─────────────────────────────────────────
+        // ── NESTED ROWS (dynamic: one level from subtaskData.children) ──
         ColumnLayout {
             id: nestedColumn
             Layout.fillWidth: true
@@ -351,33 +361,49 @@ Item {
             spacing: 0
             visible: root.effectiveHasChildren && root.expanded
 
-            NestedSubtaskCard {
-                Layout.fillWidth: true
-                parentSubtaskData: root.subtaskData
-                parentSubtaskId: root.subtaskId
-                isHabitList: root.isHabitList
-                isSelected: false
-                isFirst: true
-                isLast: false
-                tree: root.tree
-                treeSpineX: root.childSpineX
-            }
+            Repeater {
+                id: nestedRepeater
+                model: root.nestedChildren
 
-            NestedSubtaskCard {
-                Layout.fillWidth: true
-                parentSubtaskData: root.subtaskData
-                parentSubtaskId: root.subtaskId
-                isHabitList: root.isHabitList
-                isSelected: false
-                isFirst: false
-                isLast: true
-                tree: root.tree
-                treeSpineX: root.childSpineX
+                delegate: NestedSubtaskCard {
+                    required property var modelData
+                    required property int index
+
+                    Layout.fillWidth: true
+                    nestedData: modelData
+                    nestedIndex: index
+                    parentSubtaskData: root.subtaskData
+                    parentSubtaskId: root.subtaskId
+                    taskIndex: root.taskIndex
+                    subtaskIndex: root.subtaskIndex
+                    isHabitList: root.isHabitList
+                    isSelected: false
+                    isEditing: root.editingNestedId === (modelData?.id ?? "")
+                    isFirst: index === 0
+                    isLast: index === nestedRepeater.count - 1
+                    tree: root.tree
+                    treeSpineX: root.childSpineX
+
+                    onToggleRequested: (taskIdx, subIdx, nestedIdx) => {
+                        root.toggleNestedRequested(taskIdx, subIdx, nestedIdx)
+                    }
+                    onDeleteRequested: (taskIdx, subIdx, nestedIdx) => {
+                        root.deleteNestedRequested(taskIdx, subIdx, nestedIdx)
+                    }
+                    onRenameRequested: (taskIdx, subIdx, nestedIdx, newTitle) => {
+                        root.renameNestedRequested(taskIdx, subIdx, nestedIdx, newTitle)
+                    }
+                    onEditingStarted: (nestedId) => {
+                        root.nestedEditingStarted(nestedId)
+                    }
+                    onEditingCancelled: {
+                        root.nestedEditingCancelled()
+                    }
+                }
             }
 
             // ── Add-child inline input ──────────────────────────
             RowLayout {
-                // alwways visible for now
                 visible: root.addingChild
                 Layout.fillWidth: true
                 Layout.leftMargin: root.childContentX
@@ -410,8 +436,9 @@ Item {
 
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                            if (text.trim()) {
-                                root.addChildRequested(root.taskIndex, root.subtaskIndex, text.trim())
+                            // Ignore pure "@minutes" input — it has no title.
+                            if (TitleParse.hasTitle(text)) {
+                                root.addChildRequested(root.taskIndex, root.subtaskIndex, text)
                                 clear()
                             }
                             event.accepted = true

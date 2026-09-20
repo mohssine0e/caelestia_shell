@@ -34,7 +34,7 @@ Item {
     property bool selected: false
     property real dotSize: 6           // use EVEN numbers
     property real dotSizeSelected: 12
-    property real dotOpacity: 0.8
+    property real dotOpacity: 1
 
     property real selectedExtension: 10
 
@@ -107,7 +107,5 @@ Item {
         radius: Tokens.rounding.full
         color: root.lineColor
         opacity: root.dotOpacity
-        Behavior on width { Anim { type: Anim.FastSpatial } }
-        Behavior on height { Anim { type: Anim.FastSpatial } }
     }
 }
