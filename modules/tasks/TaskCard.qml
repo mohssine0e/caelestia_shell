@@ -88,6 +88,7 @@ Item {
     signal subtaskEditingCancelled()
     signal selectionRequested(int taskIdx)
     signal subtaskSelectionRequested(int subIdx)
+    signal addChildCancelled(int taskIdx, int subIdx)
 
     // ── ListView recycling (reuseItems: true) ───────────────────
     // A recycled card keeps its local state, so reset it here or the next
@@ -618,6 +619,9 @@ Item {
                         onAddChildRequested: (taskIdx, subIdx, title) => {
                             root.addNestedSubtaskRequested(taskIdx, subIdx, title)
                         }
+                        onAddChildCancelled: (taskIdx, subIdx) => {
+                            root.addChildCancelled(taskIdx, subIdx)
+                        }
                         onToggleNestedRequested: (taskIdx, subIdx, nestedIdx) => {
                             root.toggleNestedSubtaskRequested(taskIdx, subIdx, nestedIdx)
                         }
@@ -683,6 +687,7 @@ Item {
                         Keys.onEscapePressed: {
                             clear()
                             focus = false
+                            root.subtaskEditingCancelled()
                         }
                     }
                 }

@@ -33,6 +33,7 @@ Item {
     property bool addingChild: false
 
     signal addChildRequested(int taskIdx, int subIdx, string title)
+    signal addChildCancelled(int taskIdx, int subIdx)
     signal toggleNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal deleteNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal renameNestedRequested(int taskIdx, int subIdx, int nestedIdx, string newTitle)
@@ -448,6 +449,7 @@ Item {
                         clear()
                         focus = false
                         root.addingChild = false
+                        root.addChildCancelled(root.taskIndex, root.subtaskIndex)
                     }
                     onVisibleChanged: {
                         if (visible) {

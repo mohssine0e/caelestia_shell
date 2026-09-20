@@ -18,14 +18,18 @@ CLICK
 
 KEYBOARD  (owned by TaskList; listed here for reference)
 --------------------------------------------------------
-- Down   → next subtask (if expanded) | else next task (wrap: last→first)
-- Up     → prev subtask (if selected)  | else prev task (wrap: first→last)
+- Down   → next subtask, circular inside expanded card (last → first);
+           from task header → next task
+- Up     → prev subtask, circular inside expanded card (first → last);
+           from task header → prev task
 - Right  → expand + select subtask 0
-- Left   → deselect subtask; if already deselected → collapse
+- Left   → on subtask: deselect to header (card stays expanded);
+           on header: collapse card
 - Enter  → if subtask selected → toggleSubtask
            elif nSub === 0         → toggleTask
            else                    → toggleTask (cascade parent)
-- Escape → cancel edit (text field only); otherwise bubble up
+- Escape → cancel edit/add field (text field only) + restore list focus;
+           otherwise bubble up
 
 SELECTION
 ---------

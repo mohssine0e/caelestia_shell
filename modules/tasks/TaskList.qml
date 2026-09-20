@@ -192,6 +192,12 @@ FocusScope {
         onSubtaskDeleted: (taskId, subtaskId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            // Clamp: the removed row may have owned the cursor.
+            var delCard = list.selectedCard()
+            if (delCard && delCard.nSub <= 0)
+                list.selectedSubtaskIndex = -1
+            else if (delCard && list.selectedSubtaskIndex >= delCard.nSub)
+                list.selectedSubtaskIndex = delCard.nSub - 1
             list.requestSave()
         }
 
@@ -517,12 +523,14 @@ FocusScope {
         } else if (event.key === Qt.Key_Down) {
             var downCard = list.selectedCard();
             if (downCard && downCard.expanded && downCard.nSub > 0) {
-                list.selectedSubtaskIndex = list.selectedSubtaskIndex < 0
-                    ? 0
-                    : (list.selectedSubtaskIndex + 1) % downCard.nSub;
-                list.keepSelectedVisible(downCard);
-                event.accepted = true;
-                return;
+                // Circular inside the card (as before); task-to-task moves
+                // happen from the task header (subtask -1) via the path below.
+                if (list.selectedSubtaskIndex >= 0) {
+                    list.selectedSubtaskIndex = (list.selectedSubtaskIndex + 1) % downCard.nSub;
+                    list.keepSelectedVisible(downCard);
+                    event.accepted = true;
+                    return;
+                }
             }
             var count = filteredModel.count;
             if (count > 0) {
@@ -532,12 +540,14 @@ FocusScope {
         } else if (event.key === Qt.Key_Up) {
             var upCard = list.selectedCard();
             if (upCard && upCard.expanded && upCard.nSub > 0) {
-                list.selectedSubtaskIndex = list.selectedSubtaskIndex < 0
-                    ? upCard.nSub - 1
-                    : (list.selectedSubtaskIndex - 1 + upCard.nSub) % upCard.nSub;
-                list.keepSelectedVisible(upCard);
-                event.accepted = true;
-                return;
+                // Circular inside the card (as before); task-to-task moves
+                // happen from the task header (subtask -1) via the path below.
+                if (list.selectedSubtaskIndex >= 0) {
+                    list.selectedSubtaskIndex = (list.selectedSubtaskIndex - 1 + upCard.nSub) % upCard.nSub;
+                    list.keepSelectedVisible(upCard);
+                    event.accepted = true;
+                    return;
+                }
             }
             var count = filteredModel.count;
             if (count > 0) {
@@ -551,9 +561,16 @@ FocusScope {
                 event.accepted = false;
                 return;
             } else if (event.key === Qt.Key_Left) {
-                list.selectedSubtaskIndex = -1;
-                restoreKeyboardFocus()
-                card.expanded = false;
+                // Two-step collapse: first Left on a subtask deselects to
+                // the task header but keeps the card expanded; second Left
+                // on the header collapses it.
+                if (list.selectedSubtaskIndex >= 0) {
+                    list.selectedSubtaskIndex = -1;
+                    list.restoreKeyboardFocus()
+                } else {
+                    restoreKeyboardFocus()
+                    card.expanded = false;
+                }
             } else if (list.selectedSubtaskIndex < 0) {
                 card.expanded = true;
                 if (card.nSub > 0) list.selectedSubtaskIndex = 0;
@@ -720,6 +737,15 @@ FocusScope {
             onSubtaskSelectionRequested: function(subIdx) {
                 list.forceActiveFocus()
                 list.selectedIndex = index
+                list.selectedSubtaskIndex = subIdx
+                list.keepSelectedVisible(scroller.itemAtIndex(index))
+            }
+
+            onAddChildCancelled: function(taskIdx, subIdx) {
+                // Esc from the add-nested field: hand focus back to the list
+                // and land the cursor on the parent subtask row so arrows
+                // keep working immediately.
+                list.forceActiveFocus()
                 list.selectedSubtaskIndex = subIdx
                 list.keepSelectedVisible(scroller.itemAtIndex(index))
             }
