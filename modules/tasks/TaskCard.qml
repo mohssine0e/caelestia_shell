@@ -53,8 +53,11 @@ Item {
     property int selectedSubtaskIndex: -1
     required property int nSub
     required property int dSub
-    required property var subOrder
     required property real prog
+
+    // Passed in by TaskList (no more reaching for the outer `list` id)
+    property bool isHabitList: false
+    property int taskDuration: 0      // subtask sum for parents, own minutes otherwise
 
     property string editingSubId: ""
     property bool showStreak: false
@@ -62,6 +65,11 @@ Item {
     property string icon: ""
     readonly property int streak: root.taskData?.streak ?? 0
     readonly property int bestStreak: root.taskData?.bestStreak ?? 0
+
+    // Turned off while ListView recycles this card so Behaviors don't
+    // replay colour/width animations when it is reused for another task.
+    property bool animate: true
+
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
     signal renameRequested(int taskIdx, string newTitle)
@@ -77,6 +85,16 @@ Item {
     signal selectionRequested(int taskIdx)
     signal subtaskSelectionRequested(int subIdx)
 
+    // ── ListView recycling (reuseItems: true) ───────────────────
+    // A recycled card keeps its local state, so reset it here or the next
+    // task would show up expanded / with half-typed subtask text.
+    ListView.onPooled: {
+        root.animate = false
+        root.expanded = false
+        addSubtaskField.clear()
+    }
+    ListView.onReused: Qt.callLater(function() { root.animate = true })
+
     // ── Layout ──────────────────────────────────────────────────
     Layout.fillWidth: true
     implicitHeight: rowBg.implicitHeight
@@ -87,47 +105,21 @@ Item {
     readonly property bool taskDone: root.taskData?.done ?? false
     readonly property bool taskPartial: root.dSub > 0 && root.dSub < root.nSub
     readonly property var subtasks: root.taskData?.subtasks ?? []
+    readonly property var emptySub: ({ id: "", title: "", done: false, minutes: 0 })
 
-    // P-A3 memoized via TaskList cache — single lookup per taskId, not per-card loop
-    readonly property var subtaskMap: {
-        // Prefer list cache when available (virtualized delegate), fallback to local loop
-        if (typeof list !== "undefined" && list.getSubtaskMapCached) {
-            var cached = list.getSubtaskMapCached(taskId)
-            if (cached && Object.keys(cached).length > 0) return cached
-        }
-        const map = {}
-        if (taskData && taskData.subtasks) {
-            for (const sub of taskData.subtasks) {
-                map[sub.id] = sub
-            }
-        }
-        return map
-    }
-
-    // Displayed estimate: subtask sum for parents, own minutes for
-    // subtask-less tasks. The "@minutes" suffix itself only ever shows
-    // in the edit field (see editPrefill), never in the title row.
-    readonly property int taskDuration: {
-        if (typeof list !== "undefined" && list.getTaskDuration) {
-            var cachedDur = list.getTaskDuration(taskId)
-            // getTaskDuration returns leaf sum for parents, minutes for leaf tasks — matches spec
-            // but we need to keep original logic where nSub===0 uses task minutes, else leaf sum
-            // getTaskDuration already does that, so use it when cache has value
-            if (cachedDur !== undefined) return cachedDur
-        }
-        if (root.nSub > 0) {
-            var sum = 0
-            var subs = root.taskData?.subtasks || []
-            for (var i = 0; i < subs.length; i++) sum += (subs[i].minutes || 0)
-            return sum
-        }
-        return root.taskData?.minutes || 0
+    // One colour binding shared by the streak icon + number
+    readonly property color streakColor: {
+        if (root.streak >= 20) return "#fe1d1d"
+        if (root.streak >= 10) return "#FF8C00"
+        if (root.streak >= 3)  return "#FFA500"
+        if (root.streak >= 1)  return Colours.palette.m3primary
+        return Colours.palette.m3outlineVariant
     }
 
     // Prefill for the title edit field. Subtask-less tasks carry their
     // estimate inline as "@minutes" (even when it is 0); the submitted
     // text is parsed back into title + minutes by DataManager.renameTask.
-    readonly property string editPrefill: root.nSub === 0 && !list.isHabitList
+    readonly property string editPrefill: root.nSub === 0 && !root.isHabitList
         ? `${root.taskTitle} @${root.taskData?.minutes || 0}`
         : root.taskTitle
 
@@ -153,9 +145,10 @@ Item {
         border.width: root.isSelected ? 1 : 0
         border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
 
+        // No Behavior on implicitHeight: animating it re-flowed the whole
+        // ListView (and resized the popout) on every frame.
         implicitHeight: rowCol.implicitHeight + Tokens.padding.small * 2
-        Behavior on implicitHeight { Anim { type: Anim.FastSpatial } }
-        Behavior on color { CAnim {} }
+        Behavior on color { enabled: root.animate; CAnim {} }
 
         HoverHandler { id: rowHover }
 
@@ -183,8 +176,8 @@ Item {
                     fontStyle: Tokens.font.icon.medium
                     color: root.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                     opacity: root.expanded ? 1 : 0.5
-                    Behavior on opacity { CAnim {} }
-                    Behavior on color { CAnim {} }
+                    Behavior on opacity { enabled: root.animate; CAnim {} }
+                    Behavior on color { enabled: root.animate; CAnim {} }
 
                     MouseArea {
                         anchors.fill: parent
@@ -201,7 +194,9 @@ Item {
                 Item {
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
-                    anchors.verticalCenter: parent.verticalCenter
+                    // (was anchors.verticalCenter — anchors on a layout child
+                    //  trigger a runtime warning per card; this is the layout way)
+                    Layout.alignment: Qt.AlignVCenter
 
                     MaterialIcon {
                         id: toggleIcon
@@ -238,7 +233,7 @@ Item {
                         }
                         opacity: root.taskDone ? 0.5 : 1
                         
-                        Behavior on color { CAnim {} }
+                        Behavior on color { enabled: root.animate; CAnim {} }
 
                         MouseArea {
                             anchors.fill: parent
@@ -266,7 +261,7 @@ Item {
 
                     color: root.taskDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
                     opacity: root.taskDone ? 0.6 : 1
-                    Behavior on color { CAnim {} }
+                    Behavior on color { enabled: root.animate; CAnim {} }
 
                     // ── Strikethrough WHEN DONE ──
                     StyledRect {
@@ -276,8 +271,8 @@ Item {
                         radius: Tokens.rounding.full
                         color:  Colours.palette.m3outline
                         opacity: root.taskDone ? 0.6 : 0
-                        Behavior on width { Anim { type: Anim.FastSpatial } }
-                        Behavior on opacity { CAnim {} }
+                        Behavior on width { enabled: root.animate; Anim { type: Anim.FastSpatial } }
+                        Behavior on opacity { enabled: root.animate; CAnim {} }
                     }
 
                     MouseArea {
@@ -328,7 +323,7 @@ Item {
                             forceActiveFocus()
                             // Pre-select only the title part so a quick retype
                             // keeps the "@minutes" tail that gets parsed on submit.
-                            if (root.nSub === 0 && !list.isHabitList && root.taskTitle.length > 0 && text.length > root.taskTitle.length)
+                            if (root.nSub === 0 && !root.isHabitList && root.taskTitle.length > 0 && text.length > root.taskTitle.length)
                                 select(0, root.taskTitle.length)
                             else
                                 selectAll()
@@ -365,7 +360,7 @@ Item {
                 // for habits, while editing a subtask-less task (the
                 // estimate is inline in the edit field) and when unset.
                 RowLayout {
-                    visible: !list.isHabitList
+                    visible: !root.isHabitList
                         && root.taskDuration > 0
                         && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
@@ -390,7 +385,7 @@ Item {
                 RowLayout {
                     visible: root.nSub > 0 && !root.isEditing
                     spacing: Tokens.spacing.small
-                        Layout.preferredWidth: 100
+                    Layout.preferredWidth: 100
                     Layout.alignment: Qt.AlignVCenter
 
                     StyledText {
@@ -399,7 +394,7 @@ Item {
                         color: root.taskDone ? Colours.palette.m3primary
                                                 : Colours.palette.m3onSurfaceVariant
                         opacity: 0.7
-                        Behavior on color { CAnim {} }
+                        Behavior on color { enabled: root.animate; CAnim {} }
                     }
 
                     StyledRect {
@@ -414,8 +409,8 @@ Item {
                             radius: parent.radius
                             color: root.taskDone ? Colours.palette.m3tertiary
                                                     : Colours.palette.m3primary
-                            Behavior on width { Anim {} }
-                            Behavior on color { CAnim {} }
+                            Behavior on width { enabled: root.animate; Anim {} }
+                            Behavior on color { enabled: root.animate; CAnim {} }
                         }
                     }
                 }
@@ -435,26 +430,14 @@ Item {
                             text: "local_fire_department"
                             fill: 1
                             fontStyle: Tokens.font.icon.small
-                            color: {
-                                if (root.streak >= 20) return '#fe1d1d'
-                                if (root.streak >= 10) return "#FF8C00"
-                                if (root.streak >= 3)  return "#FFA500"
-                                if (root.streak >= 1)  return Colours.palette.m3primary
-                                return Colours.palette.m3outlineVariant
-                            }
-                            Behavior on color { CAnim { duration: 300 } }
+                            color: root.streakColor
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
                         StyledText {
                             text: String(root.streak)
                             font: Tokens.font.label.medium
-                            color: {
-                                if (root.streak >= 20) return '#fe1d1d'
-                                if (root.streak >= 10) return "#FF8C00"
-                                if (root.streak >= 3)  return "#FFA500"
-                                if (root.streak >= 1)  return Colours.palette.m3primary
-                                return Colours.palette.m3outlineVariant
-                            }
-                            Behavior on color { CAnim { duration: 300 } }
+                            color: root.streakColor
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
                     }
 
@@ -483,8 +466,7 @@ Item {
                     visible: !root.isEditing
                     spacing: 0
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
-                    // Trophy icon for best record target
-                    Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+                    Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
 
                     IconButton {
                         type: IconButton.Text
@@ -581,25 +563,26 @@ Item {
 
                 Repeater {
                     id: subRepeater
-                    model: root.subOrder
+                    // Integer model + lazy: subtask rows only exist while the
+                    // card is expanded (collapsed cards used to build every
+                    // SubtaskCard + its nested rows anyway), and adding /
+                    // toggling / renaming a subtask no longer rebuilds them —
+                    // delegates just re-read root.subtasks[index].
+                    model: root.expanded ? root.subtasks.length : 0
                     delegate: SubtaskCard {
-                        required property string id
                         required property int index
 
-                        readonly property var sub: root.subtaskMap[id] ?? {
-                            id: id, title: "", done: false
-                        }
-                        readonly property int subIdx: index
+                        readonly property var sub: root.subtasks[index] ?? root.emptySub
 
                         taskData: root.taskData
                         taskIndex: root.taskIndex
                         subtaskData: sub
-                        subtaskIndex: subIdx
-                        subtaskId: id
+                        subtaskIndex: index
+                        subtaskId: sub.id ?? ""
 
-                        isHabitList: list.isHabitList
-                        isEditing: root.editingSubId === `${root.taskData.todoId}__${id}`
-                        isSelected: root.isSelected && root.selectedSubtaskIndex === subIdx
+                        isHabitList: root.isHabitList
+                        isEditing: root.editingSubId === `${root.taskId}__${sub.id}`
+                        isSelected: root.isSelected && root.selectedSubtaskIndex === index
 
                         isFirst: index === 0
                         isLast: index === subRepeater.count - 1
@@ -640,7 +623,7 @@ Item {
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
 
-                        Behavior on opacity { CAnim {} }
+                        Behavior on opacity { enabled: root.animate; CAnim {} }
                     }
 
                     StyledTextField {
@@ -649,10 +632,11 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 28
 
-                        font: {
-                            body: Tokens.font.body.medium
-                            pointSize: 11
-                        }
+                        // NOTE: the old `font: { body: ...; pointSize: 11 }` was a
+                        // script block, not an object, so it never applied and
+                        // logged a warning per card. Add e.g.
+                        //   font: Tokens.font.body.medium
+                        // here if you want a specific font.
 
                         placeholderText: qsTr("Add subtask…")
                         placeholderTextColor: Colours.palette.m3onSurfaceVariant

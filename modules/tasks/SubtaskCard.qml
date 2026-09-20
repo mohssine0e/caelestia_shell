@@ -21,15 +21,51 @@ Item {
     property bool isSelected: false
     property bool isHabitList: false
 
-    // ── Tree line properties ────────────────────────────────────
     property bool isFirst: false
     property bool isLast: false
     property bool hasChildren: false
     property int depth: 1
 
-    // ── Indent scaling ──────────────────────────────────────────
-    readonly property int indentUnit: 28
-    readonly property int scaledIndent: root.depth * root.indentUnit
+    property bool expanded: false
+
+    // In preview every row has 2 fake children, so hasChildren is effectively true
+    readonly property bool previewNested: true
+    readonly property int previewChildCount: 2
+    readonly property bool effectiveHasChildren:
+        root.previewNested || root.hasChildren
+    readonly property int visibleChildCount:
+        (root.effectiveHasChildren && root.expanded) ? root.previewChildCount : 0
+
+    // ╔════════════════════════════════════════════════════════════╗
+    // ║  TREE STYLE                                                ║
+    // ╚════════════════════════════════════════════════════════════╝
+    //
+    //  subtask WITH children:
+    //   ╰───☐ title               ← no dot on the elbow
+    //       │
+    //       ╰──● ☐ child           ← child spine sits under this row's checkbox
+    //
+    //  subtask WITHOUT children (standalone):
+    //   ╰───● ☐ title             ← dot present
+    //
+    readonly property var tree: QtObject {
+        readonly property real lineWidth: 2
+        readonly property real cornerRadius: 8
+        readonly property real spineX: 6
+        readonly property real elbowLength: 24
+        // readonly property real contentGap: 12
+        readonly property real contentGap: 6
+        readonly property real dotSize: 6
+        readonly property real dotOpacity: 0.8
+        readonly property color color: Colours.palette.m3primary
+        readonly property real selectedContentShift: 10
+    }
+
+    // ── Derived tree geometry ───────────────────────────────────
+    readonly property real contentStartX:
+        tree.spineX + tree.elbowLength + tree.contentGap
+    readonly property real childSpineX:
+        Math.round(contentStartX + parentCheckbox.x + parentCheckbox.width / 2)
 
     signal toggleRequested(int taskIdx, int subIdx)
     signal deleteRequested(int taskIdx, int subIdx)
@@ -42,319 +78,288 @@ Item {
     readonly property string title: root.subtaskData?.title ?? ""
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
-
-    // Edit field shows "title @minutes" so the estimate round-trips on submit
     readonly property string editPrefill: `${root.title} @${root.subtaskData?.minutes || 0}`
 
-    implicitHeight: subRow.implicitHeight
+    implicitHeight: mainCol.implicitHeight
     Layout.fillWidth: true
 
-    HoverHandler { id: subRowHover }
+    // ── TREE LINES ──────────────────────────────────────────────
+    // showDot is true ONLY when this row has no children.
+    // A row that expands to children has no dot on its own elbow.
+    TreeConnector {
+        anchors.fill: parent
+        rowHeight: rowContainer.height
+        spineX: root.tree.spineX
+        isLast: root.isLast
+        showDot: !root.effectiveHasChildren
+        selected: root.isSelected
 
-    // ── Tree Line Container ─────────────────────────────────────
-    Item {
-        id: treeContainer
-        anchors {
-            left: parent.left
-            top: parent.top
-            bottom: parent.bottom
-        }
-        width: root.scaledIndent + Tokens.spacing.small
-
-        // ── Vertical Line ───────────────────────────────────────
-        StyledRect {
-            id: verticalLine
-            anchors {
-                left: parent.left
-                top: parent.top
-                bottom: parent.bottom
-            }
-            width: 2
-            color: Colours.palette.m3primary
-            visible: !root.isFirst || !root.isLast
-            anchors.topMargin: 0
-            anchors.bottomMargin: root.isLast ? parent.height / 2 : 0
-            Behavior on color { CAnim {} }
-        }
-
-        // ── Horizontal Line ─────────────────────────────────────
-        StyledRect {
-            id: horizontalLine
-            anchors {
-                left: verticalLine.right
-                verticalCenter: parent.verticalCenter
-            }
-            width: Tokens.padding.extraLarge - Tokens.spacing.small+(root.isSelected?6:0)
-            height: 2
-            color: Colours.palette.m3primary
-            Behavior on color { CAnim {} }
-            Behavior on width { Anim { type: Anim.FastSpatial } }
-        }
-
-        // ── Node Dot ────────────────────────────────────────────
-        StyledRect {
-            id: nodeDot
-            anchors {
-                left: horizontalLine.right
-                verticalCenter: parent.verticalCenter
-            }
-            width: root.isSelected ? 12 : 6
-            height: root.isSelected ? 12 : 6
-            radius: root.isSelected ? Tokens.rounding.full : Tokens.rounding.small
-            color: Colours.palette.m3primary
-            opacity: 0.8
-            Behavior on color { CAnim {} }
-            Behavior on width { Anim { type: Anim.FastSpatial } }
-            Behavior on height { Anim { type: Anim.FastSpatial } }
-        }
+        lineWidth: root.tree.lineWidth
+        cornerRadius: root.tree.cornerRadius
+        elbowLength: root.tree.elbowLength
+        lineColor: root.tree.color
+        dotSize: root.tree.dotSize
+        dotOpacity: root.tree.dotOpacity
     }
 
-    // ── Content Row ─────────────────────────────────────────────
-    RowLayout {
-        id: subRow
-        anchors.left: treeContainer.right
-        anchors.leftMargin: root.isSelected ? 9 : 0
+    ColumnLayout {
+        id: mainCol
+        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: Tokens.spacing.small
+        anchors.top: parent.top
+        spacing: 0
 
-        Behavior on anchors.leftMargin { Anim { type: Anim.FastSpatial } }
-        // ── Checkbox ────────────────────────────────────────────
-        MaterialIcon {
-            text: root.isDone ? "check_box" : "check_box_outline_blank"
-            fill: root.isDone ? 1 : 0
-            fontStyle: Tokens.font.icon.small
-            color: Colours.palette.m3primary
-            opacity: root.isDone ? 0.5 : 1
-            Behavior on color { CAnim {} }
-
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -4
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.toggleRequested(root.taskIndex, root.subtaskIndex)
-                    root.selectionRequested(root.taskIndex, root.subtaskIndex)
-                }
-            }
-        }
-
-        // ── Title ───────────────────────────────────────────────
-        StyledText {
-            visible: !root.isEditing
+        // ── THIS ROW ────────────────────────────────────────────
+        Item {
+            id: rowContainer
             Layout.fillWidth: true
+            implicitHeight: subRow.implicitHeight
 
-            text: root.title
-            font: Tokens.font.body.medium
-            elide: Text.ElideRight
+            HoverHandler { id: subRowHover }
 
-            color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
-            opacity: root.isDone ? 0.6 : 1
-            Behavior on color { CAnim {} }
-
-            StyledRect {
+            // ── Content Row ─────────────────────────────────────
+            RowLayout {
+                id: subRow
+                anchors.left: parent.left
+                anchors.leftMargin: root.contentStartX
+                                    + (root.isSelected ? root.tree.selectedContentShift : 0)
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                width: root.isDone ? Math.min(parent.contentWidth, parent.width) : 0
-                height: 1
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3outline
-                Behavior on width { Anim { type: Anim.FastSpatial } }
-            }
+                spacing: Tokens.spacing.small
 
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.selectionRequested(root.taskIndex, root.subtaskIndex)
-            }
-        }
+                Behavior on anchors.leftMargin { Anim { type: Anim.FastSpatial } }
 
+                // ── Checkbox ────────────────────────────────────
+                MaterialIcon {
+                    id: parentCheckbox
+                    text: root.isDone ? "check_box" : "check_box_outline_blank"
+                    fill: root.isDone ? 1 : 0
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3primary
+                    opacity: root.isDone ? 0.5 : 1
+                    Behavior on color { CAnim {} }
 
-        // ── Edit Field ──────────────────────────────────────────
-        StyledTextField {
-            visible: root.isEditing
-            Layout.fillWidth: true
-            text: root.editPrefill
-            font: Tokens.font.body.medium
-            property bool commitInProgress: false
-
-            background: Rectangle {
-                color: "transparent"
-                border.width: 0
-            }
-
-            leftPadding: 0
-            rightPadding: 0
-            topPadding: 0
-            bottomPadding: 0
-            verticalAlignment: Text.AlignVCenter
-
-            function commitEdit() {
-                if (commitInProgress || !root.isEditing)
-                    return
-                commitInProgress = true
-                focus = false   // ← release focus BEFORE emitting
-                // An empty *title* cancels the edit: the "@minutes" tail
-                // must not count as one (e.g. text "@5" alone).
-                if (TitleParse.hasTitle(text))
-                    root.renameRequested(root.taskIndex, root.subtaskIndex, text)
-                else {
-                    text = root.editPrefill
-                    root.editingCancelled()
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.toggleRequested(root.taskIndex, root.subtaskIndex)
+                            root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                        }
+                    }
                 }
-            }
 
-            onVisibleChanged: {
-                if (visible) {
-                    commitInProgress = false
-                    text = root.editPrefill
-                    forceActiveFocus()
-                    // Pre-select only the title part so a quick retype
-                    // keeps the "@minutes" tail that gets parsed on submit.
-                    if (root.title.length > 0 && text.length > root.title.length)
-                        select(0, root.title.length)
-                    else
-                        selectAll()
-                }
-            }
-            onAccepted: commitEdit()
-            Keys.onPressed: event => {
-                // Consume Return/Enter so commit doesn't let the same key
-                // bubble up to TaskList and toggle the task.
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    commitEdit()
-                    event.accepted = true
-                }
-            }
-            Keys.onEscapePressed: event => {
-                commitInProgress = true
-                focus = false
-                root.editingCancelled()
-                text = root.editPrefill
-                event.accepted = true   // don't bubble Escape to the root
-            }
-            onFocusChanged: {
-                if (!focus && root.isEditing && !commitInProgress)
-                    commitEdit()
-            }
-        }
-
-        // ── Estimated time chip ─────────────────────
-        // Right-aligned before the actions; hidden while editing
-        // (the estimate is inline in the edit field) and when unset.
-        RowLayout {
-            visible: !root.isHabitList && !root.isEditing && (root.subtaskData?.minutes || 0) > 0
-            Layout.alignment: Qt.AlignVCenter
-
-            StyledRect {
-                implicitHeight: 20
-                implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3surfaceContainerHighest
-
+                // ── Title ───────────────────────────────────────
+                // Click behavior:
+                //   has children → expand/collapse
+                //   no children  → select (standalone toggle handled by checkbox)
                 StyledText {
-                    id: subMinutesLabel
-                    anchors.centerIn: parent
-                    text: `${root.subtaskData?.minutes || 0}m`
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
+                    visible: !root.isEditing
+                    Layout.fillWidth: true
+                    text: root.title
+                    font: Tokens.font.body.medium
+                    elide: Text.ElideRight
+                    color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    opacity: root.isDone ? 0.6 : 1
+                    Behavior on color { CAnim {} }
+
+                    StyledRect {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: root.isDone ? Math.min(parent.contentWidth, parent.width) : 0
+                        height: 1
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3outline
+                        Behavior on width { Anim { type: Anim.FastSpatial } }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (root.effectiveHasChildren) {
+                                root.expanded = !root.expanded
+                            } else {
+                                root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                            }
+                        }
+                    }
+                }
+
+                // ── Edit Field ──────────────────────────────────
+                StyledTextField {
+                    visible: root.isEditing
+                    Layout.fillWidth: true
+                    text: root.editPrefill
+                    font: Tokens.font.body.medium
+                    property bool commitInProgress: false
+
+                    background: Rectangle { color: "transparent"; border.width: 0 }
+                    leftPadding: 0
+                    rightPadding: 0
+                    topPadding: 0
+                    bottomPadding: 0
+                    verticalAlignment: Text.AlignVCenter
+
+                    function commitEdit() {
+                        if (commitInProgress || !root.isEditing) return
+                        commitInProgress = true
+                        focus = false
+                        if (TitleParse.hasTitle(text))
+                            root.renameRequested(root.taskIndex, root.subtaskIndex, text)
+                        else {
+                            text = root.editPrefill
+                            root.editingCancelled()
+                        }
+                    }
+
+                    onVisibleChanged: {
+                        if (visible) {
+                            commitInProgress = false
+                            text = root.editPrefill
+                            forceActiveFocus()
+                            if (root.title.length > 0 && text.length > root.title.length)
+                                select(0, root.title.length)
+                            else
+                                selectAll()
+                        }
+                    }
+                    onAccepted: commitEdit()
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            commitEdit()
+                            event.accepted = true
+                        }
+                    }
+                    Keys.onEscapePressed: event => {
+                        commitInProgress = true
+                        focus = false
+                        root.editingCancelled()
+                        text = root.editPrefill
+                        event.accepted = true
+                    }
+                    onFocusChanged: {
+                        if (!focus && root.isEditing && !commitInProgress)
+                            commitEdit()
+                    }
+                }
+
+                // ── Estimated time chip ─────────────────────────
+                RowLayout {
+                    visible: !root.isHabitList && !root.isEditing && (root.subtaskData?.minutes || 0) > 0
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledRect {
+                        implicitHeight: 20
+                        implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHighest
+
+                        StyledText {
+                            id: subMinutesLabel
+                            anchors.centerIn: parent
+                            text: `${root.subtaskData?.minutes || 0}m`
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
+                    }
+                }
+
+                // ── Action Buttons ──────────────────────────────
+                RowLayout {
+                    visible: !root.isEditing
+                    spacing: 0
+                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
+                    Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "edit"
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                                root.editingStarted(root.editId)
+                            }
+                        }
+                    }
+
+                    IconButton {
+                        id: subDeleteButton
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "delete_outline"
+
+                        property bool isShaking: false
+
+                        onClicked: {
+                            if (!isShaking) {
+                                isShaking = true
+                                shakeAnim.start()
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: subDeleteButton.clicked()
+                            onDoubleClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
+                        }
+
+                        SequentialAnimation {
+                            id: shakeAnim
+                            onFinished: {
+                                subDeleteButton.isShaking = false
+                                subDeleteButton.rotation = 0
+                            }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -8; to: 8; duration: 80 }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 8; to: -8; duration: 80 }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -8; to: 8; duration: 80 }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 8; to: -8; duration: 80 }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -4; to: 4; duration: 50 }
+                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 4; to: 0; duration: 50 }
+                        }
+                    }
                 }
             }
         }
 
-        // ── Action Buttons ──────────────────────────
-        RowLayout {
-            visible: !root.isEditing
+        // ── NESTED ROWS ─────────────────────────────────────────
+        ColumnLayout {
+            id: nestedColumn
+            Layout.fillWidth: true
+            Layout.leftMargin: root.isSelected ? root.tree.selectedContentShift : 0
+            Behavior on Layout.leftMargin { Anim { type: Anim.FastSpatial } }
+            Layout.topMargin: 0
             spacing: 0
-            opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
-            Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+            visible: root.effectiveHasChildren && root.expanded
 
-            IconButton {
-                type: IconButton.Text
-                font: Tokens.font.icon.small
-                icon: "edit"
-
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.selectionRequested(root.taskIndex, root.subtaskIndex)
-                        root.editingStarted(root.editId)
-                    }
-                }
+            NestedSubtaskCard {
+                Layout.fillWidth: true
+                parentSubtaskData: root.subtaskData
+                parentSubtaskId: root.subtaskId
+                isHabitList: root.isHabitList
+                isSelected: false
+                isFirst: true
+                isLast: false
+                tree: root.tree
+                treeSpineX: root.childSpineX
             }
 
-            IconButton {
-                id: subDeleteButton
-                type: IconButton.Text
-                font: Tokens.font.icon.small
-                icon: "delete_outline"
-
-                property bool isShaking: false
-
-                onClicked: {
-                    if (!isShaking) {
-                        isShaking = true
-                        shakeAnim.start()
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton
-                    onClicked: subDeleteButton.clicked()
-                    onDoubleClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
-                }
-
-                SequentialAnimation {
-                    id: shakeAnim
-                    onFinished: {
-                        subDeleteButton.isShaking = false
-                        subDeleteButton.rotation = 0
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: -8
-                        to: 8
-                        duration: 80
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: 8
-                        to: -8
-                        duration: 80
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: -8
-                        to: 8
-                        duration: 80
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: 8
-                        to: -8
-                        duration: 80
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: -4
-                        to: 4
-                        duration: 50
-                    }
-                    PropertyAnimation {
-                        target: subDeleteButton
-                        property: "rotation"
-                        from: 4
-                        to: 0
-                        duration: 50
-                    }
-                }
+            NestedSubtaskCard {
+                Layout.fillWidth: true
+                parentSubtaskData: root.subtaskData
+                parentSubtaskId: root.subtaskId
+                isHabitList: root.isHabitList
+                isSelected: false
+                isFirst: false
+                isLast: true
+                tree: root.tree
+                treeSpineX: root.childSpineX
             }
         }
     }

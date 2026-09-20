@@ -36,16 +36,30 @@ FocusScope {
     property bool tasksLoaded: false
     property var taskMap: ({})
     property var taskIndexMap: ({})
-    // P-A3 memoized derived per-task (progress, duration, subtask maps) — single cache per todoId,
-    // invalidated only when that task object identity changes (DataManager keeps refs for unchanged tasks)
+
+    // ── Derived-data caches ─────────────────────────────────────
+    // Plain JS objects that are MUTATED IN PLACE and never re-assigned
+    // (except resetCaches on load). The old copy-on-write caches
+    // re-assigned the property from inside delegate bindings, which
+    // re-triggered every delegate's binding on each cache miss (and
+    // copied the whole cache each time).
+    // Entries are validated by task identity (entry.task === current task
+    // object), so nothing needs manual invalidation: a changed task simply
+    // misses and is recomputed.
     property var _progressCache: ({})
-    property var _subtaskMapCache: ({})
-    property var _taskDurationCache: ({})
-    property var _subOrderCache: ({})
+    property var _durationCache: ({})
+    property var _searchCache: ({})
+    readonly property var _emptyProgress: ({ total: 0, done: 0, ratio: 0 })
+
+    function resetCaches() {
+        _progressCache = ({})
+        _durationCache = ({})
+        _searchCache = ({})
+    }
 
     function getProgressData(todoId) {
         var task = taskMap[todoId]
-        if (!task) return { total: 0, done: 0, ratio: 0 }
+        if (!task) return _emptyProgress
         var cached = _progressCache[todoId]
         if (cached && cached.task === task) return cached.value
         var subs = task.subtasks || []
@@ -55,32 +69,17 @@ FocusScope {
             res = { total: 0, done: 0, ratio: task.done ? 1 : 0 }
         } else {
             var done = 0
-            for (var i = 0; i < subs.length; i++) if (subs[i].done) done++
+            for (var i = 0; i < total; i++) if (subs[i].done) done++
             res = { total: total, done: done, ratio: done / total }
         }
-        // replace-on-write to keep binding cheap (only this key changes)
-        var next = Object.assign({}, _progressCache)
-        next[todoId] = { task: task, value: res }
-        _progressCache = next
+        _progressCache[todoId] = { task: task, value: res }
         return res
     }
-    function getSubtaskMapCached(todoId) {
-        var task = taskMap[todoId]
-        if (!task) return {}
-        var cached = _subtaskMapCache[todoId]
-        if (cached && cached.task === task) return cached.value
-        var map = {}
-        var subs = task.subtasks || []
-        for (var i = 0; i < subs.length; i++) map[subs[i].id] = subs[i]
-        var next = Object.assign({}, _subtaskMapCache)
-        next[todoId] = { task: task, value: map }
-        _subtaskMapCache = next
-        return map
-    }
+
     function getTaskDuration(todoId) {
         var task = taskMap[todoId]
         if (!task) return 0
-        var cached = _taskDurationCache[todoId]
+        var cached = _durationCache[todoId]
         if (cached && cached.task === task) return cached.value
         var subs = task.subtasks || []
         var val = 0
@@ -89,23 +88,35 @@ FocusScope {
         } else {
             val = task.minutes || 0
         }
-        var next = Object.assign({}, _taskDurationCache)
-        next[todoId] = { task: task, value: val }
-        _taskDurationCache = next
+        _durationCache[todoId] = { task: task, value: val }
         return val
     }
-    function getSubOrder(todoId) {
-        var task = taskMap[todoId]
-        if (!task) return []
-        var cached = _subOrderCache[todoId]
-        if (cached && cached.task === task) return cached.value
-        var order = []
+
+    // One lower-cased haystack per task (title + subtask titles) so a search
+    // is a single indexOf per task instead of toLowerCase() on every subtask.
+    function getSearchText(todoId, task) {
+        var cached = _searchCache[todoId]
+        if (cached && cached.task === task) return cached.text
+        var parts = [task.title || ""]
         var subs = task.subtasks || []
-        for (var i = 0; i < subs.length; i++) order.push({ id: subs[i].id })
-        var next = Object.assign({}, _subOrderCache)
-        next[todoId] = { task: task, value: order }
-        _subOrderCache = next
-        return order
+        for (var i = 0; i < subs.length; i++) parts.push(subs[i].title || "")
+        var text = parts.join("\n").toLowerCase()
+        _searchCache[todoId] = { task: task, text: text }
+        return text
+    }
+
+    readonly property string searchLower: searchQuery.trim().toLowerCase()
+
+    // THE filter (status + search). Used by the delegates' `visible`,
+    // isTaskVisible() and visibleTaskCount, so the rules live in one place.
+    function matchesFilter(task, todoId) {
+        if (!task) return false
+        var status = list.statusFilter
+        if (status === "active" && task.done) return false
+        if (status === "done" && !task.done) return false
+        var q = list.searchLower
+        if (q && getSearchText(todoId, task).indexOf(q) === -1) return false
+        return true
     }
 
     // ── Data Layer (DataManager bridge) ──
@@ -210,7 +221,7 @@ FocusScope {
         onTriggered: list.save()
     }
 
-    // Debounce search so typing "lab" doesn't do 3× O(n*m) scans in quick succession (P-A5)
+    // Debounce search so typing "lab" doesn't move the selection 3× in quick succession (P-A5)
     Timer {
         id: searchDebounce
         interval: 80
@@ -229,41 +240,14 @@ FocusScope {
         taskMap = dataManager.getTaskMap();
         taskIndexMap = dataManager.getTaskIndexMap();
     }
-    // P-A2 incremental: update only one taskId (lighter than full O(n) rebuild) — keeps taskIndexMap as is when index unchanged
+    // Incremental: swap in only one task (no per-cache invalidation needed —
+    // the caches validate by task identity).
     function updateMapsForTask(taskId) {
         var fresh = dataManager.getTaskMap()[taskId]
-        if (fresh) {
-            var nextMap = Object.assign({}, taskMap)
-            nextMap[taskId] = fresh
-            taskMap = nextMap
-            // invalidate per-task caches for this id only
-            if (_progressCache[taskId]) { var n = Object.assign({}, _progressCache); delete n[taskId]; _progressCache = n }
-            if (_subtaskMapCache[taskId]) { var n2 = Object.assign({}, _subtaskMapCache); delete n2[taskId]; _subtaskMapCache = n2 }
-            if (_taskDurationCache[taskId]) { var n3 = Object.assign({}, _taskDurationCache); delete n3[taskId]; _taskDurationCache = n3 }
-            if (_subOrderCache[taskId]) { var n4 = Object.assign({}, _subOrderCache); delete n4[taskId]; _subOrderCache = n4 }
-            if (_titleLowerCache[taskId]) { var n5 = Object.assign({}, _titleLowerCache); delete n5[taskId]; _titleLowerCache = n5 }
-        } else {
-            // deleted — remove from maps (index map will be rebuilt lazily via full updateMaps when needed)
-            if (taskMap[taskId] !== undefined) {
-                var nm = Object.assign({}, taskMap); delete nm[taskId]; taskMap = nm
-            }
-            if (_progressCache[taskId]) { var nc = Object.assign({}, _progressCache); delete nc[taskId]; _progressCache = nc }
-            if (_titleLowerCache[taskId]) { var nt = Object.assign({}, _titleLowerCache); delete nt[taskId]; _titleLowerCache = nt }
-        }
-    }
-    // P-B cached lower search (avoid per-task toLower per frame)
-    readonly property string searchLower: searchQuery.trim().toLowerCase()
-    property var _titleLowerCache: ({})
-    function getTitleLower(todoId) {
-        var task = taskMap[todoId]
-        if (!task) return ""
-        var cached = _titleLowerCache[todoId]
-        if (cached && cached.task === task) return cached.value
-        var v = task.title ? task.title.toLowerCase() : ""
-        var next = Object.assign({}, _titleLowerCache)
-        next[todoId] = { task: task, value: v }
-        _titleLowerCache = next
-        return v
+        var next = Object.assign({}, taskMap)
+        if (fresh) next[taskId] = fresh
+        else delete next[taskId]   // deleted — index map is rebuilt by the full updateMaps() path
+        taskMap = next
     }
 
     function updateFilteredModel() {
@@ -289,29 +273,11 @@ FocusScope {
         }
     }
 
-    // Mirrors the delegates' visible binding (status filter + search). P-B: uses cached searchLower + titleLower
+    // Mirrors the delegates' visible binding (status filter + search).
     function isTaskVisible(index) {
         var entry = filteredModel.get(index);
-        var task = entry ? list.taskMap[entry.todoId] : null;
-        if (!task) return false;
-
-        if (list.statusFilter === "active" && task.done) return false;
-        if (list.statusFilter === "done" && !task.done) return false;
-
-        var q = list.searchLower
-        if (q) {
-            var matchTitle = getTitleLower(entry.todoId).indexOf(q) !== -1
-            var matchSub = false
-            var subs = task.subtasks || []
-            for (var j = 0; j < subs.length; j++) {
-                if (subs[j].title && subs[j].title.toLowerCase().indexOf(q) !== -1) {
-                    matchSub = true
-                    break
-                }
-            }
-            if (!matchTitle && !matchSub) return false
-        }
-        return true
+        if (!entry) return false;
+        return list.matchesFilter(list.taskMap[entry.todoId], entry.todoId);
     }
 
     // Nearest visible index searching from `from` in `dir` (+1 / -1) with
@@ -384,30 +350,10 @@ FocusScope {
 
     readonly property int visibleTaskCount: {
         var count = 0
-        var q = list.searchLower
         for (var i = 0; i < filteredModel.count; i++) {
             var todoId = filteredModel.get(i).todoId
-            var task = list.taskMap[todoId]
-            if (!task) continue
-
-            if (list.statusFilter === "active" && task.done) continue
-            if (list.statusFilter === "done" && !task.done) continue
-
-            if (q) {
-                var matchTitle = getTitleLower(todoId).indexOf(q) !== -1
-                var matchSubtask = false
-                if (task.subtasks) {
-                    for (var j = 0; j < task.subtasks.length; j++) {
-                        if (task.subtasks[j].title && task.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
-                            matchSubtask = true
-                            break
-                        }
-                    }
-                }
-                if (!matchTitle && !matchSubtask) continue
-            }
-
-            count++
+            if (list.matchesFilter(list.taskMap[todoId], todoId))
+                count++
         }
         return count
     }
@@ -623,16 +569,19 @@ FocusScope {
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
                 }
+                list.resetCaches();
                 list.tasks = parsed;
                 list.tasksLoaded = true;
                 list.finishLoad();
             } catch (e) {
+                list.resetCaches();
                 list.tasks = [];
                 list.tasksLoaded = true;
                 list.finishLoad();
             }
         }
         onLoadFailed: function(err) {
+            list.resetCaches();
             list.tasks = [];
             list.tasksLoaded = true;
             if (err === FileViewError.FileNotFound)
@@ -664,14 +613,14 @@ FocusScope {
     // ── Optimized View: virtualized ListView (P-A1) — only visible delegates instantiated
     // Replaces StyledFlickable+ColumnLayout+Repeater (which created all delegates) with
     // ListView reuseItems. Keeps emptyState as overlay, not as delegate, so hidden filtered
-    // tasks don't reserve space. CacheBuffer 500 keeps scroll smooth.
+    // tasks don't reserve space. cacheBuffer trades scroll smoothness for fewer live cards.
     ListView {
         id: scroller
         anchors.fill: parent
         clip: true
         model: filteredModel
         spacing: Tokens.spacing.small
-        cacheBuffer: 500
+        cacheBuffer: 300
         reuseItems: true
         interactive: contentHeight > height
         flickableDirection: Flickable.VerticalFlick
@@ -688,27 +637,7 @@ FocusScope {
             width: ListView.view ? ListView.view.width : parent ? parent.width : 0
             // Collapse hidden filtered items to 0 height so they don't reserve space in ListView
             height: visible ? implicitHeight : 0
-            visible: {
-                var t = task
-                if (!t) return false
-                if (list.statusFilter === "active" && t.done) return false
-                if (list.statusFilter === "done" && !t.done) return false
-                var q = list.searchLower
-                if (q) {
-                    var matchTitle = list.getTitleLower(todoId).indexOf(q) !== -1
-                    var matchSubtask = false
-                    if (t.subtasks) {
-                        for (var j = 0; j < t.subtasks.length; j++) {
-                            if (t.subtasks[j].title && t.subtasks[j].title.toLowerCase().indexOf(q) !== -1) {
-                                matchSubtask = true
-                                break
-                            }
-                        }
-                    }
-                    if (!matchTitle && !matchSubtask) return false
-                }
-                return true
-            }
+            visible: list.matchesFilter(task, todoId)
 
             property var taskMap: list.taskMap
             property var taskIndexMap: list.taskIndexMap
@@ -733,7 +662,7 @@ FocusScope {
                 return idx !== undefined ? idx : -1
             })()
 
-            // P-A3 memoized: single cache per todoId, not per-delegate loop
+            // Memoized per task (identity-validated, mutated in place)
             readonly property var progressData: list.getProgressData(todoId)
 
             taskData: task
@@ -743,8 +672,9 @@ FocusScope {
             selectedSubtaskIndex: list.selectedIndex === index ? list.selectedSubtaskIndex : -1
             nSub: progressData.total
             dSub: progressData.done
-            subOrder: list.getSubOrder(todoId)
             prog: progressData.ratio
+            taskDuration: list.getTaskDuration(todoId)
+            isHabitList: list.isHabitList
             icon: list.isHabitList ? (task.icon || "") : ""
             showStreak: list.isHabitList
 
