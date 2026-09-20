@@ -19,6 +19,9 @@ Item {
     required property string subtaskId
     required property bool isEditing
     property string editingNestedId: ""
+    // Scope cursor from TaskList: which nested row (if any) is highlighted
+    // while this subtask is selected (-1 = this row itself).
+    property int selectedNestedIndex: -1
     property bool isSelected: false
     property bool isHabitList: false
 
@@ -28,6 +31,20 @@ Item {
     property int depth: 1
 
     property bool expanded: false
+
+    // Expansion is owned by TaskNavigationController when one is wired in
+    // (falls back to the local property otherwise).
+    property var nav: null
+    readonly property bool effectiveExpanded:
+        root.nav ? (root.nav.expandedSubtasks[`${root.taskData?.todoId}/${root.subtaskId}`] ?? false) : root.expanded
+
+    // Expansion toggle routed through the controller when wired in.
+    function setExpanded(v) {
+        if (root.nav)
+            root.nav.setSubExpanded(root.taskData?.todoId ?? "", root.subtaskId, v)
+        else
+            root.expanded = v
+    }
 
     // ── Add-child state ─────────────────────────────────────────
     property bool addingChild: false
@@ -46,7 +63,7 @@ Item {
     readonly property bool effectiveHasChildren:
         root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
     readonly property int visibleChildCount:
-        (root.effectiveHasChildren && root.expanded) ? Math.max(root.nestedChildren.length, root.addingChild ? 1 : 0) : 0
+        (root.effectiveHasChildren && root.effectiveExpanded) ? Math.max(root.nestedChildren.length, root.addingChild ? 1 : 0) : 0
 
     // ╔════════════════════════════════════════════════════════════╗
     // ║  TREE STYLE                                                ║
@@ -98,7 +115,8 @@ Item {
         rowHeight: rowContainer.height
         spineX: root.tree.spineX
         isLast: root.isLast
-        showDot: !root.effectiveHasChildren
+        // showDot: !root.effectiveHasChildren
+        showDot: true
         selected: root.isSelected
 
         lineWidth: root.tree.lineWidth
@@ -183,7 +201,7 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             if (root.effectiveHasChildren) {
-                                root.expanded = !root.expanded
+                                root.setExpanded(!root.effectiveExpanded)
                             } else {
                                 root.selectionRequested(root.taskIndex, root.subtaskIndex)
                             }
@@ -288,7 +306,7 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 root.selectionRequested(root.taskIndex, root.subtaskIndex)
-                                root.expanded = true
+                                root.setExpanded(true)
                                 root.addingChild = true
                                 addChildField.focus=true
                             }
@@ -360,7 +378,7 @@ Item {
             Behavior on Layout.leftMargin { Anim { type: Anim.FastSpatial } }
             Layout.topMargin: 0
             spacing: 0
-            visible: root.effectiveHasChildren && root.expanded
+            visible: root.effectiveHasChildren && root.effectiveExpanded
 
             Repeater {
                 id: nestedRepeater
@@ -378,7 +396,7 @@ Item {
                     taskIndex: root.taskIndex
                     subtaskIndex: root.subtaskIndex
                     isHabitList: root.isHabitList
-                    isSelected: false
+                    isSelected: root.isSelected && root.selectedNestedIndex === index
                     isEditing: root.editingNestedId === (modelData?.id ?? "")
                     isFirst: index === 0
                     isLast: index === nestedRepeater.count - 1

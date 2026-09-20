@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Caelestia
+import Caelestia.Components
 import Caelestia.Config
 import qs.components
 import qs.components.controls
@@ -143,12 +144,9 @@ FocusScope {
                     break;
                 }
             }
-            if (list.selectedIndex >= filteredModel.count) {
-                list.selectedIndex = filteredModel.count - 1;
-            }
             list.tasks = dataManager.tasks;
             list.updateMaps();
-            list.refresh();
+            list.refresh(); // rebuilds structure → controller clamps the cursor
         }
 
         onTaskToggled: (taskId, newState) => {
@@ -170,6 +168,7 @@ FocusScope {
         onSubtaskAdded: (taskId, subtaskId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
@@ -192,24 +191,21 @@ FocusScope {
         onSubtaskDeleted: (taskId, subtaskId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
-            // Clamp: the removed row may have owned the cursor.
-            var delCard = list.selectedCard()
-            if (delCard && delCard.nSub <= 0)
-                list.selectedSubtaskIndex = -1
-            else if (delCard && list.selectedSubtaskIndex >= delCard.nSub)
-                list.selectedSubtaskIndex = delCard.nSub - 1
+            list.rebuildNavCounts() // controller clamps the cursor to the new counts
             list.requestSave()
         }
 
         onNestedSubtaskAdded: (taskId, subtaskId, nestedId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
         onNestedSubtaskToggled: (taskId, subtaskId, nestedId, newState) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
@@ -220,12 +216,14 @@ FocusScope {
             list.renameJustCommitted = true
             renameCommitGuard.restart()
             list.restoreKeyboardFocus()
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
         onNestedSubtaskDeleted: (taskId, subtaskId, nestedId) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.rebuildNavCounts() // controller clamps the nested cursor
             list.requestSave()
         }
 
@@ -264,8 +262,8 @@ FocusScope {
         id: searchDebounce
         interval: 80
         onTriggered: {
-            list.selectedIndex = list.firstVisibleIndex()
-            list.selectedSubtaskIndex = -1
+            navController.selectTask(list.firstVisibleIndex())
+            list.rebuildNavCounts()
         }
     }
 
@@ -345,13 +343,12 @@ FocusScope {
     // toggled away under the "active" filter).
     function ensureSelectionVisible() {
         if (filteredModel.count === 0) {
-            list.selectedIndex = -1;
+            navController.selectTask(-1);
             return;
         }
-        if (list.selectedIndex >= filteredModel.count)
-            list.selectedIndex = filteredModel.count - 1;
-        if (list.selectedIndex >= 0 && !list.isTaskVisible(list.selectedIndex))
-            list.selectedIndex = list.nextVisibleIndex(list.selectedIndex, 1);
+        // Structure was just rebuilt; let the controller clamp the cursor
+        // (visible row, sub bounds, nested bounds) in one shot.
+        navController.clampToStructure();
     }
 
     function refresh() {
@@ -359,6 +356,7 @@ FocusScope {
         list.updateMaps();
         list.updateFilteredModel();
         list.ensureSelectionVisible();
+        list.rebuildNavCounts();
         list.requestSave();
     }
 
@@ -374,14 +372,15 @@ FocusScope {
             dataManager.tasks = list.tasks;
             list.updateMaps();
             list.updateFilteredModel();
+            list.rebuildNavCounts();
         }
     }
 
     onStatusFilterChanged: {
         // Instant: the delegates hide/show via their visible bindings,
         // no model rebuild — just move the selection to a visible task.
-        list.selectedSubtaskIndex = -1;
-        list.selectedIndex = list.firstVisibleIndex();
+        navController.selectTask(list.firstVisibleIndex());
+        list.rebuildNavCounts();
     }
 
     onSearchQueryChanged: searchDebounce.restart()
@@ -398,8 +397,6 @@ FocusScope {
 
     property string editingTaskId: ""
     property string editingSubId: ""
-    property int selectedIndex: -1
-    property int selectedSubtaskIndex: -1
     // Set when a rename commit returns focus to the list: the Enter key
     // that triggered the commit must not then toggle the task.
     property bool renameJustCommitted: false
@@ -411,10 +408,91 @@ FocusScope {
     }
     focus: true
 
-    onSelectedIndexChanged: list.selectedSubtaskIndex = -1
+    // ── Keyboard cursor + expansion: owned by TaskNavigationController (C++) ──
+    // behaviors.txt §2: scope triple (listIndex, subIdx, nestedIdx), -1 = header.
+    // QML feeds a structure snapshot (sizes + visibility only) and forwards
+    // mutation intents; the controller is the single source of truth.
+    TaskNavigationController {
+        id: navController
+        structure: list.navRows
+
+        onToggleTaskRequested: li => {
+            const ti = list.dataTaskIndex(li)
+            if (ti >= 0) dataManager.toggleTask(ti)
+        }
+        onToggleSubtaskRequested: (li, si) => {
+            const ti = list.dataTaskIndex(li)
+            if (ti >= 0) dataManager.toggleSubtask(ti, si)
+        }
+        onToggleNestedRequested: (li, si, ni) => {
+            const ti = list.dataTaskIndex(li)
+            if (ti >= 0) dataManager.toggleNestedSubtask(ti, si, ni)
+        }
+        onEditTaskRequested: li => {
+            list.editingSubId = ""
+            list.editingTaskId = list.todoIdAt(li)
+        }
+        onEditSubtaskRequested: (li, si) => {
+            list.editingTaskId = ""
+            list.editingSubId = `${list.todoIdAt(li)}__${list.subIdAt(li, si)}`
+        }
+        onEditNestedRequested: (li, si, ni) => {
+            list.editingTaskId = ""
+            list.editingSubId = list.nestedIdAt(li, si, ni)
+        }
+        onScrollToIndex: li => list.keepSelectedVisible(scroller.itemAtIndex(li))
+        onFocusListRequested: list.forceActiveFocus()
+    }
+
+    // Per visible task: { todoId, visible, nSub, nestedCounts: [int…] }.
+    // Sizes only — the controller traverses this instead of delegates, so
+    // navigation works while cards are virtualized away.
+    property var navRows: []
+    function rebuildNavCounts() {
+        var arr = []
+        var n = filteredModel.count
+        for (var i = 0; i < n; i++) {
+            var todoId = filteredModel.get(i).todoId
+            var task = list.taskMap[todoId]
+            var subs = task ? (task.subtasks || []) : []
+            var nested = []
+            for (var j = 0; j < subs.length; j++)
+                nested.push((subs[j].children || []).length)
+            arr.push({
+                todoId: todoId,
+                visible: list.matchesFilter(task, todoId),
+                nSub: subs.length,
+                nestedCounts: nested
+            })
+        }
+        list.navRows = arr
+    }
+    function navOf(listIndex) {
+        return (listIndex >= 0 && listIndex < list.navRows.length) ? list.navRows[listIndex] : null
+    }
+
+    // listIndex → data-layer resolvers (controller speaks list indices only)
+    function todoIdAt(listIndex) {
+        if (listIndex < 0 || listIndex >= filteredModel.count) return ""
+        return filteredModel.get(listIndex).todoId
+    }
+    function dataTaskIndex(listIndex) {
+        const id = list.todoIdAt(listIndex)
+        return id ? (list.taskIndexMap[id] ?? -1) : -1
+    }
+    function subIdAt(listIndex, subIdx) {
+        const task = list.taskMap[list.todoIdAt(listIndex)]
+        return task ? ((task.subtasks || [])[subIdx] || {}).id ?? "" : ""
+    }
+    function nestedIdAt(listIndex, subIdx, nestedIdx) {
+        const task = list.taskMap[list.todoIdAt(listIndex)]
+        if (!task) return ""
+        const kids = ((task.subtasks || [])[subIdx] || {}).children || []
+        return (kids[nestedIdx] || {}).id ?? ""
+    }
 
     function selectedCard() {
-        return selectedIndex >= 0 ? scroller.itemAtIndex(selectedIndex) : null;
+        return navController.selectedIndex >= 0 ? scroller.itemAtIndex(navController.selectedIndex) : null;
     }
 
     function restoreKeyboardFocus() {
@@ -430,33 +508,47 @@ FocusScope {
     }
 
     function selectTask(index) {
-        selectedIndex = index;
-        selectedSubtaskIndex = -1;
-        keepSelectedVisible(selectedCard());
+        navController.selectTask(index);
     }
 
     function toggleSelected() {
-        var card = selectedCard();
-        if (!card)
+        const li = navController.selectedIndex;
+        const ti = list.dataTaskIndex(li);
+        if (ti < 0)
             return;
-        if (list.selectedSubtaskIndex >= 0)
-            dataManager.toggleSubtask(card.taskIndex, list.selectedSubtaskIndex);
-        else if (card.nSub === 0)
-            dataManager.toggleTask(card.taskIndex);
+        const si = navController.selectedSubtaskIndex;
+        const ni = navController.selectedNestedIndex;
+        if (si >= 0 && ni >= 0)
+            dataManager.toggleNestedSubtask(ti, si, ni);
+        else if (si >= 0)
+            dataManager.toggleSubtask(ti, si);
+        else
+            dataManager.toggleTask(ti); // header: no subs → direct; with subs → cascade
     }
 
     function beginEditingSelected() {
-        var card = selectedCard();
-        if (!card)
+        const li = navController.selectedIndex;
+        const taskId = list.todoIdAt(li);
+        if (!taskId)
             return;
+        const task = list.taskMap[taskId];
+        const si = navController.selectedSubtaskIndex;
+        const ni = navController.selectedNestedIndex;
 
-        if (list.selectedSubtaskIndex >= 0 && list.selectedSubtaskIndex < card.nSub) {
-            var subtask = card.taskData.subtasks[list.selectedSubtaskIndex];
+        if (si >= 0 && ni >= 0 && task) {
+            const kids = ((task.subtasks || [])[si] || {}).children || [];
+            if (ni < kids.length) {
+                list.editingTaskId = "";
+                list.editingSubId = kids[ni].id;
+                return;
+            }
+        }
+        if (si >= 0 && task && si < (task.subtasks || []).length) {
             list.editingTaskId = "";
-            list.editingSubId = `${card.taskId}__${subtask.id}`;
+            list.editingSubId = `${taskId}__${task.subtasks[si].id}`;
         } else {
             list.editingSubId = "";
-            list.editingTaskId = card.taskId;
+            list.editingTaskId = taskId;
         }
     }
 
@@ -469,8 +561,8 @@ FocusScope {
             return;
         }
         // Virtualized case: delegate not instantiated (offscreen) — ask ListView to bring it into view
-        if (selectedIndex >= 0 && scroller.positionViewAtIndex) {
-            scroller.positionViewAtIndex(selectedIndex, ListView.Contain);
+        if (navController.selectedIndex >= 0 && scroller.positionViewAtIndex) {
+            scroller.positionViewAtIndex(navController.selectedIndex, ListView.Contain);
         }
     }
 
@@ -515,89 +607,35 @@ FocusScope {
             return;
         }
 
-        var nextIndex = list.selectedIndex;
-        if (event.key === Qt.Key_F2) {
-            list.beginEditingSelected();
-            event.accepted = true;
-            return;
-        } else if (event.key === Qt.Key_Down) {
-            var downCard = list.selectedCard();
-            if (downCard && downCard.expanded && downCard.nSub > 0) {
-                // Circular inside the card (as before); task-to-task moves
-                // happen from the task header (subtask -1) via the path below.
-                if (list.selectedSubtaskIndex >= 0) {
-                    list.selectedSubtaskIndex = (list.selectedSubtaskIndex + 1) % downCard.nSub;
-                    list.keepSelectedVisible(downCard);
-                    event.accepted = true;
-                    return;
-                }
-            }
-            var count = filteredModel.count;
-            if (count > 0) {
-                nextIndex = list.nextVisibleIndex(list.selectedIndex, 1);
-            }
-            list.selectedSubtaskIndex = -1;
-        } else if (event.key === Qt.Key_Up) {
-            var upCard = list.selectedCard();
-            if (upCard && upCard.expanded && upCard.nSub > 0) {
-                // Circular inside the card (as before); task-to-task moves
-                // happen from the task header (subtask -1) via the path below.
-                if (list.selectedSubtaskIndex >= 0) {
-                    list.selectedSubtaskIndex = (list.selectedSubtaskIndex - 1 + upCard.nSub) % upCard.nSub;
-                    list.keepSelectedVisible(upCard);
-                    event.accepted = true;
-                    return;
-                }
-            }
-            var count = filteredModel.count;
-            if (count > 0) {
-                var cur = list.selectedIndex;
-                nextIndex = (cur < 0) ? list.lastVisibleIndex() : list.nextVisibleIndex(cur, -1);
-            }
-            list.selectedSubtaskIndex = -1;
-        } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
-            var card = list.selectedCard();
-            if (!card) {
-                event.accepted = false;
-                return;
-            } else if (event.key === Qt.Key_Left) {
-                // Two-step collapse: first Left on a subtask deselects to
-                // the task header but keeps the card expanded; second Left
-                // on the header collapses it.
-                if (list.selectedSubtaskIndex >= 0) {
-                    list.selectedSubtaskIndex = -1;
-                    list.restoreKeyboardFocus()
-                } else {
-                    restoreKeyboardFocus()
-                    card.expanded = false;
-                }
-            } else if (list.selectedSubtaskIndex < 0) {
-                card.expanded = true;
-                if (card.nSub > 0) list.selectedSubtaskIndex = 0;
-            }
-            event.accepted = true;
-            return;
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            // Swallow the Enter that triggered a rename commit so it
-            // doesn't also toggle the just-edited item.
-            if (list.renameJustCommitted) {
-                list.renameJustCommitted = false
-                event.accepted = true
-                return
-            }
-            list.toggleSelected();
-            event.accepted = true;
-            return;
-        } else {
-            event.accepted = false;
-            return;
+        // Swallow the Enter that triggered a rename commit so it
+        // doesn't also toggle the just-edited item.
+        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && list.renameJustCommitted) {
+            list.renameJustCommitted = false
+            event.accepted = true
+            return
         }
 
-        if (filteredModel.count > 0) {
-            list.selectTask(nextIndex);
-            list.keepSelectedVisible(list.selectedCard());
+        // behaviors.txt §2 Right drill-in, step 1: a collapsed subtask with
+        // children expands first (cursor stays on the row). The controller's
+        // moveRight then enters nested 0 on the next Right.
+        if (event.key === Qt.Key_Right && navController.selectedSubtaskIndex >= 0
+                && navController.selectedNestedIndex < 0) {
+            const row = list.navOf(navController.selectedIndex)
+            if (row && (row.nestedCounts[navController.selectedSubtaskIndex] || 0) > 0) {
+                const sub = list.selectedCard()?.subDelegate(navController.selectedSubtaskIndex)
+                if (sub && !sub.effectiveExpanded) {
+                    navController.setSubExpanded(list.todoIdAt(navController.selectedIndex),
+                        list.subIdAt(navController.selectedIndex, navController.selectedSubtaskIndex), true)
+                    event.accepted = true
+                    return
+                }
+            }
         }
-        event.accepted = true;
+
+        // Everything else (Up/Down/Left/Right/Enter/F2/Escape) is the
+        // controller's scope-based model.
+        if (navController.handleKey(event.key, event.modifiers))
+            event.accepted = true
     }
 
     // ── Persistence (load/save) ──
@@ -716,9 +754,13 @@ FocusScope {
 
             taskData: task
             taskIndex: absIdx
-            isEditing: list.editingTaskId === task.todoId
-            isSelected: list.selectedIndex === index
-            selectedSubtaskIndex: list.selectedIndex === index ? list.selectedSubtaskIndex : -1
+                        isEditing: list.editingTaskId === task.todoId
+            isSelected: navController.selectedIndex === index
+            // Cursor lives on TaskNavigationController (nav). Passing it so
+            // TaskCard computes selectedSubtaskIndex/selectedNestedIndex via
+            // its own readonly accessors (root.nav.selected*), not via external
+            // binding assignment (which readonly props reject).
+            nav: navController
             nSub: progressData.total
             dSub: progressData.done
             prog: progressData.ratio
@@ -736,8 +778,7 @@ FocusScope {
 
             onSubtaskSelectionRequested: function(subIdx) {
                 list.forceActiveFocus()
-                list.selectedIndex = index
-                list.selectedSubtaskIndex = subIdx
+                navController.selectSubtask(index, subIdx)
                 list.keepSelectedVisible(scroller.itemAtIndex(index))
             }
 
@@ -746,7 +787,7 @@ FocusScope {
                 // and land the cursor on the parent subtask row so arrows
                 // keep working immediately.
                 list.forceActiveFocus()
-                list.selectedSubtaskIndex = subIdx
+                navController.selectSubtask(index, subIdx)
                 list.keepSelectedVisible(scroller.itemAtIndex(index))
             }
 

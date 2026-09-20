@@ -48,9 +48,20 @@ Item {
     required property var taskData
     required property int taskIndex
     required property bool isEditing
-    property bool expanded: false
-    required property bool isSelected
-    property int selectedSubtaskIndex: -1
+        required property bool isSelected
+    // Cursor owned by TaskNavigationController; TaskCard is a pure view.
+    // Read directly off the controller (same source as `expanded` below) so
+    // there is exactly one writer (TaskList) and nothing leaks across
+    // ListView.onPooled/onReused recycling.
+    readonly property int selectedSubtaskIndex:
+        root.nav ? root.nav.selectedSubtaskIndex : -1
+    readonly property int selectedNestedIndex:
+        root.nav ? root.nav.selectedNestedIndex : -1
+    // Expansion is owned by TaskNavigationController (survives ListView
+    // recycling — no local state to leak through reuseItems).
+    required property var nav
+    readonly property bool expanded:
+        root.nav.expandedTasks[root.taskData.todoId] ?? false
     required property int nSub
     required property int dSub
     required property real prog
@@ -91,11 +102,10 @@ Item {
     signal addChildCancelled(int taskIdx, int subIdx)
 
     // ── ListView recycling (reuseItems: true) ───────────────────
-    // A recycled card keeps its local state, so reset it here or the next
-    // task would show up expanded / with half-typed subtask text.
+    // Reset only non-controller local state; expansion lives in the
+    // TaskNavigationController and intentionally survives recycling.
     ListView.onPooled: {
         root.animate = false
-        root.expanded = false
         addSubtaskField.clear()
     }
     ListView.onReused: Qt.callLater(function() { root.animate = true })
@@ -111,6 +121,12 @@ Item {
     readonly property bool taskPartial: root.dSub > 0 && root.dSub < root.nSub
     readonly property var subtasks: root.taskData?.subtasks ?? []
     readonly property var emptySub: ({ id: "", title: "", done: false, minutes: 0 })
+
+    // Read-only accessor used by TaskList's key handler (Right drill-in).
+    // Returns null for collapsed/virtualized rows — callers guard for that.
+    function subDelegate(subIdx) {
+        return subRepeater.itemAt(subIdx)
+    }
 
     // One colour binding shared by the streak icon + number
     readonly property color streakColor: {
@@ -189,7 +205,7 @@ Item {
                         anchors.margins: -4
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            root.expanded = !root.expanded
+                            root.nav?.setTaskExpanded(root.taskData.todoId, !root.expanded)
                             root.selectionRequested(root.taskIndex)
                         }
                     }
@@ -588,12 +604,14 @@ Item {
                         isHabitList: root.isHabitList
                         isEditing: root.editingSubId === `${root.taskId}__${sub.id}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === index
+                        nav: root.nav
 
                         isFirst: index === 0
                         isLast: index === subRepeater.count - 1
                         hasChildren: (sub.children?.length ?? 0) > 0
                         depth: 1
                         editingNestedId: root.editingSubId
+                        selectedNestedIndex: (root.isSelected && root.selectedSubtaskIndex === index) ? root.selectedNestedIndex : -1
 
                         onToggleRequested: (taskIdx, subIdx) => {
                             root.toggleSubtaskRequested(taskIdx, subIdx)

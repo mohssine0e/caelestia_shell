@@ -1,198 +1,153 @@
-TASK CARD BEHAVIOR
-==================
-Owner:      TaskList
-Direction:  parent → child (props) | child → parent (signals)
-Data:       taskMap[todoId] (read-only)
-Scope:      one task + its subtask list
+================================================================================
+                       TASK CARD BEHAVIOR CONTRACTS
+================================================================================
+Owner:     TaskList
+Direction: parent → child (props) | child → parent (signals)
+Data:      taskMap[todoId] (read-only)
+Scope:     one task + its subtask list
 
-CLICK
------
-- Card body            → selectionRequested(taskIdx)
-- Checkbox             → toggleRequested(taskIdx) + selectionRequested(taskIdx)
-                         (only if nSub === 0)
-- Expander             → expanded = !expanded; selectionRequested(taskIdx)
-- Edit icon            → editingStarted(taskId); selectionRequested(taskIdx)
-- Delete icon          → shake; double-click → deleteRequested(taskIdx)
-- Double-click title   → no-op
-- Click on subtask     → bubbles via SubtaskCard (see SubtaskCard.behavior)
+--------------------------------------------------------------------------------
+1. DATA & STATE CONTRACTS
+--------------------------------------------------------------------------------
+PROPERTY CONTRACTS
+- expanded:   local, not persisted
+- isSelected: derived from parent (never set internally)
+- taskData:   read-only; mutations via signals only
 
-KEYBOARD  (owned by TaskList; listed here for reference)
---------------------------------------------------------
-- Down   → next subtask, circular inside expanded card (last → first);
-           from task header → next task
-- Up     → prev subtask, circular inside expanded card (first → last);
-           from task header → prev task
-- Right  → expand + select subtask 0
-- Left   → on subtask: deselect to header (card stays expanded);
-           on header: collapse card
-- Enter  → if subtask selected → toggleSubtask
-           elif nSub === 0         → toggleTask
-           else                    → toggleTask (cascade parent)
-- Escape → cancel edit/add field (text field only) + restore list focus;
-           otherwise bubble up
+EDIT MODES (mutually exclusive)
+- isEditing   (task title)
+- editingSubId (subtask title)
+- Rules:
+    entering task edit    → editingSubId cleared
+    entering subtask edit → isEditing cleared
+    keyboard nav disabled while editing
+    Escape cancels; Enter commits; blur commits
 
-SELECTION
----------
+SELECTION & SCROLL
 - isSelected           → (selectedIndex === index)
 - selectedSubtaskIndex → -1 when this card is not selected
 - Reset rules:          task change → subtask = -1
                         filter change → index = 0 (or -1 if empty)
 - Scroll:               TaskList keeps selected card visible
 
-EDIT MODES (mutually exclusive)
--------------------------------
-- isEditing      (task title)
-- editingSubId   (subtask title)
-- Rules:
-    entering task edit   → editingSubId cleared
-    entering subtask edit → isEditing cleared
-    keyboard nav disabled while editing
-    Escape cancels; Enter commits; blur commits
-- Signal order on entry: editingStarted → selectionRequested
+--------------------------------------------------------------------------------
+2. KEYBOARD NAVIGATION & SCOPED CURSOR MODEL
+--------------------------------------------------------------------------------
+CURSOR STATE TRIPLE
+- Controlled by TaskList via selection triple:
+  (selectedIndex, selectedSubtaskIndex, selectedNestedIndex)
+
+UP / DOWN (Scope-Bounded Circular Navigation)
+- Condition 1: On Task Header (selectedSubtaskIndex == -1, selectedNestedIndex == -1)
+    • Down → next visible TaskCard (circular wrap at bottom)
+    • Up   → prev visible TaskCard (circular wrap at top)
+- Condition 2: On Subtask Scope (selectedSubtaskIndex >= 0, selectedNestedIndex == -1)
+    • Down → next subtask inside current task (circular wrap)
+    • Up   → prev subtask inside current task (circular wrap)
+- Condition 3: On Nested Scope (selectedSubtaskIndex >= 0, selectedNestedIndex >= 0)
+    • Down → next nested subtask inside current subtask (circular wrap)
+    • Up   → prev nested subtask inside current subtask (circular wrap)
+
+RIGHT / LEFT (Hierarchy Drill-In & Retract)
+- Right:
+    • On collapsed task header → expands card + selects subtask 0
+    • On subtask row → if collapsed, expands; if expanded + has children, enters nested 0
+    • On nested child → no-op (terminal depth)
+- Left:
+    • On nested child → retracts focus to parent subtask (selectedNestedIndex = -1)
+    • On subtask row → retracts focus to main task header (selectedSubtaskIndex = -1)
+    • On task header → collapses task card
+
+ACTION KEYS
+- Enter:
+    • On nested child → toggles nested subtask state
+    • On subtask row → toggles subtask state
+    • On task header (nSub === 0) → toggles task state
+    • On task header (nSub > 0) → toggles task + cascades completion state to all subtasks
+- F2:
+    • Triggers inline title edit (isEditing = true) for the currently focused level
+- Escape:
+    • In text field → cancels edit/add input + restores focus to list cursor
+    • Outside text input → bubbles up to close scope/window
+
+--------------------------------------------------------------------------------
+3. CLICK INTERACTIONS & SIGNAL PIPELINE
+--------------------------------------------------------------------------------
+CLICK EVENTS
+- Card body           → selectionRequested(taskIdx)
+- Checkbox            → toggleRequested(taskIdx) + selectionRequested(taskIdx)
+                        (only if nSub === 0)
+- Expander            → expanded = !expanded; selectionRequested(taskIdx)
+- Edit icon           → editingStarted(taskId); selectionRequested(taskIdx)
+- Delete icon         → shake; double-click → deleteRequested(taskIdx)
+- Double-click title  → no-op
+- Click on subtask    → bubbles via SubtaskCard (see SubtaskCard.behavior)
 
 SIGNAL EMISSION ORDER
----------------------
 - checkbox click:  toggleRequested → selectionRequested
 - edit click:      selectionRequested → editingStarted
 - delete dbl-click: deleteRequested (single signal)
 - expander click:  expanded flip → selectionRequested
-- subtask bubble:  subtaskSelectionRequested(subIdx)  (TaskList sets index+subIdx)
+- subtask bubble:  subtaskSelectionRequested(subIdx) (TaskList sets index+subIdx)
+- entry order:     editingStarted → selectionRequested
 
 SIGNALS OUT
------------
-toggleRequested(taskIdx)
-renameRequested(taskIdx, newTitle)
-deleteRequested(taskIdx)
-addSubtaskRequested(taskIdx, title)
-toggleSubtaskRequested(taskIdx, subIdx)
-deleteSubtaskRequested(taskIdx, subIdx)
-renameSubtaskRequested(taskIdx, subIdx, newTitle)
-editingStarted(taskId)
-editingCancelled()
-subtaskEditingStarted(subtaskId)
-subtaskEditingCancelled()
-selectionRequested(taskIdx)
-subtaskSelectionRequested(subIdx)
+- toggleRequested(taskIdx)
+- renameRequested(taskIdx, newTitle)
+- deleteRequested(taskIdx)
+- addSubtaskRequested(taskIdx, title)
+- toggleSubtaskRequested(taskIdx, subIdx)
+- deleteSubtaskRequested(taskIdx, subIdx)
+- renameSubtaskRequested(taskIdx, subIdx, newTitle)
+- editingStarted(taskId)
+- editingCancelled()
+- subtaskEditingStarted(subtaskId)
+- subtaskEditingCancelled()
+- selectionRequested(taskIdx)
+- subtaskSelectionRequested(subIdx)
 
-VISUAL STATE PRIORITY  (highest wins)
--------------------------------------
-1. Editing      → text field replaces title
-2. Selected     → 2px primary border + left accent
-3. Done         → title primary @0.6, checkbox primary, strikethrough
-4. Partial      → checkbox secondary (some subtasks done)
-5. Hovered      → actions visible, surfaceContainer bg
-6. Normal       → title onSurface, checkbox outline
+--------------------------------------------------------------------------------
+4. VISUAL STATES & EDGE CASES
+--------------------------------------------------------------------------------
+VISUAL STATE PRIORITY (highest wins)
+1. Editing  → text field replaces title
+2. Selected → 2px primary border + left accent
+3. Done     → title primary @0.6, checkbox primary, strikethrough
+4. Partial  → checkbox secondary (some subtasks done)
+5. Hovered  → actions visible, surfaceContainer bg
+6. Normal   → title onSurface, checkbox outline
 
 - Hover never overrides selection or done visuals; only action visibility.
 - Selected + Done → both apply: selected border + done strikethrough.
 
-PROPERTY CONTRACTS
-------------------
-- expanded:     local, not persisted
-- isSelected:   derived from parent (never set internally)
-- taskData:     read-only; mutations via signals only
-
 EDGE CASES
-----------
 - Enter on card with subtasks & no subtask selected → toggles parent (cascade)
-- Double-click title on card with no subtasks     → no-op
+- Double-click title on card with no subtasks       → no-op
 - Delete confirm requires double-click within shake window
 - Rapid double toggleRequested                    → idempotent per tick (parent dedupes)
 - Clicking already-selected card                  → no-op (avoids reset)
 
-DO NOT
-------
-- Emit selectionRequested on hover
-- Set isSelected internally
-- Allow two edit modes at once
-- Re-sort / re-filter inside the card
-- Mutate taskData directly
-- Emit signals outside the defined order
+STRICT CONSTRAINTS (DO NOT)
+- Do NOT emit selectionRequested on hover
+- Do NOT set isSelected internally
+- Do NOT allow two edit modes at once
+- Do NOT re-sort / re-filter inside the card
+- Do NOT mutate taskData directly
+- Do NOT emit signals outside the defined order
 
 
+================================================================================
+                      SUBTASK CARD BEHAVIOR CONTRACTS
+================================================================================
+Owner:     TaskCard (rendered by TaskList's Repeater)
+Direction: parent → child (props) | child → parent (signals)
+Data:      subtaskMap[subtaskId] (read-only)
+Scope:     one subtask row (can contain nested subtasks)
 
-
-SUBTASK CARD BEHAVIOR
-=====================
-Owner:      TaskCard (rendered by TaskList's Repeater)
-Direction:  parent → child (props) | child → parent (signals)
-Data:       subtaskMap[subtaskId] (read-only)
-Scope:      one subtask row (leaf — no expand)
-
-CLICK
------
-- Title        → selectionRequested(taskIdx, subIdx)
-- Checkbox     → toggleRequested(taskIdx, subIdx) + selectionRequested(taskIdx, subIdx)
-- Edit icon    → editingStarted(editId)
-- Delete icon  → shake; double-click → deleteRequested(taskIdx, subIdx)
-- Empty space  → no-op (parent card handles)
-
-KEYBOARD
---------
-- Owned by TaskList / TaskCard. This card reacts only to isSelected.
-
-SELECTION
----------
-- isSelected is passed by parent (never computed locally)
-- Reset rules: task change → -1; sibling change → parent sets new subIdx
-- Scroll: TaskCard / TaskList keeps selected subtask visible
-
-EDIT MODE
----------
-- isEditing → this subtask title is being edited
-- Only one subtask edits at a time (parent enforces)
-- Enter commits; Escape cancels; blur commits
-- Signal order: selectionRequested → editingStarted
-
-SIGNAL EMISSION ORDER
----------------------
-- checkbox click:   toggleRequested → selectionRequested
-- title click:      selectionRequested only
-- edit click:       selectionRequested → editingStarted
-- delete dbl-click: deleteRequested (single)
-- cancel edit:      editingCancelled (blur / Escape)
-
-SIGNALS OUT
------------
-toggleRequested(taskIdx, subIdx)
-deleteRequested(taskIdx, subIdx)
-renameRequested(taskIdx, subIdx, newTitle)
-editingStarted(subtaskId)
-editingCancelled()
-selectionRequested(taskIdx, subIdx)
-
-TREE LINES
-----------
-- Vertical   → links this row to next sibling
-                visible when: !(isFirst && isLast) || hasChildren
-                bottom cut when: isLast && !hasChildren (stops at mid)
-- Horizontal → links vertical line to checkbox (always visible)
-- Node dot   → anchor at junction (always visible)
-- Color/opacity by state priority:
-    1. Done      → m3primary, 1.0
-    2. Selected  → m3secondary, 0.6
-    3. Default   → m3outlineVariant, 0.3
-
-INDENT
-------
-- indentUnit  = 28 px
-- scaledIndent = depth × indentUnit
-- maxDepth = 3 (children beyond depth 3 clamp)
-- treeContainer width = scaledIndent + Tokens.spacing.small
-
-VISUAL STATE PRIORITY  (highest wins)
--------------------------------------
-1. Editing      → text field replaces title
-2. Selected     → title m3secondary, bg surfaceContainerHigh
-3. Done         → title m3primary @0.6, checkbox primary, strikethrough
-4. Hovered      → action buttons fade in (only affects actions)
-5. Normal       → title onSurfaceVariant, checkbox outline
-
-- Selected + Done → selected color wins for text; strikethrough still shown.
-- Selection color (m3secondary) never equals done color (m3primary).
-
-PROPS
------
+--------------------------------------------------------------------------------
+1. DATA & STATE CONTRACTS
+--------------------------------------------------------------------------------
+PROPERTIES
 - isFirst / isLast / hasChildren → tree drawing only
 - depth                          → indent + tree fan-out
 - isDone                         → subtaskData.done
@@ -200,26 +155,92 @@ PROPS
 - isSelected                     → from parent, read-only
 - streak                         → optional, from subtaskData
 
+SELECTION & EDIT MODE
+- isSelected is passed by parent (never computed locally)
+- Reset rules: task change → -1; sibling change → parent sets new subIdx
+- Scroll: TaskCard / TaskList keeps selected subtask visible
+- isEditing → this subtask title is being edited
+- Only one subtask edits at a time (parent enforces)
+- Enter commits; Escape cancels; blur commits
+
 STREAK BADGE
-------------
 - Visible only if subtaskData.streak > 0 and !isEditing
 - Fire icon + number
 - Color priority: selected → m3secondary, else → m3primary
 - Never overrides title or tree line colors
 
+--------------------------------------------------------------------------------
+2. KEYBOARD NAVIGATION & CURSOR DELEGATION
+--------------------------------------------------------------------------------
+CURSOR DELEGATION
+- Keyboard events are NOT handled locally by SubtaskCard; owned by TaskList.
+- Reacts only to `isSelected` and `selectedNestedIndex` passed down by TaskCard.
+- When `isSelected && selectedNestedIndex === -1`: highlights parent subtask row.
+- When `isSelected && selectedNestedIndex === N`: highlights N-th nested subtask row.
+- `expanded` state determines whether nested children are visible for drill-in navigation.
+
+--------------------------------------------------------------------------------
+3. CLICK INTERACTIONS & SIGNAL PIPELINE
+--------------------------------------------------------------------------------
+CLICK EVENTS
+- Title      → selectionRequested(taskIdx, subIdx)
+- Checkbox   → toggleRequested(taskIdx, subIdx) + selectionRequested(taskIdx, subIdx)
+- Edit icon  → editingStarted(editId)
+- Delete icon → shake; double-click → deleteRequested(taskIdx, subIdx)
+- Empty space → no-op (parent card handles)
+
+SIGNAL EMISSION ORDER
+- checkbox click:   toggleRequested → selectionRequested
+- title click:      selectionRequested only
+- edit click:       selectionRequested → editingStarted
+- delete dbl-click: deleteRequested (single)
+- cancel edit:      editingCancelled (blur / Escape)
+
+SIGNALS OUT
+- toggleRequested(taskIdx, subIdx)
+- deleteRequested(taskIdx, subIdx)
+- renameRequested(taskIdx, subIdx, newTitle)
+- editingStarted(subtaskId)
+- editingCancelled()
+- selectionRequested(taskIdx, subIdx)
+
+--------------------------------------------------------------------------------
+4. LAYOUT, TREE LINES & VISUAL STATES
+--------------------------------------------------------------------------------
+TREE LINES
+- Vertical   → links this row to next sibling
+               visible when: !(isFirst && isLast) || hasChildren
+               bottom cut when: isLast && !hasChildren (stops at mid)
+- Horizontal → links vertical line to checkbox (always visible)
+- Node dot   → anchor at junction (always visible)
+- Color/opacity by state priority:
+    1. Done     → m3primary, 1.0
+    2. Selected → m3secondary, 0.6
+    3. Default  → m3outlineVariant, 0.3
+
+INDENT
+- indentUnit    = 28 px
+- scaledIndent  = depth × indentUnit
+- maxDepth      = 3 (children beyond depth 3 clamp)
+- treeContainer width = scaledIndent + Tokens.spacing.small
+
+VISUAL STATE PRIORITY (highest wins)
+1. Editing  → text field replaces title
+2. Selected → title m3secondary, bg surfaceContainerHigh
+3. Done     → title m3primary @0.6, checkbox primary, strikethrough
+4. Hovered  → action buttons fade in (only affects actions)
+5. Normal   → title onSurfaceVariant, checkbox outline
+
 EDGE CASES
-----------
 - Clicking already-selected subtask → no-op (parent dedupes)
 - Rapid double toggleRequested      → parent dedupes per tick
 - Deleting last subtask             → parent collapses card (parent decision)
 - isEditing + deletion              → delete wins (parent clears editSubId)
 
-DO NOT
-------
-- Mutate subtaskData directly
-- Handle keyboard navigation (parent owns it)
-- Expand / collapse (subtasks are leaves)
-- Change tree lines on hover
-- Reuse done color for selection
-- Compute isSelected locally
-- Emit signals outside the defined order
+STRICT CONSTRAINTS (DO NOT)
+- Do NOT mutate subtaskData directly
+- Do NOT handle keyboard navigation locally (parent owns it)
+- Do NOT change tree lines on hover
+- Do NOT reuse done color for selection
+- Do NOT compute isSelected locally
+- Do NOT emit signals outside the defined order

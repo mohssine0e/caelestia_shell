@@ -8,6 +8,7 @@ qml_module(caelestia-components
         circularindicatormanager.cpp
         linearindicatormanager.cpp
         sparklineitem.cpp
+        tasknavigationcontroller.cpp
         visualiserbars.cpp
     LIBRARIES
         Qt::Gui
