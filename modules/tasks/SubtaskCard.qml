@@ -77,7 +77,7 @@ Item {
         readonly property real dotSize: 6
         readonly property real dotOpacity: 1
         readonly property color color: Colours.palette.m3primary
-        readonly property real selectedContentShift: 10
+        readonly property real selectedContentShift: 15
     }
 
     // ── Derived tree geometry ───────────────────────────────────

@@ -104,8 +104,9 @@ signals:
     void editTaskRequested(int listIndex);
     void editSubtaskRequested(int listIndex, int subIdx);
     void editNestedRequested(int listIndex, int subIdx, int nestedIdx);
-    void scrollToIndex(int listIndex);
+        void scrollToIndex(int listIndex);
     void focusListRequested();
+    void dismissRequested();
 
 private:
     [[nodiscard]] QList<int> visibleIndices() const;
@@ -113,6 +114,7 @@ private:
     [[nodiscard]] int subCount(int listIndex) const;
     [[nodiscard]] int nestedCount(int listIndex, int subIdx) const;
     [[nodiscard]] QString taskIdAt(int listIndex) const;
+    [[nodiscard]] QString subIdAt(int listIndex, int subIdx) const;
     void emitCursor(int listIndex, int subIdx, int nestedIdx);
 
     int m_selectedIndex = -1;

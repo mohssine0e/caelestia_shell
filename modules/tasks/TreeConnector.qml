@@ -33,16 +33,22 @@ Item {
     property bool showDot: true
     property bool selected: false
     property real dotSize: 6           // use EVEN numbers
-    property real dotSizeSelected: 12
+    property real dotSizeSelected: 8
     property real dotOpacity: 1
 
-    property real selectedExtension: 10
+    property real selectedExtension: 15
 
 
     // ── Derived (don't edit) ────────────────────────────────────
     readonly property real _cy: Math.round(rowHeight / 2)   // elbow's Y
     readonly property real _r: Math.max(0, Math.min(cornerRadius, _cy, elbowLength))
-    readonly property real _dotX: spineX + elbowLength
+    
+    property real _selectedAnim: selected ? selectedExtension : 0
+    Behavior on _selectedAnim { Anim { type: Anim.FastSpatial } }
+
+    readonly property real _dotX: spineX + elbowLength + _selectedAnim
+
+
 
     Behavior on lineColor { CAnim {} }
 

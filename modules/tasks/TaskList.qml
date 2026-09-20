@@ -455,14 +455,18 @@ FocusScope {
             var todoId = filteredModel.get(i).todoId
             var task = list.taskMap[todoId]
             var subs = task ? (task.subtasks || []) : []
-            var nested = []
-            for (var j = 0; j < subs.length; j++)
+                        var nested = []
+            var subIds = []
+            for (var j = 0; j < subs.length; j++) {
                 nested.push((subs[j].children || []).length)
+                subIds.push(subs[j].id ?? "")
+            }
             arr.push({
                 todoId: todoId,
                 visible: list.matchesFilter(task, todoId),
                 nSub: subs.length,
-                nestedCounts: nested
+                nestedCounts: nested,
+                subIds: subIds
             })
         }
         list.navRows = arr
@@ -615,9 +619,11 @@ FocusScope {
             return
         }
 
-        // behaviors.txt §2 Right drill-in, step 1: a collapsed subtask with
-        // children expands first (cursor stays on the row). The controller's
-        // moveRight then enters nested 0 on the next Right.
+                // behaviors.txt §2 Right drill-in, subtask row: a collapsed subtask with
+        // children must expand before entering its nested rows. We pre-expand
+        // here so the subsequent handleKey (moveRight) sees an expanded section
+        // and can step into nested 0 on the same keypress. The controller also
+        // double-checks isSubExpanded, so this guard is belt-and-suspenders.
         if (event.key === Qt.Key_Right && navController.selectedSubtaskIndex >= 0
                 && navController.selectedNestedIndex < 0) {
             const row = list.navOf(navController.selectedIndex)

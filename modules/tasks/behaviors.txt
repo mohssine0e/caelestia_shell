@@ -66,9 +66,14 @@ ACTION KEYS
     • On task header (nSub > 0) → toggles task + cascades completion state to all subtasks
 - F2:
     • Triggers inline title edit (isEditing = true) for the currently focused level
-- Escape:
-    • In text field → cancels edit/add input + restores focus to list cursor
-    • Outside text input → bubbles up to close scope/window
+- Escape (staged cancel, one retraction per keypress):
+    - In a text field → cancels text input + returns focus to list cursor
+    - Nested child selected → unselects nested child (subtask row stays selected, nested section stays open)
+    - Subtask row with nested section open → collapses nested section (stays on subtask)
+    - Subtask row with nested section closed → retract cursor to task header
+    - Task header with card expanded → collapses card
+    - Fully retracted (header, card collapsed) → bubbles up → closes popout/window
+    - Each stage keeps list focus; never loses the cursor
 
 --------------------------------------------------------------------------------
 3. CLICK INTERACTIONS & SIGNAL PIPELINE
