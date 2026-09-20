@@ -28,6 +28,11 @@ Item {
 
     property bool expanded: false
 
+    // ── Add-child state ─────────────────────────────────────────
+    property bool addingChild: false
+
+    signal addChildRequested(int taskIdx, int subIdx, string title)
+
     // In preview every row has 2 fake children, so hasChildren is effectively true
     readonly property bool previewNested: true
     readonly property int previewChildCount: 2
@@ -39,21 +44,11 @@ Item {
     // ╔════════════════════════════════════════════════════════════╗
     // ║  TREE STYLE                                                ║
     // ╚════════════════════════════════════════════════════════════╝
-    //
-    //  subtask WITH children:
-    //   ╰───☐ title               ← no dot on the elbow
-    //       │
-    //       ╰──● ☐ child           ← child spine sits under this row's checkbox
-    //
-    //  subtask WITHOUT children (standalone):
-    //   ╰───● ☐ title             ← dot present
-    //
     readonly property var tree: QtObject {
         readonly property real lineWidth: 2
         readonly property real cornerRadius: 8
         readonly property real spineX: 6
         readonly property real elbowLength: 24
-        // readonly property real contentGap: 12
         readonly property real contentGap: 6
         readonly property real dotSize: 6
         readonly property real dotOpacity: 0.8
@@ -66,6 +61,9 @@ Item {
         tree.spineX + tree.elbowLength + tree.contentGap
     readonly property real childSpineX:
         Math.round(contentStartX + parentCheckbox.x + parentCheckbox.width / 2)
+    // Where a child's content (checkbox) would sit
+    readonly property real childContentX:
+        childSpineX + tree.elbowLength + tree.contentGap
 
     signal toggleRequested(int taskIdx, int subIdx)
     signal deleteRequested(int taskIdx, int subIdx)
@@ -84,8 +82,6 @@ Item {
     Layout.fillWidth: true
 
     // ── TREE LINES ──────────────────────────────────────────────
-    // showDot is true ONLY when this row has no children.
-    // A row that expands to children has no dot on its own elbow.
     TreeConnector {
         anchors.fill: parent
         rowHeight: rowContainer.height
@@ -134,7 +130,7 @@ Item {
                     id: parentCheckbox
                     text: root.isDone ? "check_box" : "check_box_outline_blank"
                     fill: root.isDone ? 1 : 0
-                    fontStyle: Tokens.font.icon.small
+                    font: Tokens.font.icon.small
                     color: Colours.palette.m3primary
                     opacity: root.isDone ? 0.5 : 1
                     Behavior on color { CAnim {} }
@@ -151,9 +147,6 @@ Item {
                 }
 
                 // ── Title ───────────────────────────────────────
-                // Click behavior:
-                //   has children → expand/collapse
-                //   no children  → select (standalone toggle handled by checkbox)
                 StyledText {
                     visible: !root.isEditing
                     Layout.fillWidth: true
@@ -273,6 +266,25 @@ Item {
                     opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
+                    // Add-child button
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "add"
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                                root.expanded = true
+                                root.addingChild = true
+                                addChildField.focus=true
+                            }
+                        }
+                    }
+
+                    // Edit button
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -288,6 +300,7 @@ Item {
                         }
                     }
 
+                    // Delete button
                     IconButton {
                         id: subDeleteButton
                         type: IconButton.Text
@@ -360,6 +373,62 @@ Item {
                 isLast: true
                 tree: root.tree
                 treeSpineX: root.childSpineX
+            }
+
+            // ── Add-child inline input ──────────────────────────
+            RowLayout {
+                // alwways visible for now
+                visible: root.addingChild
+                Layout.fillWidth: true
+                Layout.leftMargin: root.childContentX
+                Layout.topMargin: 0
+
+
+                MaterialIcon {
+                    text: "add_circle_outline"
+                    font: Tokens.font.icon.small
+                    color: Colours.palette.m3primary
+                    opacity: 0.6
+                }
+
+                StyledTextField {
+                    id: addChildField
+                    placeholderFloats: false
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 28
+                    placeholderText: qsTr("Add nested subtask…")
+                    placeholderTextColor: Colours.palette.m3onSurfaceVariant
+                    color: Colours.palette.m3onSurfaceVariant
+
+                    background: Rectangle { color: "transparent"; border.width: 0 }
+
+                    topPadding: 2
+                    bottomPadding: 2
+                    leftPadding: 5
+                    rightPadding: 5
+
+
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (text.trim()) {
+                                root.addChildRequested(root.taskIndex, root.subtaskIndex, text.trim())
+                                clear()
+                            }
+                            event.accepted = true
+                        }
+                    }
+                    Keys.onEscapePressed:{
+                        clear()
+                        focus = false
+                        root.addingChild = false
+                    }
+                    onVisibleChanged: {
+                        if (visible) {
+                            clear()
+                            forceActiveFocus()
+                        }
+                    }
+                }
             }
         }
     }

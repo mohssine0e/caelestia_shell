@@ -632,11 +632,6 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 28
 
-                        // NOTE: the old `font: { body: ...; pointSize: 11 }` was a
-                        // script block, not an object, so it never applied and
-                        // logged a warning per card. Add e.g.
-                        //   font: Tokens.font.body.medium
-                        // here if you want a specific font.
 
                         placeholderText: qsTr("Add subtask…")
                         placeholderTextColor: Colours.palette.m3onSurfaceVariant
