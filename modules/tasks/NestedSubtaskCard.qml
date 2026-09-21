@@ -110,7 +110,9 @@ Item {
             Layout.fillWidth: true
             text: root.nestedData?.title ?? ""
             font: Tokens.font.body.medium
-            elide: Text.ElideRight
+            elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+            wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
+
             color: root.isDone ? Colours.palette.m3outline : Colours.palette.m3onSurface
 
             opacity: root.isDone ? 0.6 : 0.8

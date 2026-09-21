@@ -279,8 +279,9 @@ Item {
 
                     text: root.taskTitle
                     font: Tokens.font.body.large
-                    elide: Text.ElideRight
 
+                    elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+                    wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
                     color: root.taskDone
                         ? Colours.palette.m3onSurfaceVariant
                         : (root.nSub === 0 ? Colours.palette.m3onSurface

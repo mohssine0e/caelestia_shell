@@ -413,7 +413,11 @@ data model used: for both tasks and habits // to keep for reference
     function toggleTask(i) {
         if (i < 0 || i >= tasks.length) return;
 
+
         var task = tasks[i];
+        // ignore if they have no subtasks, to avoid mistakenly tooggling all subtasks 
+        if (task.subtasks && task.subtasks.length > 0) return;
+
         var newDone = !task.done;
         var taskId = task.todoId;
 
@@ -522,6 +526,10 @@ data model used: for both tasks and habits // to keep for reference
         var taskId = task.todoId;
 
         var sub = task.subtasks[subtaskIndex];
+
+        // If the subtask has children, don't toggle it directly — toggling a parent would toggle all its children, which is not what we want. Only leaf subtasks can be toggled.
+        if (sub.children && sub.children.length > 0) return;
+
         var newSub = {
             id: sub.id,
             title: sub.title,

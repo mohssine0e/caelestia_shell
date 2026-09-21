@@ -169,14 +169,17 @@ Item {
                     Behavior on color { CAnim {} }
 
                     MouseArea {
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: root.effectiveHasChildren ? Qt.ArrowCursor : Qt.PointingHandCursor
+                    enabled: !root.effectiveHasChildren
+                    onClicked: {
+                        if (!root.effectiveHasChildren) {
                             root.toggleRequested(root.taskIndex, root.subtaskIndex)
                             root.selectionRequested(root.taskIndex, root.subtaskIndex)
                         }
                     }
+}
                 }
 
                 // ── Title ───────────────────────────────────────
@@ -185,7 +188,9 @@ Item {
                     Layout.fillWidth: true
                     text: root.title
                     font: Tokens.font.body.medium
-                    elide: Text.ElideRight
+                    elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+                    wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
+
                     color: root.isDone ? Colours.palette.m3onSurfaceVariant
                         : (root.effectiveHasChildren ? Colours.palette.m3primary : Colours.palette.m3onSurface)
                     opacity: root.isDone ? 0.6 : 1
