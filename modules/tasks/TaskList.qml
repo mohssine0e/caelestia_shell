@@ -619,27 +619,7 @@ FocusScope {
             return
         }
 
-                // behaviors.txt §2 Right drill-in, subtask row: a collapsed subtask with
-        // children must expand before entering its nested rows. We pre-expand
-        // here so the subsequent handleKey (moveRight) sees an expanded section
-        // and can step into nested 0 on the same keypress. The controller also
-        // double-checks isSubExpanded, so this guard is belt-and-suspenders.
-        if (event.key === Qt.Key_Right && navController.selectedSubtaskIndex >= 0
-                && navController.selectedNestedIndex < 0) {
-            const row = list.navOf(navController.selectedIndex)
-            if (row && (row.nestedCounts[navController.selectedSubtaskIndex] || 0) > 0) {
-                const sub = list.selectedCard()?.subDelegate(navController.selectedSubtaskIndex)
-                if (sub && !sub.effectiveExpanded) {
-                    navController.setSubExpanded(list.todoIdAt(navController.selectedIndex),
-                        list.subIdAt(navController.selectedIndex, navController.selectedSubtaskIndex), true)
-                    event.accepted = true
-                    return
-                }
-            }
-        }
 
-        // Everything else (Up/Down/Left/Right/Enter/F2/Escape) is the
-        // controller's scope-based model.
         if (navController.handleKey(event.key, event.modifiers))
             event.accepted = true
     }

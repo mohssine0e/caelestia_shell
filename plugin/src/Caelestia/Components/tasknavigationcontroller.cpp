@@ -117,6 +117,7 @@ bool TaskNavigationController::handleKey(int key, int modifiers) {
         return false;
     }
 }
+
 void TaskNavigationController::moveDown() {
     // Nested scope: circular inside the current subtask's children.
     if (m_selectedSubtaskIndex >= 0 && m_selectedNestedIndex >= 0) {
@@ -170,29 +171,35 @@ void TaskNavigationController::moveUp() {
 }
 
 void TaskNavigationController::moveLeft() {
-    // 1) Nested child selected → just unselect the child. The subtask card
-    //    stays expanded so the rows remain visible and you can re-Enter/Right
-    //    back in immediately; one more Left does the collapse.
+    // 1) Nested child selected → unselect AND collapse the subtask section.
+    //    Choice B: Left always peels one layer.
     if (m_selectedNestedIndex >= 0) {
+        const QString taskId = taskIdAt(m_selectedIndex);
+        const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
         setSelectedNestedIndex(kParentNested);
+        if (!taskId.isEmpty() && !subId.isEmpty()) {
+            setSubExpanded(taskId, subId, false);
+        }
         emit focusListRequested();
         return;
     }
-    // 2) On the subtask row (cursor on the parent, no nested child selected):
-    //    if the subtask's nested section is still open, collapse *only that
-    //    section* — the card (task) stays expanded and the subtask row stays
-    //    the active selection (step 2 of the 3-step sequence).
+    // 2) On the subtask row:
+    //    - if nested section is open → collapse it, stay on subtask
+    //    - if already closed → retract to header
     if (m_selectedSubtaskIndex >= 0) {
         const QString taskId = taskIdAt(m_selectedIndex);
         const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
-        if (isSubExpanded(taskId, subId)) {
+        if (!taskId.isEmpty() && !subId.isEmpty() && isSubExpanded(taskId, subId)) {
             setSubExpanded(taskId, subId, false);
-            emit focusListRequested();   // keep the list focused between steps
+            emit focusListRequested();
             return;
         }
-        // Nested section already collapsed → fall through to card collapse.
+        setSelectedSubtaskIndex(kHeaderSub);
+        emit focusListRequested();
+        return;
     }
-    // 3) Task header (or subtask already collapsed) → collapse the card.
+    // 3) Task header → collapse the card (no-op if already collapsed;
+    //    Left never dismisses the popout).
     if (m_selectedIndex >= 0) {
         const QString id = taskIdAt(m_selectedIndex);
         if (!id.isEmpty() && isTaskExpanded(id)) {
@@ -216,20 +223,16 @@ void TaskNavigationController::moveRight() {
     }
     // Collapsed header → expand + select subtask 0.
     if (m_selectedSubtaskIndex < 0) {
-        if (!isTaskExpanded(taskId)) {
-            setTaskExpanded(taskId, true);
-        }
         if (subCount(m_selectedIndex) > 0) {
+            if (!isTaskExpanded(taskId)) {
+                setTaskExpanded(taskId, true);
+            }
             setSelectedSubtaskIndex(0);
         }
         emit scrollToIndex(m_selectedIndex);
         return;
     }
-        // Subtask row → expand (mirroring task-level drill-in) + enter nested 0.
-    // Without the setSubExpanded call the cursor moves to a child index whose
-    // rows aren't rendered yet, so the selection is invisible until the next
-    // Right (which is a no-op as "terminal depth"). Expanding here makes one
-    // Right both show and select the first child.
+    // Subtask row → expand (mirroring task-level drill-in) + enter nested 0.
     if (nestedCount(m_selectedIndex, m_selectedSubtaskIndex) > 0) {
         const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
         if (!taskId.isEmpty() && !subId.isEmpty() && !isSubExpanded(taskId, subId)) {
@@ -268,40 +271,42 @@ void TaskNavigationController::beginEdit() {
 
 void TaskNavigationController::cancel() {
     if (m_selectedIndex < 0) {
-        emit dismissRequested();   // nothing to retract: close the popout
+        emit dismissRequested();
         return;
     }
     const QString taskId = taskIdAt(m_selectedIndex);
-    // 1) Nested child selected → just unselect the child. Card + subtask
-    //    section stay open so the next Escape peels the next layer.
+
+    // 1) Nested child selected → unselect AND collapse the subtask section.
     if (m_selectedNestedIndex >= 0) {
+        const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
         setSelectedNestedIndex(kParentNested);
+        if (!taskId.isEmpty() && !subId.isEmpty()) {
+            setSubExpanded(taskId, subId, false);
+        }
         emit focusListRequested();
         return;
     }
-    // 2) On the subtask row: if the nested section is still open, collapse it.
+    // 2) On the subtask row:
+    //    - if nested section is open → collapse it, stay on subtask
+    //    - if already closed → retract to header
     if (m_selectedSubtaskIndex >= 0) {
         const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
-        if (isSubExpanded(taskId, subId)) {
+        if (!taskId.isEmpty() && !subId.isEmpty() && isSubExpanded(taskId, subId)) {
             setSubExpanded(taskId, subId, false);
             emit focusListRequested();
             return;
         }
-    }
-    // 3) On the task header (or subtask section already collapsed): collapse
-    //    the card if open. If nothing else is open, dismiss the popout.
-    if (m_selectedSubtaskIndex >= 0) {
-        // subtask row, nested section already closed → retract to header.
         setSelectedSubtaskIndex(kHeaderSub);
         emit focusListRequested();
         return;
     }
-    if (isTaskExpanded(taskId)) {
+    // 3) On the task header: if the card is expanded, collapse it.
+    if (!taskId.isEmpty() && isTaskExpanded(taskId)) {
         setTaskExpanded(taskId, false);
         emit focusListRequested();
         return;
     }
-    // Fully retracted → close the popout.
+    // 4) Fully retracted → dismiss the popout.
     emit dismissRequested();
 }
 
@@ -312,6 +317,7 @@ void TaskNavigationController::selectTask(int listIndex) {
 void TaskNavigationController::selectSubtask(int listIndex, int subIdx) {
     emitCursor(listIndex, subIdx, kHeaderNested);
 }
+
 bool TaskNavigationController::isTaskExpanded(const QString& taskId) const {
     return m_expandedTasks.value(taskId, false).toBool();
 }
@@ -347,6 +353,7 @@ void TaskNavigationController::setSubExpanded(const QString& taskId, const QStri
     }
     emit expansionChanged();
 }
+
 void TaskNavigationController::clampToStructure() {
     // 1. Cursor task must be a visible row.
     const QList<int> visible = visibleIndices();
