@@ -1,0 +1,746 @@
+================================================================================
+                        TASK CARD BEHAVIOR CONTRACTS
+================================================================================
+Owner:     TaskList (FocusScope)
+Direction: parent → child (props) | child → parent (signals)
+Data:      taskMap[todoId] (read-only, identity-validated cache)
+Scope:     one task + its direct subtask list (one nested-children level below)
+
+--------------------------------------------------------------------------------
+1. DATA & STATE CONTRACTS
+--------------------------------------------------------------------------------
+PROPERTY CONTRACTS
+- expanded:        OWNED by TaskNavigationController (expandedTasks map,
+                   keyed by todoId). Persists across ListView recycling.
+- isSelected:      derived from parent (never set internally)
+- taskData:        read-only; mutations via DataManager signals only
+- taskIndex:       data-layer absolute index (taskIndexMap[todoId]), NOT
+                   the ListView index. Used for data mutations.
+- nSub / dSub:     derived from getProgressData (direct subtasks only)
+
+EDIT MODES (mutually exclusive)
+- isEditing    → task title edit field visible
+- editingSubId → controls which subtask or nested child is editing:
+    Subtask edit:  set to composite "todoId__subtaskId"
+    Nested edit:   set to raw nested child id
+- Rules:
+    entering task edit    → editingSubId cleared
+    entering subtask edit → editingTaskId cleared
+    entering nested edit  → both editingTaskId and editingSubId
+                            reset by controller handler
+    keyboard nav disabled while editing (TaskList returns
+                            event.accepted=false before navController)
+    Escape cancels; Enter commits; blur commits (unless noted)
+    TaskCard edit field: Enter blurs (commit), Escape cancels,
+                         Return consumed to prevent toggle
+                         (renameCommitGuard swallows the Enter key)
+    SubtaskCard field:     Enter commits via onAccepted,
+                         Escape cancels, blur commits
+                         (onFocusChanged with commitInProgress guard)
+    NestedSubtaskCard field: Enter commits via Keys.onPressed
+                            (calls commitRename directly), Escape cancels;
+                            blur does NOT commit (no onFocusChanged
+                            handler exists)
+
+SELECTION & SCROLL
+- isSelected           → (navController.selectedIndex === index)
+- selectedSubtaskIndex → from controller; -1 when on header
+- selectedNestedIndex  → from controller; -1 when on subtask row
+- Reset rules:          data change → controller.clampToStructure()
+                         filter change → selectTask(firstVisibleIndex())
+                         task deleted  → clampToStructure (clamps cursor)
+- Scroll:               TaskList keeps selected card visible via
+                        keepSelectedVisible() (scroller or ListView.positionViewAtIndex)
+
+EDIT FIELD FOCUS GUARD
+- renameCommitGuard (0ms timer) sets renameJustCommitted=true after a
+  rename commit so the Enter key that triggered the commit is swallowed
+  and does not also toggle the just-completed task.
+
+--------------------------------------------------------------------------------
+2. KEYBOARD NAVIGATION & SCOPED CURSOR MODEL
+--------------------------------------------------------------------------------
+Cursor triple (owned by TaskNavigationController, C++):
+  (selectedIndex, selectedSubtaskIndex, selectedNestedIndex)
+  (-1, -1, -1)        → nothing selected
+  (i, -1, -1)         → task header i (ListView index)
+  (i, s, -1)          → subtask s of task at ListView index i
+  (i, s, n)           → nested child n of subtask s (terminal depth)
+
+UP / DOWN (Scope-Bounded Circular Navigation)
+- Nested scope (s >= 0, n >= 0):
+    • Down → next nested child in same subtask (circular wrap)
+    • Up   → prev nested child in same subtask (circular wrap)
+- Subtask scope (s >= 0, n == -1):
+    • Down → next subtask in same task (circular wrap)
+    • Up   → prev subtask in same task (circular wrap)
+- Header scope (s == -1, n == -1):
+    • Down → next visible task (circular wrap at bottom)
+    • Up   → prev visible task (circular wrap at top)
+  Visibility is determined by matchesFilter (status + search per delegate).
+
+RIGHT / LEFT (Hierarchy Drill-In & Retract)
+- Right (drill in):
+    • On nested child → no-op (terminal depth)
+    • On collapsed task header → expands task (setTaskExpanded) +
+      selects subtask 0 (if any subtasks exist). No-op if subCount == 0.
+    • On subtask row → if has children, expands subtask section
+      (setSubExpanded=true) if collapsed, then enters nested child 0.
+      The controller does the expand itself — TaskList does NOT
+      pre-expand. A single Right both shows and selects the first
+      nested child.
+    • On subtask row without children → no-op.
+- Left (retract — 4-step peel, one layer per press):
+    • On nested child (s >= 0, n >= 0) → unselect nested child AND
+      collapse the subtask's nested section (setSubExpanded=false).
+      Subtask row stays selected.
+    • On subtask row with nested section open → collapse nested
+      section only. Subtask row stays selected.
+    • On subtask row with nested section closed → retract to header
+      (setSelectedSubtaskIndex = -1). Subtask deselects; header selects.
+    • On task header with card expanded → collapse card.
+    • On task header with card collapsed → no-op.
+    Note: Left NEVER closes the popout. It always ends with
+    focusListRequested.
+
+ACTION KEYS
+- Enter (activate):
+    • On nested child  → toggles nested subtask state
+    • On subtask row   → toggles subtask state (cascades to children)
+    • On task header   → toggles task state (cascades to subtasks
+                          and their children)
+- F2 (beginEdit):
+    • On nested child  → begins editing nested child title
+    • On subtask row   → begins editing subtask title
+    • On task header   → begins editing task title
+- Escape (cancel) — IDENTICAL to Left in the controller, plus a
+  final dismiss handled by Tasks.qml:
+  Note: Escape inside a text field is NOT handled by the controller —
+  TaskList returns early (event.accepted=false) when editingTaskId or
+  editingSubId is set, letting the field handle Escape.
+  Outside text fields:
+    TaskList forwards Escape to navController.handleKey.
+    handleKey(Key_Escape):
+      • If hasRetractableState() is false (cursor on collapsed header,
+        no inner state) → returns false. Event bubbles.
+        Tasks.qml Keys.onEscapePressed fires → root.closeRequested()
+        → popout closes.
+      • Otherwise → cancel() peels one layer (identical to Left),
+        returns true. Event consumed. Popout stays open.
+  The controller NEVER emits dismissRequested. Closing is entirely
+  Tasks.qml's responsibility.
+
+  5-stage peel when pressed repeatedly (same order as Left):
+    1. (i, s, n) nested child → unselect + collapse subtask section
+    2. (i, s, -1) subtask + open nested → collapse nested section
+    3. (i, s, -1) subtask + closed nested → retract to header
+    4. (i, -1, -1) header + expanded card → collapse card
+    5. (i, -1, -1) header + collapsed card → controller returns false
+                                              → Tasks.qml closes popout
+
+--------------------------------------------------------------------------------
+3. CLICK INTERACTIONS & SIGNAL PIPELINE
+--------------------------------------------------------------------------------
+CLICK EVENTS (TaskCard)
+- Card body       → selectionRequested(taskIndex)
+- Checkbox        → toggleRequested(taskIndex) + selectionRequested(taskIndex)
+                    (checkbox MouseArea enabled only when nSub === 0)
+- Expander        → nav.setTaskExpanded(!expanded) + selectionRequested(taskIndex)
+- Edit icon       → selectionRequested(taskIndex) → editingStarted(taskId)
+- Delete icon     → shake (single click); double-click via MouseArea
+                    → deleteRequested(taskIndex)
+- Double-click title → no-op (title MouseArea only single-clicks)
+- Subtask rows    → bubbles via SubtaskCard signals to TaskCard → TaskList
+
+CLICK EVENTS (SubtaskCard)
+- Title           → if effectiveHasChildren: setExpanded(!effectiveExpanded)
+                    else: selectionRequested(taskIndex, subtaskIndex)
+- Checkbox        → toggleRequested(taskIndex, subtaskIndex)
+                    + selectionRequested(taskIndex, subtaskIndex)
+- Edit icon       → selectionRequested → editingStarted(editId)
+                    (editId = "todoId__subtaskId")
+- Delete icon     → shake (single click); double-click via MouseArea
+                    → deleteRequested(taskIndex, subtaskIndex)
+- Add-child "+"   → selectionRequested + setExpanded(true) + addingChild=true
+                    + focus addChildField
+
+CLICK EVENTS (NestedSubtaskCard)
+- Title           → double-tap → editingStarted(nestedId)
+                     (no selectionRequested — selection already managed
+                     by parent's isSelected)
+- Checkbox        → toggleRequested(taskIndex, subtaskIndex, nestedIndex)
+- Edit icon       → editingStarted(nestedId) (no selectionRequested)
+- Delete icon     → deleteRequested(taskIndex, subtaskIndex, nestedIndex)
+  (NO shake animation — direct delete on single click, unlike
+  TaskCard/SubtaskCard which require double-click after shake)
+
+SIGNAL EMISSION ORDER (TaskCard)
+- checkbox click:   toggleRequested → selectionRequested
+- edit click:       selectionRequested → editingStarted
+- delete dbl-click: deleteRequested (single signal)
+- expander click:   expanded flip → selectionRequested
+- subtask bubble:   subtaskSelectionRequested(subIdx) via onSubtaskSelectionRequested
+                    (TaskList calls navController.selectSubtask(index, subIdx))
+
+SIGNALS OUT (TaskCard)
+- toggleRequested(taskIdx)
+- renameRequested(taskIdx, newTitle)
+- deleteRequested(taskIdx)
+- addSubtaskRequested(taskIdx, title)
+- toggleSubtaskRequested(taskIdx, subIdx)
+- deleteSubtaskRequested(taskIdx, subIdx)
+- renameSubtaskRequested(taskIdx, subIdx, newTitle)
+- addNestedSubtaskRequested(taskIdx, subIdx, title)
+- toggleNestedSubtaskRequested(taskIdx, subIdx, nestedIdx)
+- deleteNestedSubtaskRequested(taskIdx, subIdx, nestedIdx)
+- renameNestedSubtaskRequested(taskIdx, subIdx, nestedIdx, newTitle)
+- editingStarted(taskId)
+- editingCancelled()
+- subtaskEditingStarted(subtaskId)
+- subtaskEditingCancelled()
+- selectionRequested(taskIdx)
+- subtaskSelectionRequested(subIdx)
+- addChildCancelled(taskIdx, subIdx)
+
+TaskList handler notes:
+- onSelectionRequested: uses ListView `index` (not taskIdx) to call
+  navController.selectTask(index)
+- onSubtaskSelectionRequested: navController.selectSubtask(index, subIdx)
+- onAddChildCancelled: navController.selectSubtask(index, subIdx) +
+  keepSelectedVisible — returns focus to the add-child subtask after Esc
+- TaskList.Keys.onPressed forwards every unhandled key to
+  navController.handleKey(key, modifiers) and sets
+  event.accepted = true when it returns true.
+- TaskList has NO pre-expand block for Right. The controller's moveRight
+  expands the subtask section itself (setSubExpanded) before descending
+  to nested 0, so a single Right both shows and selects the first child.
+
+--------------------------------------------------------------------------------
+4. VISUAL STATES & EDGE CASES
+--------------------------------------------------------------------------------
+VISUAL STATE PRIORITY (highest wins)
+
+TaskCard:
+1. Editing  → text field replaces title (title.visible = false)
+2. Selected → bg m3surfaceContainerHigh, 1px border @ m3primary 0.35
+3. Done     → title m3onSurfaceVariant @0.6 opacity, checkbox m3primary
+               @0.5, strikethrough bar
+4. Partial  → checkbox m3secondary (dSub > 0 && dSub < nSub)
+5. Hovered  → action buttons opacity 0.3 → 1.0 (only affects actions)
+6. Normal   → title m3primary, checkbox outline
+
+SubtaskCard:
+1. Editing  → text field replaces title
+2. Selected → leftMargin shift (+15px via tree.selectedContentShift),
+               tree dot grows (dotSize 6→8)
+   No background color change. No title color change to m3secondary.
+3. Done     → title m3onSurfaceVariant @0.6, checkbox m3primary @0.5,
+               strikethrough
+4. Hovered  → action buttons opacity 0 → 1.0 (only affects actions)
+5. Normal   → title m3primary, checkbox m3primary
+
+NestedSubtaskCard:
+1. Editing  → text field replaces title
+2. Selected → leftMargin shift (via tree.selectedContentShift), tree dot grows
+   No background color change.
+3. Done     → title m3outline, opacity 0.6
+4. Hovered  → action buttons opacity 0 → 1.0
+5. Normal   → title m3secondary, opacity 0.8
+
+TREE LINES (TreeConnector, shared by SubtaskCard & NestedSubtaskCard)
+- Color: ALWAYS m3primary (hardcoded in tree.style block, no
+  state-based color priority).
+- Vertical spine:
+    • Visible top-to-bottom on non-last siblings
+    • Bottom cut at elbow for last sibling (isLast → stops at _cy - _r)
+- Horizontal branch: rounded elbow (cornerRadius) from spine to dot
+- Node dot: always visible (showDot: true)
+    • Size animates on selection: 6px → 8px (dotSizeSelected)
+    • Offset animates on selection: _selectedAnim (0 → 15px)
+- indentUnit = 28px (not used for simple depth * indentUnit; instead
+  tree geometry via contentStartX, childSpineX, childContentX)
+- One nested level only; no depth clamping needed (data model is
+  task → subtasks → children, children are terminal leaves)
+
+STREAK BADGE (TaskCard, habits only)
+- Visible: showStreak && (streak > 0 || bestStreak > 0) && !isEditing
+- Fire icon + number
+- Color (streakColor): computed from streak value only, does NOT
+  check selected state:
+    streak >= 20 → #fe1d1d, >= 10 → #FF8C00, >= 3 → #FFA500,
+    >= 1 → m3primary, 0 → m3outlineVariant
+- Best-streak badge (trophy) visible when bestStreak > streak
+  (separate RowLayout, opacity 0.65)
+- Never overrides title or checkbox colors
+
+EDGE CASES
+- Enter on card with subtasks & no subtask selected → toggles task (cascade)
+- Double-click title on TaskCard → no-op (title MouseArea only single-clicks)
+  Note: NestedSubtaskCard uses double-TAP on title → editingStarted(nestedId)
+- Delete confirm requires double-click within shake window
+- Rapid double toggleRequested → idempotent per tick (parent dedupes)
+- Clicking already-selected card → no-op (controller setSelectedIndex
+  returns early if index unchanged)
+- Nested subtask toggle: children array is reset to [] on toggle
+  (nested children are terminal; toggleNestedSubtask sets children: [])
+- toggleTask cascade: subtasks get done=newDone; their children arrays
+  are mapped with done=newDone BUT children: [] (reset on each cascade)
+- syncDone: only considers DIRECT subtasks (not nested children)
+- getProgressData / getTaskDuration: only DIRECT subtasks
+  (nested children's minutes are NOT included in task duration)
+
+STRICT CONSTRAINTS (DO NOT)
+- Do NOT mutate taskData directly
+- Do NOT handle keyboard navigation locally in SubtaskCard/NestedSubtaskCard
+  (owned by TaskNavigationController)
+- Do NOT change tree lines on hover
+- Do NOT reuse done color for selection (tree lines are always m3primary)
+- Do NOT compute isSelected locally
+- Do NOT emit signals outside the defined contracts
+- Do NOT add pre-expand blocks in TaskList — the controller owns
+  expand-then-select
+- Do NOT emit dismissRequested from the controller — Tasks.qml owns
+  the popout close decision
+
+--------------------------------------------------------------------------------
+5. FILTERING & SEARCH
+--------------------------------------------------------------------------------
+FILTER MODEL
+- filteredModel: ListModel of {todoId} — contains ALL task IDs (not
+  status- or search-filtered). Filtering is applied per-delegate via
+  `visible: list.matchesFilter(task, todoId)`.
+- updateFilteredModel() calls dataManager.getFilteredTasks("", "")
+  with empty filter strings — this returns all task IDs. The model
+  only changes when the SET of task IDs changes, not on filter toggle.
+- Switching status filter or search text does NOT rebuild filteredModel;
+  delegates show/hide via their visible binding.
+
+MATCHES FILTER (TaskList.matchesFilter)
+- statusFilter values: "all" (default), "active", "done"
+- "active" hides done tasks; "done" hides active tasks
+- Unknown statusFilter value → treated as "all" (no status filtering)
+- Search: matches title OR any subtask title OR any nested child title
+  (case-insensitive, via cached getSearchText haystack)
+- Search text from taskTitles, subtaskTitles, nestedChildTitles
+  combined into a single lowercased string (cached per todoId,
+  identity-validated)
+
+SEARCH DEBOUNCE
+- searchDebounce timer: 80ms interval, restarts on every searchQuery
+  change
+- On trigger: navController.selectTask(firstVisibleIndex()) +
+  list.rebuildNavCounts()
+- Status filter change: immediate — delegates hide/show instantly,
+  then navController.selectTask(firstVisibleIndex()) + rebuildNavCounts
+
+VISIBLE TASK COUNT
+- Iterates filteredModel and counts entries where matchesFilter is true
+- Used for empty state overlay visibility
+
+EMPTY STATE
+- Overlay (not a delegate): visible when loaded && visibleTaskCount === 0
+- Icon varies: search_off (search), sentiment_satisfied (done filter),
+  check_circle (default)
+
+--------------------------------------------------------------------------------
+6. DATA LAYER (DataManager) — PERSISTENCE & HABITS
+--------------------------------------------------------------------------------
+DATA MODEL
+- task: { todoId, title, done, icon, type, minutes, priority, streak,
+         bestStreak, lastCompletedDate, createdAt, subtasks[], completionDates[] }
+- subtask: { id, title, done, minutes, streak, bestStreak, children[] }
+- nested child: { id, title, done, minutes, streak, bestStreak, children[] }
+  (children array kept for forward-compatibility but is always empty —
+  nested children are terminal leaves; no deeper UI level)
+
+ID GENERATION
+- task.todoId: Date.now() + "-" + random(1e6)
+- subtask.id:  Date.now() + "-" + random(1e6)
+- nested.id:  Date.now() + "-" + random(1e6)
+
+IDENTITY & LOOKUP
+- taskIndexMap: { todoId → data-layer array index } (O(1) lookup)
+- taskMap: { todoId → task object } (O(1) lookup)
+- taskIndex (absIdx) in TaskCard = taskIndexMap[todoId]
+  This is the DATA-LAYER index, different from ListView index.
+- Controller speaks in LIST/VIEW indices (via filteredModel).
+  TaskList translates: dataTaskIndex(listIndex) → taskIndexMap[todoId]
+
+EDIT ID SCHEMES
+- Subtask edit ID (editingSubId): composite "todoId__subtaskId"
+- Nested edit ID (editingSubId): raw nested child id (not composite)
+- TaskCard.isEditing: editingTaskId === task.todoId
+- SubtaskCard.isEditing: editingSubId === "todoId__subtaskId"
+- NestedSubtaskCard.isEditing: editingSubId === nestedChild.id
+
+SYNC & CASCADE
+- syncDone(task): sets task.done = true only if ALL DIRECT subtasks
+  are done. Does NOT consider nested children.
+- updateSubtask: calls syncDone(newTask) after any subtask mutation
+- toggleTask(i): newDone = !task.done; cascades newDone to all
+  direct subtasks; maps each subtask's children with done=newDone
+  but resets children to [] (breaks nested persistence on cascade)
+- toggleSubtask: cascades newSub.done to children (done=newSub.done)
+- toggleNestedSubtask: sets children: [] (terminal)
+- applyHabitCompletion: BUILD type — done=true adds today to
+  completionDates; AVOID type — done=true removes today (not relapsed)
+- applyHabitDayRollover: at 2am reset; BUILD resets done=false +
+  recreates subtasks with done=false (preserves titles, resets done);
+  AVOID preserves relapse state; updates streaks
+
+PERSISTENCE
+- FileView: JSON file at Paths.home/dataType + ".json" (tasks.json / habits.json)
+- saveTimer: 400ms debounce; coalesces rapid mutations into one stringify
+- JSON is compact (no pretty-print) for ~30% smaller files
+
+CACHES (TaskList)
+- _progressCache, _durationCache, _searchCache: mutated in place,
+  identity-validated (entry.task === current task object)
+- resetCaches() clears all three on load
+- No manual invalidation needed; changed task → cache miss → recompute
+
+--------------------------------------------------------------------------------
+7. EXPANSION STATE (TaskNavigationController)
+--------------------------------------------------------------------------------
+- expandedTasks: QVariantMap { todoId: true }
+  Read by TaskCard: nav.expandedTasks[taskData.todoId] ?? false
+- expandedSubtasks: QVariantMap { "todoId/subtaskId": true }
+  Read by SubtaskCard: nav.expandedSubtasks[taskId/subtaskId] ?? false
+- setTaskExpanded / setSubExpanded: no-op if already in desired state
+- clampToStructure:
+    • Prunes expansion entries for tasks/subs no longer in the structure
+      snapshot.
+    • Clamps cursor indices to valid ranges (task visibility, subtask
+      bounds, nested bounds).
+    • STEP 3 exception: while a subtask is expanded, its nested cursor
+      is NOT reset to -1 even if the structure snapshot still reports
+      nestedCount == 0. Reason: expansion is signaled before the QML
+      Repeater instantiates the new rows, so nestedCount==0 is a
+      transient state. Resetting here would wipe the
+      setSelectedNestedIndex(0) issued by moveRight and force the user
+      to press Right twice.
+- Expansion survives ListView item recycling (state lives in C++,
+  not in delegate local properties)
+
+--------------------------------------------------------------------------------
+8. STRUCTURE SNAPSHOT (navRows)
+--------------------------------------------------------------------------------
+- Rebuilt by TaskList.rebuildNavCounts() whenever data changes
+- Per visible task: { todoId, visible, nSub, nestedCounts[], subIds[] }
+- visible: computed via matchesFilter (status + search)
+- nSub: count of direct subtasks
+- nestedCounts[]: per-subtask child count (parallel to subIds[])
+- subIds[]: parallel list of subtask ids (for expansion key construction)
+- Controller reads ONLY sizes + visibility (no titles) — navigation works
+  even when ListView delegates are virtualized away
+
+--------------------------------------------------------------------------------
+9. TIMING & EFFICIENCY NOTES
+--------------------------------------------------------------------------------
+- cacheBuffer: 300 (ListView trades scroll smoothness for fewer live cards)
+- saveTimer: 400ms coalesced persistence
+- searchDebounce: 80ms
+- habitResetTimer: 60s → sleeps until next 2am reset (msUntilNextReset)
+- CAnim on color/opacity; Anim.FastSpatial on spatial properties
+- ListView recycling: onPooled → animate=false + clear addSubtaskField;
+  onReused → animate=true (next tick via Qt.callLater)
+
+================================================================================
+                       SUBTASK CARD BEHAVIOR CONTRACTS
+================================================================================
+Owner:     TaskCard (rendered by TaskList's ListView delegate)
+Direction: parent → child (props) | child → parent (signals)
+Data:      subtaskData (read-only, from task.subtasks[index])
+Scope:     one subtask row + its nested children section
+
+--------------------------------------------------------------------------------
+1. DATA & STATE CONTRACTS
+--------------------------------------------------------------------------------
+PROPERTIES
+- isFirst / isLast / hasChildren → tree drawing only
+- depth = 1 (one level below task)
+- isDone → subtaskData.done
+- editId → "taskId__subtaskId" (composite, used for isEditing matching)
+- isSelected → from parent (read-only, NOT computed locally)
+- effectiveExpanded → nav.expandedSubtasks["taskId/subtaskId"] (controller-
+  owned) or local `expanded` property fallback when nav is null
+- addingChild → true when add-child inline input is open
+
+SELECTION & EDIT MODE
+- isSelected is passed by parent (never computed locally)
+- Reset rules: task change → -1; sibling change → parent sets new subIdx
+- Scroll: TaskCard / TaskList keeps selected subtask visible
+- isEditing → this subtask title is being edited
+  Triggered by F2 (controller) or edit icon click
+  isEditing = editingNestedId === "taskId__subtaskId" (composite match)
+- Only one subtask edits at a time (parent enforces via editingSubId)
+- Enter commits (onAccepted); Escape cancels; blur commits
+
+NESTED EDIT MODE
+- editingNestedId property passed from TaskCard (= list.editingSubId)
+- When list.editingSubId is a raw nested id, this subtask's isEditing
+  is false (composite format doesn't match) — only the nested child
+  shows editing
+- When list.editingSubId is "taskId__subtaskId", this subtask's
+  isEditing is true
+
+--------------------------------------------------------------------------------
+2. KEYBOARD NAVIGATION & CURSOR DELEGATION
+--------------------------------------------------------------------------------
+CURSOR DELEGATION
+- Keyboard events are NOT handled locally by SubtaskCard; owned by
+  TaskNavigationController via TaskList.Keys.onPressed.
+- Reacts only to `isSelected` and `selectedNestedIndex` passed down by
+  TaskCard.
+- isSelected = navController.selectedIndex === index (ListView index)
+- selectedNestedIndex from: (root.isSelected && root.selectedSubtaskIndex
+  === index) ? root.selectedNestedIndex : -1
+  (only active when this subtask row is selected)
+- effectiveExpanded determines whether nested children are visible
+  for drill-in navigation
+
+--------------------------------------------------------------------------------
+3. CLICK INTERACTIONS & SIGNAL PIPELINE
+--------------------------------------------------------------------------------
+CLICK EVENTS
+- Title      → if effectiveHasChildren: setExpanded(!effectiveExpanded);
+               else: selectionRequested(taskIndex, subtaskIndex)
+- Checkbox   → toggleRequested(taskIndex, subtaskIndex) +
+               selectionRequested(taskIndex, subtaskIndex)
+- Edit icon  → selectionRequested → editingStarted(editId)
+               (editId = "taskId__subtaskId")
+- Delete icon → shake; double-click → deleteRequested(taskIndex, subtaskIndex)
+- Add-child "+" → selectionRequested + setExpanded(true) + addingChild=true +
+                 focus addChildField
+
+KEYBOARD INPUTS (add-child field)
+- Return/Enter → if hasTitle: addChildRequested(taskIdx, subIdx, text)
+- Escape → clear() + addingChild=false + addChildCancelled(taskIdx, subIdx)
+
+SIGNAL EMISSION ORDER
+- checkbox click:   toggleRequested → selectionRequested
+- title click (no children): selectionRequested only
+- title click (has children): setExpanded (no signal emit)
+- edit click:       selectionRequested → editingStarted
+- add-child click:  selectionRequested → setExpanded → addChildRequested
+- cancel add-child: addChildCancelled
+- child edit started: nestedEditingStarted(nestedId) → TaskCard forwards
+  as subtaskEditingStarted(nestedId) → TaskList sets editingSubId = nestedId
+- child edit cancelled: nestedEditingCancelled() → TaskCard forwards
+  as subtaskEditingCancelled() → TaskList clears editingSubId
+
+SIGNALS OUT
+- toggleRequested(taskIdx, subIdx)
+- deleteRequested(taskIdx, subIdx)
+- renameRequested(taskIdx, subIdx, newTitle)
+- editingStarted(subtaskId)  [subtaskId is composite editId]
+- editingCancelled()
+- selectionRequested(taskIdx, subIdx)
+- addChildRequested(taskIdx, subIdx, title)
+- addChildCancelled(taskIdx, subIdx)
+- nestedEditingStarted(nestedId)
+- nestedEditingCancelled()
+- toggleNestedRequested(taskIdx, subIdx, nestedIdx)
+- deleteNestedRequested(taskIdx, subIdx, nestedIdx)
+- renameNestedRequested(taskIdx, subIdx, nestedIdx, newTitle)
+
+TaskCard forwards all nested signals to its own signals, which TaskList
+routes to DataManager.
+
+--------------------------------------------------------------------------------
+4. LAYOUT, TREE LINES & VISUAL STATES
+--------------------------------------------------------------------------------
+TREE LINES (TreeConnector)
+- Color: ALWAYS m3primary (no state-based color — hardcoded in tree style)
+- Vertical spine:
+    visible when: not isLast OR hasChildren
+    bottom cut when: isLast && !hasChildren (stops at elbow)
+- Horizontal branch: rounded elbow (cornerRadius 8) → dot
+- Node dot: always visible (showDot: true)
+    size animates: 6px (default) → 8px (dotSizeSelected) when selected
+    elbow shifts +15px when selected (selectedContentShift)
+- indentUnit = 28px (tree geometry uses contentStartX, childSpineX, not
+  simple depth * indentUnit)
+
+INDENT
+- contentStartX = spineX(6) + elbowLength(24) + contentGap(6) = 36px
+- Nested children indent further via childSpineX / childContentX
+- One nested level only; no maxDepth clamping
+
+VISUAL STATE PRIORITY (highest wins)
+1. Editing  → text field replaces title
+2. Selected → contentShift (+15px leftMargin), tree dot grows
+   NO background color change. NO title color change to m3secondary.
+3. Done     → title m3onSurfaceVariant @0.6, checkbox m3primary @0.5,
+               strikethrough
+4. Hovered  → action buttons opacity 0 → 1 (only affects actions)
+5. Normal   → title m3primary, checkbox m3primary
+
+EDGE CASES
+- Clicking already-selected subtask → no-op (controller returns early)
+- Rapid double toggleRequested → parent dedupes per tick
+- Deleting last subtask → parent may collapse card (controller clampToStructure)
+- isEditing + deletion → delete wins (parent clears editingSubId)
+
+STRICT CONSTRAINTS (DO NOT)
+- Do NOT mutate subtaskData directly
+- Do NOT handle keyboard navigation locally (parent owns it)
+- Do NOT change tree line colors on hover or selection
+- Do NOT compute isSelected locally
+- Do NOT reuse done color for selection (tree lines are always m3primary)
+
+================================================================================
+                       NESTED SUBTASK CARD BEHAVIOR CONTRACTS
+================================================================================
+Owner:     SubtaskCard (rendered by nestedRepeater)
+Direction: parent → child (props) | child → parent (signals)
+Data:      nestedData (read-only, from subtask.children[index])
+Scope:     one nested child row (terminal depth)
+
+--------------------------------------------------------------------------------
+1. DATA & STATE CONTRACTS
+--------------------------------------------------------------------------------
+PROPERTIES
+- nestedId → subtaskData?.id ?? "" (raw id, NOT composite)
+- isEditing → editingNestedId === nestedData?.id (raw id comparison)
+- editPrefill → `${title} @${minutes || 0}` (raw text, parsed on commit)
+- title color: done → m3outline @0.6; not done → m3secondary @0.8
+- No background color; no surfaceContainerHigh on selection
+
+SELECTION & EDIT MODE
+- isSelected from SubtaskCard (read-only)
+- isEditing triggered by: F2 (controller → editNestedRequested →
+  TaskList sets editingSubId = nestedId directly), or
+  double-tap on title / edit icon click (emits editingStarted(nestedId)
+  → SubtaskCard.nestedEditingStarted → TaskCard.subtaskEditingStarted →
+  TaskList sets editingSubId = nestedId)
+- commitRename: checks hasTitle(text); if true → renameRequested;
+  if false → editingCancelled (resets field, no data mutation)
+- Enter commits via commitRename; Escape cancels; blur commits
+
+--------------------------------------------------------------------------------
+2. CLICK INTERACTIONS & SIGNAL PIPELINE
+--------------------------------------------------------------------------------
+CLICK EVENTS
+- Title double-tap → editingStarted(nestedId)
+- Checkbox tap     → toggleRequested(taskIdx, subIdx, nestedIdx)
+- Edit icon click  → editingStarted(nestedId)
+- Delete icon click → deleteRequested(taskIdx, subIdx, nestedIdx)
+
+KEYBOARD INPUTS
+- Enter → commitRename(text) (via Keys.onPressed → commitRename)
+- Escape → clear() + editingCancelled()
+
+SIGNALS OUT
+- toggleRequested(taskIdx, subIdx, nestedIdx)
+- deleteRequested(taskIdx, subIdx, nestedIdx)
+- renameRequested(taskIdx, subIdx, nestedIdx, newTitle)
+- editingStarted(nestedId)
+- editingCancelled()
+
+All signals bubble to SubtaskCard's onXxx handlers, which re-emit as
+SubtaskCard signals (toggleNestedRequested, deleteNestedRequested,
+renameNestedRequested, nestedEditingStarted, nestedEditingCancelled).
+TaskCard's delegate forwards these to its own signals:
+  subtaskEditingStarted(nestedId) / subtaskEditingCancelled()
+which TaskList routes to editingSubId = nestedId / editingSubId = "".
+
+--------------------------------------------------------------------------------
+3. LAYOUT, TREE LINES & VISUAL STATES
+--------------------------------------------------------------------------------
+TREE LINES (TreeConnector)
+- Same as SubtaskCard: color always m3primary, dot animates on selection
+- spineX comes from parent's childSpineX (center of parent checkbox)
+- showDot: always true
+- selected → dot grows 6→8px, elbow shifts +15px
+
+VISUAL STATE PRIORITY (highest wins)
+1. Editing  → text field replaces title
+2. Selected → dot grows + contentShift (no bg, no title color change)
+3. Done     → title m3outline, opacity 0.6
+4. Hovered  → actions opacity 0 → 1
+5. Normal   → title m3secondary, opacity 0.8
+
+STRICT CONSTRAINTS (DO NOT)
+- Do NOT mutate nestedData directly
+- Do NOT handle keyboard navigation locally
+- Do NOT change tree line colors
+- Do NOT emit signals outside the defined pipeline
+
+================================================================================
+                       TITLE PARSE (TitleParse.js)
+================================================================================
+- parseCapturePrefix(text): strips "@N" suffix, returns {title, minutes}
+- Regex: /(@\d+)/ — captures digits after @ sign
+- Title is everything before + after @N, trimmed, collapsed whitespace
+- hasTitle(text): true if parsed title is non-empty
+- Used by: DataManager (addTask, addSubtask, addNestedSubtask, renameXxx),
+  TaskCard (editPrefill, commitEdit guard), SubtaskCard (editPrefill,
+  commitEdit guard, addChildField guard), TasksHeader (capture field guard)
+
+================================================================================
+                       FILTER SWITCHER (BtnSwitcher)
+================================================================================
+- Reusable toggle/switch component
+- model: array of {icon, text, value, action?}
+- currentValue ↔ root binding
+- showOnlyActiveText: if true, inactive buttons show icon-only; if false,
+  all buttons show icon + text
+- onActivated emitted when value changes (not on same-value click)
+- used for: page switcher (Tasks/Daily), habit type (Build/Avoid),
+  status filter (All/Active/Done)
+
+================================================================================
+                       ARROW KEY NAVIGATION SUMMARY
+================================================================================
+Cursor triple: (selectedIndex, selectedSubtaskIndex, selectedNestedIndex)
+  All indices from TaskNavigationController (C++). -1 = "at parent level".
+
+UP / DOWN — circular within current scope
+- (-1, -1) header scope   → next/prev visible task (wraps)
+- (i, s, -1) subtask scope → next/prev subtask in task i (wraps)
+- (i, s, n) nested scope   → next/prev nested child in subtask s (wraps)
+
+RIGHT — drill in
+- (-1, -1) on header         → expand task + select subtask 0
+- (i, s, -1) on subtask      → expand subtask if collapsed, then enter
+                                nested child 0 (controller does the
+                                expand itself — no TaskList pre-expand)
+- (i, s, n) on nested child  → no-op (terminal depth)
+
+LEFT — retract (4-step peel, one layer per press)
+- (i, s, n) nested child     → unselect nested child + collapse subtask
+                                nested section (subtask row stays selected)
+- (i, s, -1) subtask + open nested → collapse nested section only
+- (i, s, -1) subtask + closed nested → retract to header
+                                (setSelectedSubtaskIndex = -1)
+- (i, -1, -1) header + expanded card → collapse card
+- (i, -1, -1) header + collapsed card → no-op
+- Left NEVER dismisses the popout
+
+ESCAPE — same as Left, plus a final dismiss handled by Tasks.qml
+- In a text field → field handles Escape (TaskList returns
+  event.accepted=false when editingTaskId/editingSubId is set)
+  - TaskCard/SubtaskCard edit field: cancels edit, restores list focus
+  - NestedSubtaskCard edit field: cancels edit
+  - Search field: clears text, returns focus to list
+  - Capture field: clears text, focuses list
+- Outside text fields:
+    TaskList forwards Escape to navController.handleKey.
+    handleKey(Key_Escape):
+      • If hasRetractableState() is false (cursor on collapsed header,
+        no inner state) → returns false. Event bubbles.
+        Tasks.qml Keys.onEscapePressed fires → root.closeRequested()
+        → popout closes.
+      • Otherwise → cancel() peels one layer (identical to Left),
+        returns true. Event consumed. Popout stays open.
+  Controller does NOT emit dismissRequested — the signal was removed.
+  Closing is entirely Tasks.qml's responsibility.
+
+  5-stage peel when pressed repeatedly (same order as Left):
+    1. (i, s, n) nested child → unselect + collapse subtask section
+    2. (i, s, -1) subtask + open nested → collapse nested section
+    3. (i, s, -1) subtask + closed nested → retract to header
+    4. (i, -1, -1) header + expanded card → collapse card
+    5. (i, -1, -1) header + collapsed card → controller returns false
+                                              → Tasks.qml closes popout

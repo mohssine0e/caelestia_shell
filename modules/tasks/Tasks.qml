@@ -11,53 +11,84 @@ import qs.services
 
 FocusScope {
     id: root
+    focus: true
     width: 1040
     height: 720
+    implicitWidth: 1040
+    implicitHeight: 720
 
-    signal closeRequested() // this is handled by the popout wrapper, not this component itself 
-    Keys.onEscapePressed: {
-        root.closeRequested();
-        event.accepted = true;
-    }
-    // "/" set focus to the capture field, unless a text field is already active (so you can type "/" in a search box)
+    signal closeRequested()
+
+    // ── Root key handler ─────────────────────────────────────────
+    // Only handles keys that should work globally (not when typing).
     Keys.onPressed: event => {
-        if (event.key === Qt.Key_Slash && !inputActive) {
-            tasksHeader.focusCapture()
-            event.accepted = true;
-        } else {
-            event.accepted = false;
+        // Q — quick page switch (only when no text field has focus)
+        if (event.key === Qt.Key_Q && !root.inputActive) {
+            if (root.activePage === "daily") {
+                root.activePage = "tasks"
+                taskList.forceActiveFocus()
+            } else {
+                root.activePage = "daily"
+                dailyHabitsList.forceActiveFocus()
+            }
+            event.accepted = true
+            return
         }
+
+        // "/" — focus the capture field
+        if (event.key === Qt.Key_Slash && !root.inputActive) {
+            tasksHeader.focusCapture()
+            event.accepted = true
+            return
+        }
+
+        event.accepted = false
     }
+
+    // ── Escape at the root closes the popout ─────────────────────
+    // Text fields inside will consume Escape first (via event.accepted).
+    Keys.onEscapePressed: event => {
+        if (root.inputActive) {
+            // A text field owns Escape; let it handle it.
+            event.accepted = false
+            return
+        }
+        root.closeRequested()
+        event.accepted = true
+    }
+
+    // ── Background click catcher ─────────────────────────────────
     MouseArea {
         anchors.fill: parent
         onPressed: {
             if (root.activePage === "tasks")
-                taskList.forceActiveFocus();
+                taskList.forceActiveFocus()
             else
-                dailyHabitsList.forceActiveFocus();
+                dailyHabitsList.forceActiveFocus()
         }
     }
 
-    property string activePage: "tasks" // "tasks" | "daily"
-
-    property string statusFilter: "all" // "all" | "active" | "done"
+    property string activePage: "tasks"
+    property string statusFilter: "all"
     property string searchQuery: ""
+    property string habitType: "build"
+    property string habitIcon: "task_alt"
 
     property var timeUntilReset: ({ hours: 0, mins: 0 })
-    
+
     function updateTimeLeft() {
-        const now = new Date();
-        const resetHour = 2;
-        let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0, 0);
+        const now = new Date()
+        const resetHour = 2
+        let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0, 0)
         if (now >= end)
-            end.setDate(end.getDate() + 1);
-        const diffMs = Math.max(0, end - now);
-        const diffMins = Math.floor(diffMs / 60000);
-        const hours = Math.floor(diffMins / 60);
-        const mins = diffMins % 60;
-        timeUntilReset = { hours: hours, mins: mins };
+            end.setDate(end.getDate() + 1)
+        const diffMs = Math.max(0, end - now)
+        const diffMins = Math.floor(diffMs / 60000)
+        const hours = Math.floor(diffMins / 60)
+        const mins = diffMins % 60
+        timeUntilReset = { hours: hours, mins: mins }
     }
-    
+
     Timer {
         id: timeTrackerTimer
         interval: 30000
@@ -67,58 +98,58 @@ FocusScope {
         onTriggered: root.updateTimeLeft()
     }
 
-    // Icon the next new habit will get (daily page only)
-    property string habitIcon: "task_alt"
-
-    // True while any text field inside the popout has focus — the wrapper
-    // uses this to suspend the mouse-idle auto-close while typing.
+    // ── True while any text field has focus ──────────────────────
     readonly property Item focusItem: Window.activeFocusItem
     readonly property bool inputActive: focusItem?.cursorPosition !== undefined
 
     ColumnLayout {
         id: layout
 
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.fill: parent
         anchors.margins: Tokens.padding.medium
         spacing: Tokens.spacing.medium
 
-        // switcher and capture field
-        TasksHeader{
+        // ── Header (capture field + switchers) ───────────────────
+        TasksHeader {
             id: tasksHeader
 
             Layout.fillWidth: true
             activePage: root.activePage
             habitIcon: root.habitIcon
+            habitType: root.habitType
 
-            onPageChanged: page => {
-                root.activePage = page
-            }
+            onHabitTypeSelected: type => root.habitType = type
             onHabitIconSelected: icon => root.habitIcon = icon
+            onPageChanged: page => root.activePage = page
+
+            onEscapePressed: {
+                (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
+            }
 
             onCaptureAccepted: text => {
-                if (root.activePage === "daily") dailyHabitsList.addTask(text, root.habitIcon)
-                else taskList.addTask(text)
+                if (root.activePage === "daily")
+                    dailyHabitsList.addTask(text, root.habitIcon, root.habitType)
+                else
+                    taskList.addTask(text)
             }
         }
 
-        // seperator line
+        // ── Separator ────────────────────────────────────────────
         StyledRect {
-            Layout.fillWidth: true; implicitHeight: 1
-            color: Colours.palette.m3outlineVariant; opacity: 0.4
+            Layout.fillWidth: true
+            implicitHeight: 1
+            color: Colours.palette.m3outlineVariant
+            opacity: 0.4
         }
 
-        // ── Status filter (All/Active/Done) + search ──────────────
+        // ── Status filter + search ───────────────────────────────
         RowLayout {
-            visible: true
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
 
-            // Filter buttons (all, active, done)
             BtnSwitcher {
                 id: statusFilterSwitcher
-                Layout.fillHeight: true   
+                Layout.fillHeight: true
                 model: [
                     { icon: "format_list_bulleted", text: qsTr("All"), value: "all" },
                     { icon: "pending", text: qsTr("Active"), value: "active" },
@@ -156,24 +187,9 @@ FocusScope {
                 }
             }
 
-            // IconTextButton {
-            //     implicitHeight: statusFilterSwitcher.givenHeight
-            //     visible: true
-            //     icon: "vertical_align_bottom"
-            //     onClicked: (root.activePage === "daily" ? dailyHabitsList : taskList).moveDoneToBottom()
-            //     isToggle: false
-            //     checked:true
-            //     type: ButtonBase.Tonal
-            //     activeColour: Colours.palette.m3primary
-            //     font: Tokens.font.label.medium
-            //     radius: Tokens.rounding.small
-            //     padding: Tokens.padding.small
-            // }
-
-            // spacer pushes evrything else to the right
             Item { Layout.fillWidth: true }
 
-            // Search input
+            // Search
             StyledTextField {
                 implicitHeight: statusFilterSwitcher.givenHeight
                 verticalPadding: Tokens.padding.small
@@ -183,19 +199,35 @@ FocusScope {
                 placeholderText: root.activePage === "daily" ? qsTr("Search habits") : qsTr("Search tasks")
                 text: root.searchQuery
                 onTextChanged: root.searchQuery = text
-                Keys.onEscapePressed: { clear(); focus = false; }
+
+                onAccepted: {
+                    focus = false
+                    clear()
+                    Qt.callLater(() => {
+                        (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
+                    })                }
+
+
+                Keys.onEscapePressed: {
+                    clear()
+                    focus = false
+                    Qt.callLater(() => {
+                        (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
+                    })
+                }
             }
         }
 
-
-
-        // seperator line
+        // ── Separator ────────────────────────────────────────────
         StyledRect {
-            Layout.fillWidth: true; implicitHeight: 1
-            color: Colours.palette.m3outlineVariant; opacity: 0.4
+            Layout.fillWidth: true
+            implicitHeight: 1
+            color: Colours.palette.m3outlineVariant
+            opacity: 0.4
             visible: root.activePage === "tasks"
         }
 
+        // ── Task list ────────────────────────────────────────────
         TaskList {
             id: taskList
             Layout.fillWidth: true
@@ -207,6 +239,7 @@ FocusScope {
             searchQuery: root.searchQuery
         }
 
+        // ── Habit list ───────────────────────────────────────────
         TaskList {
             id: dailyHabitsList
             Layout.fillWidth: true
@@ -215,7 +248,8 @@ FocusScope {
             focus: root.activePage === "daily"
             dataType: "habits"
             statusFilter: root.statusFilter
-            searchQuery: root.searchQuery
+                        searchQuery: root.searchQuery
         }
-    }
+        }
+
 }

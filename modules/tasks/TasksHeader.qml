@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
 import qs.components
@@ -14,46 +15,55 @@ Item {
 
     required property string activePage
     required property string habitIcon
+    required property string habitType
 
     signal pageChanged(string page)
     signal captureAccepted(string text)
+    signal escapePressed()
     signal habitIconSelected(string icon)
+    signal habitTypeSelected(string type)
 
-    // remove the big icons or the onte represented as Text
-    readonly property var habitIcons: [
-            // ── No Icon (clear) ── (1)
-        "block",  // or "cancel" or "clear"
-
-
-        // ── Engineering & Coding ── (8)
-        "code", "terminal", "build", "engineering", 
-        "analytics", "dashboard",
-        
-        // ── Productivity ── (6)
-        "task_alt", "check_circle", "pending", "today",
-        "calendar_today", "trending_up",
-        
-        // ── Health & Wellness ── (6)
+    // ── Icon lists per type ──────────────────────────────────────
+    readonly property var buildIcons: [
+        "block",
+        // Engineering & Coding
+        "code", "terminal", "build", "engineering", "analytics", "dashboard",
+        // Productivity
+        "pending", "today", "calendar_today", "trending_up",
+        // Health & Wellness
         "directions_run", "fitness_center", "water_drop",
         "bedtime", "spa", "self_improvement",
-        
-        // ── Learning ── (6)
-        "menu_book", "school", "book",
-        "lightbulb",
-        
-        // ── Focus & Mindfulness ── (4)
+        // Learning
+        "menu_book", "school", "book", "lightbulb",
+        // Focus & Mindfulness
         "balance",
-        
-        // ── Social & Networking ── (4)
+        // Social & Networking
         "group", "handshake", "volunteer_activism",
-        
-        // ── Finance ── (4)
+        // Finance
         "savings", "receipt", "payments", "account_balance",
-        
-        // ── Daily Life ── (6)
+        // Daily Life
         "restaurant", "local_cafe", "cleaning_services",
         "home", "pets"
     ]
+
+    readonly property var avoidIcons: [
+        "block", "do_not_disturb", "do_not_disturb_on",
+        "phone_disabled", "wifi_off", "no_food",
+        "no_drinks", "smoke_free", "no_accounts",
+        "cancel", "close", "not_interested",
+        "hourglass_disabled", "mobiledata_off",
+        "visibility_off", "volume_off", "notifications_off"
+    ]
+
+    readonly property var habitIcons: root.habitType === "avoid" ? avoidIcons : buildIcons
+
+    // Reset icon when type changes
+    onHabitTypeChanged: {
+        // If the current icon isn't in the new list, reset to first
+        if (root.habitIcons.indexOf(root.habitIcon) === -1) {
+            root.habitIconSelected(root.habitIcons[0])
+        }
+    }
 
     implicitHeight: headerColumn.implicitHeight
 
@@ -61,15 +71,14 @@ Item {
         captureField.forceActiveFocus()
     }
 
-    // ── Icon picker visibility ──────────────────────────────────
-    readonly property bool iconPickerVisible: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
+    readonly property bool showHabitControls: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
 
     ColumnLayout {
         id: headerColumn
         anchors.fill: parent
         spacing: Tokens.spacing.small
 
-        // ── Top Row: Capture Field + Page Switcher ────────────
+        // ── Top Row: Capture Field + Type + Page Switcher ────
         RowLayout {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
@@ -82,16 +91,39 @@ Item {
                 leadingIcon: root.activePage === "daily" ? root.habitIcon : "checklist"
                 borderWidth: 1
                 placeholderText: root.activePage === "daily"
-                    ? qsTr("Add a habit")
+                    ? (root.habitType === "avoid"
+                        ? qsTr("Avoid a habit")
+                        : qsTr("Add a habit"))
                     : qsTr("Capture a task")
                 onAccepted: {
-                    root.captureAccepted(text)
-                    clear()
+                    // Ignore pure "@minutes" input — it has no title.
+                    if (TitleParse.hasTitle(text)) {
+                        root.captureAccepted(text)
+                        clear()
+                    }
                 }
                 Keys.onEscapePressed: {
                     clear()
                     focus = false
+                    root.escapePressed()
                 }
+            }
+
+            // ── Habit Type Switcher (daily only) ───────────────
+            BtnSwitcher {
+                id: habitTypeSwitch
+                visible: root.showHabitControls
+                Layout.fillHeight: true
+                model: [
+                    { icon: "build", text: qsTr("Build"), value: "build" },
+                    { icon: "block", text: qsTr("Avoid"), value: "avoid" }
+                ]
+                currentValue: root.habitType
+                onActivated: {
+                    root.habitType = value
+                    root.habitTypeSelected(value)
+                }
+                showOnlyActiveText: true
             }
 
             // ── Spacer ──────────────────────────────────────────
@@ -116,17 +148,16 @@ Item {
         // ── Bottom Row: Icon Picker ─────────────────────────────
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: root.iconPickerVisible ? pageSwitch.implicitHeight : 0
-            visible: root.iconPickerVisible
-            opacity: root.iconPickerVisible ? 1 : 0
+            Layout.preferredHeight: root.showHabitControls ? pageSwitch.implicitHeight : 0
+            visible: root.showHabitControls
+            opacity: root.showHabitControls ? 1 : 0
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
             Behavior on Layout.preferredHeight { Anim { type: Anim.FastSpatial } }
-            
+
             color: "transparent"
             clip: true
             radius: Tokens.rounding.small
 
-            // ── ListView with built-in scrolling ──────────────
             ListView {
                 id: iconListView
                 anchors {
@@ -136,29 +167,27 @@ Item {
                 orientation: ListView.Horizontal
                 spacing: Tokens.spacing.small
                 clip: true
-                
-                // ── Enable smooth scrolling ─────────────────────
+
                 snapMode: ListView.SnapToItem
                 highlightMoveDuration: 200
                 boundsBehavior: Flickable.StopAtBounds
                 flickDeceleration: 2500
                 maximumFlickVelocity: 900
-                
+
                 model: root.habitIcons
 
                 delegate: Rectangle {
                     required property string modelData
                     required property int index
 
-                    readonly property bool selected:modelData === root.habitIcon
+                    readonly property bool selected: modelData === root.habitIcon
 
-                    
                     width: 36
                     height: iconListView.height - 4
                     radius: Tokens.rounding.small
                     color: selected ? Colours.palette.m3primary
-                            : iconHover.hovered 
-                            ? Colours.tPalette.m3surfaceContainerHigh 
+                            : iconHover.hovered
+                            ? Colours.tPalette.m3surfaceContainerHigh
                             : "transparent"
                     Behavior on color { CAnim {} }
 
@@ -171,46 +200,46 @@ Item {
                         Behavior on color { CAnim {} }
                     }
 
-                    HoverHandler { 
-                        id: iconHover 
+                    HoverHandler {
+                        id: iconHover
                         enabled: !iconListView.moving
                     }
 
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked:root.habitIconSelected(modelData);
+                        onClicked: root.habitIconSelected(modelData)
                         enabled: !iconListView.moving
                     }
                 }
+            }
 
-                // ── Left Shadow Edge ─────────────────────────────
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 16
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: Colours.tPalette.m3surfaceContainerLow }
-                        GradientStop { position: 1.0; color: "transparent" }
-                    }
-                    visible: iconListView.contentX > 0
+            // ── Left Shadow Edge ─────────────────────────────
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 16
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: Colours.tPalette.m3surfaceContainerLow }
+                    GradientStop { position: 1.0; color: "transparent" }
                 }
+                visible: iconListView.contentX > 0
+            }
 
-                // ── Right Shadow Edge ────────────────────────────
-                Rectangle {
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 16
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Colours.tPalette.m3surfaceContainerLow }
-                    }
-                    visible: iconListView.contentX < iconListView.contentWidth - iconListView.width
+            // ── Right Shadow Edge ────────────────────────────
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 16
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 1.0; color: Colours.tPalette.m3surfaceContainerLow }
                 }
+                visible: iconListView.contentX < iconListView.contentWidth - iconListView.width
             }
         }
     }

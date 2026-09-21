@@ -20,6 +20,7 @@ Item {
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
 
+
     RowLayout {
         id: row
         anchors.centerIn: parent
@@ -32,7 +33,7 @@ Item {
             color: "transparent"
             radius: Tokens.rounding.small
             border.width: 1
-            border.color: root.Colours.palette.m3secondary
+            border.color: Colours.palette.m3secondary
         }
 
         Repeater {
@@ -46,7 +47,7 @@ Item {
                 type: ButtonBase.Tonal
 
                 activeColour: Colours.palette.m3primary
-                
+
                 inactiveColour: "transparent"
                 inactiveOnColour: Colours.palette.m3onSurfaceVariant
 
@@ -69,7 +70,6 @@ Item {
                 padding: Tokens.padding.small
                 onClicked: {
                     if (root.currentValue !== modelData.value) {
-                        root.currentValue = modelData.value
                         root.activated(modelData.value)
                         if (modelData.action) modelData.action()
                     }
