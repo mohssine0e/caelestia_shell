@@ -190,7 +190,7 @@ Item {
         // Actions (hover-reveal only)
         RowLayout {
             spacing: 0
-            opacity: (hover.hovered || root.isSelected) ? 1 : 0
+            opacity: (hover.hovered || root.isSelected) ? 1 : 0.3
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
             IconButton {

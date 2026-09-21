@@ -302,7 +302,7 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
+                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     // Add-child button

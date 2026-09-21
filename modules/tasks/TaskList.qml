@@ -93,6 +93,8 @@ FocusScope {
         return val
     }
 
+    
+
     // One lower-cased haystack per task (title + subtask titles) so a search
     // is a single indexOf per task instead of toLowerCase() on every subtask.
     function getSearchText(todoId, task) {
