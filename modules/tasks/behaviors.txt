@@ -45,7 +45,7 @@ EDIT MODES (mutually exclusive)
 SELECTION & SCROLL
 - isSelected           → (navController.selectedIndex === index)
 - selectedSubtaskIndex → from controller; -1 when on header
-- selectedNestedIndex   → from controller; -1 when on subtask row
+- selectedNestedIndex  → from controller; -1 when on subtask row
 - Reset rules:          data change → controller.clampToStructure()
                          filter change → selectTask(firstVisibleIndex())
                          task deleted  → clampToStructure (clamps cursor)
@@ -62,7 +62,7 @@ EDIT FIELD FOCUS GUARD
 --------------------------------------------------------------------------------
 Cursor triple (owned by TaskNavigationController, C++):
   (selectedIndex, selectedSubtaskIndex, selectedNestedIndex)
-  (-1, -1, -1)        → nothing selected / would dismiss popout
+  (-1, -1, -1)        → nothing selected
   (i, -1, -1)         → task header i (ListView index)
   (i, s, -1)          → subtask s of task at ListView index i
   (i, s, n)           → nested child n of subtask s (terminal depth)
@@ -80,26 +80,28 @@ UP / DOWN (Scope-Bounded Circular Navigation)
   Visibility is determined by matchesFilter (status + search per delegate).
 
 RIGHT / LEFT (Hierarchy Drill-In & Retract)
-- Right:
+- Right (drill in):
     • On nested child → no-op (terminal depth)
     • On collapsed task header → expands task (setTaskExpanded) +
-      selects subtask 0 (if any subtasks exist)
-    • On subtask row → if collapsed and has children, expands subtask
-      (setSubExpanded). Then enters nested child 0 if children exist.
-      The TaskList key handler pre-expands collapsed subtask rows so
-      a single Right both shows and selects the first nested child.
-- Left:
-    • On nested child → unselects nested child only (subtask stays
-      selected, nested section stays open)
-    • On subtask row with nested section open → collapses nested
-      section (setSubExpanded=false); subtask remains selected
-    • On subtask row with nested section closed → collapses task
-      card (does NOT retract to header first)
-    • On task header with card expanded → collapses card
-    Note: Left NEVER emits dismissRequested — it always ends with
-    focusListRequested. Only Escape (cancel) can dismiss the popout.
-    (The hpp comment "subtask → task header" is outdated; the code
-    collapses the card directly from the subtask level.)
+      selects subtask 0 (if any subtasks exist). No-op if subCount == 0.
+    • On subtask row → if has children, expands subtask section
+      (setSubExpanded=true) if collapsed, then enters nested child 0.
+      The controller does the expand itself — TaskList does NOT
+      pre-expand. A single Right both shows and selects the first
+      nested child.
+    • On subtask row without children → no-op.
+- Left (retract — 4-step peel, one layer per press):
+    • On nested child (s >= 0, n >= 0) → unselect nested child AND
+      collapse the subtask's nested section (setSubExpanded=false).
+      Subtask row stays selected.
+    • On subtask row with nested section open → collapse nested
+      section only. Subtask row stays selected.
+    • On subtask row with nested section closed → retract to header
+      (setSelectedSubtaskIndex = -1). Subtask deselects; header selects.
+    • On task header with card expanded → collapse card.
+    • On task header with card collapsed → no-op.
+    Note: Left NEVER closes the popout. It always ends with
+    focusListRequested.
 
 ACTION KEYS
 - Enter (activate):
@@ -111,17 +113,30 @@ ACTION KEYS
     • On nested child  → begins editing nested child title
     • On subtask row   → begins editing subtask title
     • On task header   → begins editing task title
-- Escape (cancel, staged — one retraction per keypress):
+- Escape (cancel) — IDENTICAL to Left in the controller, plus a
+  final dismiss handled by Tasks.qml:
   Note: Escape inside a text field is NOT handled by the controller —
   TaskList returns early (event.accepted=false) when editingTaskId or
   editingSubId is set, letting the field handle Escape.
-  Outside text fields (controller.cancel()):
-    1. Nested child selected → unselect nested child
-    2. Subtask row, nested section open → collapse nested section
-    3. Subtask row, nested section closed → retract to task header
-    4. Task header, card expanded → collapse card
-    5. Task header, card collapsed → dismissRequested (closes popout)
-  Each stage emits focusListRequested; cursor is never lost.
+  Outside text fields:
+    TaskList forwards Escape to navController.handleKey.
+    handleKey(Key_Escape):
+      • If hasRetractableState() is false (cursor on collapsed header,
+        no inner state) → returns false. Event bubbles.
+        Tasks.qml Keys.onEscapePressed fires → root.closeRequested()
+        → popout closes.
+      • Otherwise → cancel() peels one layer (identical to Left),
+        returns true. Event consumed. Popout stays open.
+  The controller NEVER emits dismissRequested. Closing is entirely
+  Tasks.qml's responsibility.
+
+  5-stage peel when pressed repeatedly (same order as Left):
+    1. (i, s, n) nested child → unselect + collapse subtask section
+    2. (i, s, -1) subtask + open nested → collapse nested section
+    3. (i, s, -1) subtask + closed nested → retract to header
+    4. (i, -1, -1) header + expanded card → collapse card
+    5. (i, -1, -1) header + collapsed card → controller returns false
+                                              → Tasks.qml closes popout
 
 --------------------------------------------------------------------------------
 3. CLICK INTERACTIONS & SIGNAL PIPELINE
@@ -193,6 +208,12 @@ TaskList handler notes:
 - onSubtaskSelectionRequested: navController.selectSubtask(index, subIdx)
 - onAddChildCancelled: navController.selectSubtask(index, subIdx) +
   keepSelectedVisible — returns focus to the add-child subtask after Esc
+- TaskList.Keys.onPressed forwards every unhandled key to
+  navController.handleKey(key, modifiers) and sets
+  event.accepted = true when it returns true.
+- TaskList has NO pre-expand block for Right. The controller's moveRight
+  expands the subtask section itself (setSubExpanded) before descending
+  to nested 0, so a single Right both shows and selects the first child.
 
 --------------------------------------------------------------------------------
 4. VISUAL STATES & EDGE CASES
@@ -228,8 +249,7 @@ NestedSubtaskCard:
 
 TREE LINES (TreeConnector, shared by SubtaskCard & NestedSubtaskCard)
 - Color: ALWAYS m3primary (hardcoded in tree.style block, no
-  state-based color priority). TreeConnector.color comes from
-  root.tree.color — a QtObject property that does not vary.
+  state-based color priority).
 - Vertical spine:
     • Visible top-to-bottom on non-last siblings
     • Bottom cut at elbow for last sibling (isLast → stops at _cy - _r)
@@ -261,8 +281,6 @@ EDGE CASES
 - Rapid double toggleRequested → idempotent per tick (parent dedupes)
 - Clicking already-selected card → no-op (controller setSelectedIndex
   returns early if index unchanged)
-- TaskList key handler pre-expands collapsed subtask rows on Right key
-  when nestedCount > 0, before delegating to controller
 - Nested subtask toggle: children array is reset to [] on toggle
   (nested children are terminal; toggleNestedSubtask sets children: [])
 - toggleTask cascade: subtasks get done=newDone; their children arrays
@@ -279,6 +297,10 @@ STRICT CONSTRAINTS (DO NOT)
 - Do NOT reuse done color for selection (tree lines are always m3primary)
 - Do NOT compute isSelected locally
 - Do NOT emit signals outside the defined contracts
+- Do NOT add pre-expand blocks in TaskList — the controller owns
+  expand-then-select
+- Do NOT emit dismissRequested from the controller — Tasks.qml owns
+  the popout close decision
 
 --------------------------------------------------------------------------------
 5. FILTERING & SEARCH
@@ -385,8 +407,18 @@ CACHES (TaskList)
 - expandedSubtasks: QVariantMap { "todoId/subtaskId": true }
   Read by SubtaskCard: nav.expandedSubtasks[taskId/subtaskId] ?? false
 - setTaskExpanded / setSubExpanded: no-op if already in desired state
-- clampToStructure: prunes expansion entries for tasks/subs no longer
-  in the structure snapshot; clamps cursor indices to valid ranges
+- clampToStructure:
+    • Prunes expansion entries for tasks/subs no longer in the structure
+      snapshot.
+    • Clamps cursor indices to valid ranges (task visibility, subtask
+      bounds, nested bounds).
+    • STEP 3 exception: while a subtask is expanded, its nested cursor
+      is NOT reset to -1 even if the structure snapshot still reports
+      nestedCount == 0. Reason: expansion is signaled before the QML
+      Repeater instantiates the new rows, so nestedCount==0 is a
+      transient state. Resetting here would wipe the
+      setSelectedNestedIndex(0) issued by moveRight and force the user
+      to press Right twice.
 - Expansion survives ListView item recycling (state lives in C++,
   not in delegate local properties)
 
@@ -672,31 +704,43 @@ UP / DOWN — circular within current scope
 RIGHT — drill in
 - (-1, -1) on header         → expand task + select subtask 0
 - (i, s, -1) on subtask      → expand subtask if collapsed, then enter
-                                nested child 0 (TaskList pre-expands so
-                                one Right shows + selects first child)
+                                nested child 0 (controller does the
+                                expand itself — no TaskList pre-expand)
 - (i, s, n) on nested child  → no-op (terminal depth)
 
-LEFT — retract
-- (i, s, n) nested child     → unselect nested child (subtask stays selected,
-                                nested section stays open)
+LEFT — retract (4-step peel, one layer per press)
+- (i, s, n) nested child     → unselect nested child + collapse subtask
+                                nested section (subtask row stays selected)
 - (i, s, -1) subtask + open nested → collapse nested section only
-- (i, s, -1) subtask + closed nested → collapse task card
-- (-1, -1) on header         → collapse task card (if expanded)
-- Left NEVER dismisses the popout — only Escape (cancel) does that
+- (i, s, -1) subtask + closed nested → retract to header
+                                (setSelectedSubtaskIndex = -1)
+- (i, -1, -1) header + expanded card → collapse card
+- (i, -1, -1) header + collapsed card → no-op
+- Left NEVER dismisses the popout
 
-ESCAPE — staged cancel (one retraction per keypress)
+ESCAPE — same as Left, plus a final dismiss handled by Tasks.qml
 - In a text field → field handles Escape (TaskList returns
   event.accepted=false when editingTaskId/editingSubId is set)
   - TaskCard/SubtaskCard edit field: cancels edit, restores list focus
   - NestedSubtaskCard edit field: cancels edit
   - Search field: clears text, returns focus to list
   - Capture field: clears text, focuses list
-- Outside text fields (controller.cancel()):
-  1. (i, s, n) nested child → unselect nested child
-  2. (i, s, -1) subtask + open nested → collapse nested section
-  3. (i, s, -1) subtask + closed nested → retract to header
-  4. (i, -1, -1) header + expanded card → collapse card
-  5. (i, -1, -1) header + collapsed card → dismissRequested (closes popout)
-  Note: (i, -1, -1) with a collapsed card reaches step 5 directly —
-  this is the common dismiss case when nothing else is retracted.
+- Outside text fields:
+    TaskList forwards Escape to navController.handleKey.
+    handleKey(Key_Escape):
+      • If hasRetractableState() is false (cursor on collapsed header,
+        no inner state) → returns false. Event bubbles.
+        Tasks.qml Keys.onEscapePressed fires → root.closeRequested()
+        → popout closes.
+      • Otherwise → cancel() peels one layer (identical to Left),
+        returns true. Event consumed. Popout stays open.
+  Controller does NOT emit dismissRequested — the signal was removed.
+  Closing is entirely Tasks.qml's responsibility.
 
+  5-stage peel when pressed repeatedly (same order as Left):
+    1. (i, s, n) nested child → unselect + collapse subtask section
+    2. (i, s, -1) subtask + open nested → collapse nested section
+    3. (i, s, -1) subtask + closed nested → retract to header
+    4. (i, -1, -1) header + expanded card → collapse card
+    5. (i, -1, -1) header + collapsed card → controller returns false
+                                              → Tasks.qml closes popout

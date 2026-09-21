@@ -252,17 +252,4 @@ FocusScope {
         }
         }
 
-    // Staged Escape (cancel()): retracts nested → subtask-section → card
-    // → popout close. When the cursor is fully retracted, the controller
-    // emits dismissRequested so we close the popout here (not per-key, which
-    // would re-close mid-staged-retraction). Both lists share the rule;
-    // guarded inside the handler (Connections.when isn't available here).
-    Connections {
-        target: taskList.navController
-        onDismissRequested: { if (root.activePage === "tasks") root.closeRequested() }
-    }
-    Connections {
-        target: dailyHabitsList.navController
-        onDismissRequested: { if (root.activePage === "daily") root.closeRequested() }
-    }
 }

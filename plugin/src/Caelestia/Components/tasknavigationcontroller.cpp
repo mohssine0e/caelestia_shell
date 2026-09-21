@@ -110,9 +110,15 @@ bool TaskNavigationController::handleKey(int key, int modifiers) {
     case Qt::Key_F2:
         beginEdit();
         return true;
-    case Qt::Key_Escape:
+    case Qt::Key_Escape: {
+        // Escape == Left. Return true only if there was inner state to
+        // peel; false lets the outer scope (Tasks.qml) close the popout.
+        if (!hasRetractableState()) {
+            return false;
+        }
         cancel();
         return true;
+    }
     default:
         return false;
     }
@@ -172,7 +178,6 @@ void TaskNavigationController::moveUp() {
 
 void TaskNavigationController::moveLeft() {
     // 1) Nested child selected → unselect AND collapse the subtask section.
-    //    Choice B: Left always peels one layer.
     if (m_selectedNestedIndex >= 0) {
         const QString taskId = taskIdAt(m_selectedIndex);
         const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
@@ -198,8 +203,7 @@ void TaskNavigationController::moveLeft() {
         emit focusListRequested();
         return;
     }
-    // 3) Task header → collapse the card (no-op if already collapsed;
-    //    Left never dismisses the popout).
+    // 3) Task header → collapse the card (no-op if already collapsed).
     if (m_selectedIndex >= 0) {
         const QString id = taskIdAt(m_selectedIndex);
         if (!id.isEmpty() && isTaskExpanded(id)) {
@@ -270,44 +274,8 @@ void TaskNavigationController::beginEdit() {
 }
 
 void TaskNavigationController::cancel() {
-    if (m_selectedIndex < 0) {
-        emit dismissRequested();
-        return;
-    }
-    const QString taskId = taskIdAt(m_selectedIndex);
-
-    // 1) Nested child selected → unselect AND collapse the subtask section.
-    if (m_selectedNestedIndex >= 0) {
-        const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
-        setSelectedNestedIndex(kParentNested);
-        if (!taskId.isEmpty() && !subId.isEmpty()) {
-            setSubExpanded(taskId, subId, false);
-        }
-        emit focusListRequested();
-        return;
-    }
-    // 2) On the subtask row:
-    //    - if nested section is open → collapse it, stay on subtask
-    //    - if already closed → retract to header
-    if (m_selectedSubtaskIndex >= 0) {
-        const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
-        if (!taskId.isEmpty() && !subId.isEmpty() && isSubExpanded(taskId, subId)) {
-            setSubExpanded(taskId, subId, false);
-            emit focusListRequested();
-            return;
-        }
-        setSelectedSubtaskIndex(kHeaderSub);
-        emit focusListRequested();
-        return;
-    }
-    // 3) On the task header: if the card is expanded, collapse it.
-    if (!taskId.isEmpty() && isTaskExpanded(taskId)) {
-        setTaskExpanded(taskId, false);
-        emit focusListRequested();
-        return;
-    }
-    // 4) Fully retracted → dismiss the popout.
-    emit dismissRequested();
+    // Escape == Left. This controller never dismisses anything.
+    moveLeft();
 }
 
 void TaskNavigationController::selectTask(int listIndex) {
@@ -354,6 +322,28 @@ void TaskNavigationController::setSubExpanded(const QString& taskId, const QStri
     emit expansionChanged();
 }
 
+bool TaskNavigationController::hasRetractableState() const {
+    if (m_selectedIndex < 0) {
+        return false;
+    }
+    if (m_selectedNestedIndex >= 0) {
+        return true;
+    }
+    if (m_selectedSubtaskIndex >= 0) {
+        // Either the subtask's nested section is open, or we can
+        // retract to the header.
+        const QString taskId = taskIdAt(m_selectedIndex);
+        const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
+        if (!taskId.isEmpty() && !subId.isEmpty() && isSubExpanded(taskId, subId)) {
+            return true;
+        }
+        return true; // retract to header is always possible
+    }
+    // On the header: retractable only if the card is expanded.
+    const QString id = taskIdAt(m_selectedIndex);
+    return !id.isEmpty() && isTaskExpanded(id);
+}
+
 void TaskNavigationController::clampToStructure() {
     // 1. Cursor task must be a visible row.
     const QList<int> visible = visibleIndices();
@@ -381,10 +371,16 @@ void TaskNavigationController::clampToStructure() {
         return;
     }
     // 3. Nested index within bounds.
+    //    While the subtask is expanded, leave the nested cursor alone —
+    //    the structure snapshot may still report 0 children before the
+    //    QML Repeater has laid out the newly-revealed rows.
     if (m_selectedSubtaskIndex >= 0) {
         const int n = nestedCount(m_selectedIndex, m_selectedSubtaskIndex);
         if (n <= 0) {
-            if (m_selectedNestedIndex != kHeaderNested) {
+            const QString taskId = taskIdAt(m_selectedIndex);
+            const QString subId = subIdAt(m_selectedIndex, m_selectedSubtaskIndex);
+            const bool expanded = isSubExpanded(taskId, subId);
+            if (!expanded && m_selectedNestedIndex != kHeaderNested) {
                 setSelectedNestedIndex(kHeaderNested);
             }
         } else if (m_selectedNestedIndex >= n) {

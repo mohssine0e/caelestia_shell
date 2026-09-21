@@ -23,8 +23,13 @@ namespace caelestia::components {
 //   Right: collapsed header → expand + select subtask 0;
 //          subtask row → expand if collapsed, else enter nested 0 if children;
 //          nested child → no-op (terminal depth).
-//   Left: nested child → parent subtask; subtask → task header (stays
-//         expanded); header → collapse card.
+//   Left: nested child → collapse section + parent subtask;
+//         subtask → retract to header (collapses section if open);
+//         header → collapse card.
+//
+// Escape is identical to Left — this controller never dismisses anything.
+// The outer scope (Tasks.qml) owns the popout close decision; it only runs
+// when handleKey() returns false (nothing was peeled).
 //
 // The controller is data-agnostic: QML feeds a lightweight `structure`
 // snapshot (sizes only, no titles) and forwards mutation/scroll intents
@@ -46,7 +51,8 @@ class TaskNavigationController : public QObject {
     Q_PROPERTY(QVariantMap expandedSubtasks READ expandedSubtasks NOTIFY expansionChanged)
 
     // Structure snapshot fed from QML (see setStructure):
-    //   [ { todoId, visible: bool, nSub: int, nestedCounts: [int…] } ]
+    //   [ { todoId, visible: bool, nSub: int,
+    //       nestedCounts: [int…], subIds: [string…] } ]
     Q_PROPERTY(QVariantList structure READ structure WRITE setStructure NOTIFY structureChanged)
 
 public:
@@ -68,16 +74,18 @@ public:
     void setStructure(const QVariantList& structure);
 
     // Key dispatch — QML Keys handler becomes a single call.
-    // Returns true when the key was consumed.
+    // Returns true when the key was consumed (something changed).
+    // For Escape: returns true only if a retraction happened; false
+    // means the caller should close the popout.
     Q_INVOKABLE bool handleKey(int key, int modifiers = Qt::NoModifier);
 
     Q_INVOKABLE void moveUp();
     Q_INVOKABLE void moveDown();
     Q_INVOKABLE void moveLeft();
     Q_INVOKABLE void moveRight();
-    Q_INVOKABLE void activate(); // Enter
-    Q_INVOKABLE void beginEdit(); // F2
-    Q_INVOKABLE void cancel(); // Escape (outside text fields)
+    Q_INVOKABLE void activate();   // Enter
+    Q_INVOKABLE void beginEdit();  // F2
+    Q_INVOKABLE void cancel();     // Escape (alias for moveLeft)
 
     Q_INVOKABLE void selectTask(int listIndex);
     Q_INVOKABLE void selectSubtask(int listIndex, int subIdx);
@@ -104,9 +112,8 @@ signals:
     void editTaskRequested(int listIndex);
     void editSubtaskRequested(int listIndex, int subIdx);
     void editNestedRequested(int listIndex, int subIdx, int nestedIdx);
-        void scrollToIndex(int listIndex);
+    void scrollToIndex(int listIndex);
     void focusListRequested();
-    void dismissRequested();
 
 private:
     [[nodiscard]] QList<int> visibleIndices() const;
@@ -115,6 +122,8 @@ private:
     [[nodiscard]] int nestedCount(int listIndex, int subIdx) const;
     [[nodiscard]] QString taskIdAt(int listIndex) const;
     [[nodiscard]] QString subIdAt(int listIndex, int subIdx) const;
+    // True when there is any inner state Escape/Left can retract.
+    [[nodiscard]] bool hasRetractableState() const;
     void emitCursor(int listIndex, int subIdx, int nestedIdx);
 
     int m_selectedIndex = -1;
