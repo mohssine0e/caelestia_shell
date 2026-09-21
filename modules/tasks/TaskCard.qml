@@ -136,6 +136,7 @@ Item {
         if (root.streak >= 1)  return Colours.palette.m3primary
         return Colours.palette.m3outlineVariant
     }
+    readonly property color bestStreakColor: root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
 
     // Prefill for the title edit field. Subtask-less tasks carry their
     // estimate inline as "@minutes" (even when it is 0); the submitted
@@ -468,20 +469,25 @@ Item {
 
                     // Best Streak Target Badge (shows when bestStreak exceeds current streak)
                     RowLayout {
-                        visible: root.bestStreak > root.streak
                         spacing: 1
-                        opacity: 0.65
+                        opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
 
                         MaterialIcon {
-                            text: "emoji_events" // Trophy icon for best record target
+                            id: trophy
+                            text: "emoji_events"
                             fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3onSurfaceVariant
+                            color: bestStreakColor
+                            fill: root.streak >= root.bestStreak ? 1 : 0
+
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
 
                         StyledText {
                             text: String(root.bestStreak)
                             font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
+                            color: bestStreakColor
+
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
                     }
                 }
