@@ -386,8 +386,7 @@ Item {
                 // for habits, while editing a subtask-less task (the
                 // estimate is inline in the edit field) and when unset.
                 RowLayout {
-                    visible: !root.isHabitList
-                        && root.taskDuration > 0
+                    visible: root.taskDuration > 0
                         && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
 
@@ -424,8 +423,8 @@ Item {
                     }
 
                     StyledRect {
-                        implicitWidth: 120
-                        implicitHeight: 4
+                        implicitWidth: 150
+                        implicitHeight: 10
                         radius: Tokens.rounding.full
                         color: Colours.tPalette.m3surfaceContainerHighest
 
@@ -600,13 +599,32 @@ Item {
 
                         readonly property var sub: root.subtasks[index] ?? root.emptySub
 
+                        // ── Nested progress, computed inline from sub.children ──
+                        readonly property int _nNested: sub.children ? sub.children.length : 0
+                        readonly property int _dNested: {
+                            if (!sub.children) return 0
+                            var d = 0
+                            for (var i = 0; i < sub.children.length; i++)
+                                if (sub.children[i].done) d++
+                            return d
+                        }
                         taskData: root.taskData
                         taskIndex: root.taskIndex
                         subtaskData: sub
                         subtaskIndex: index
                         subtaskId: sub.id ?? ""
 
+
                         isHabitList: root.isHabitList
+                        subtaskDuration: {
+                            const _t = root.taskMap ? root.taskMap[root.taskId] : null
+                            return _t ? list.getSubtaskDuration(root.taskId, index) : 0
+                        }
+
+                        // ── Nested progress props ──
+                        nSubNested: _nNested
+                        dSubNested: _dNested
+
                         isEditing: root.editingSubId === `${root.taskId}__${sub.id}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === index
                         nav: root.nav

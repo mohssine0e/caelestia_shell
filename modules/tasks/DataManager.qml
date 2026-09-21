@@ -565,12 +565,16 @@ data model used: for both tasks and habits // to keep for reference
             id: sub.id,
             title: parsed.title,
             done: sub.done,
-            minutes: parsed.minutes,
+            // minutes: parsed.minutes,
+            minutes: sub.minutes || 0,
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0,
             children: sub.children || []
         };
 
+        if(!sub.children || sub.children.length === 0) {
+            newSub.minutes = parsed.minutes;
+        }
         updateSubtask(taskIndex, subtaskIndex, newSub);
         subtaskRenamed(taskId, sub.id, oldTitle, parsed.title);
     }

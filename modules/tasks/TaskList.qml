@@ -93,6 +93,21 @@ FocusScope {
         return val
     }
 
+        function getSubtaskDuration(todoId, subIdx) {
+        var task = taskMap[todoId]
+        if (!task) return 0
+        var sub = (task.subtasks || [])[subIdx]
+        if (!sub) return 0
+
+        var kids = sub.children || []
+        if (kids.length > 0) {
+            var val = 0
+            for (var i = 0; i < kids.length; i++) val += (kids[i].minutes || 0)
+            return val
+        }
+        return sub.minutes || 0
+    }
+
     
 
     // One lower-cased haystack per task (title + subtask titles) so a search
@@ -738,7 +753,10 @@ FocusScope {
             })()
 
             // Memoized per task (identity-validated, mutated in place)
-            readonly property var progressData: list.getProgressData(todoId)
+            readonly property var progressData: {
+                const _t = taskMap[todoId]
+                return _t ? list.getProgressData(todoId) : list._emptyProgress
+            }
 
             taskData: task
             taskIndex: absIdx
@@ -752,7 +770,10 @@ FocusScope {
             nSub: progressData.total
             dSub: progressData.done
             prog: progressData.ratio
-            taskDuration: list.getTaskDuration(todoId)
+            taskDuration: {
+                const _t =taskMap[todoId]
+                return _t ? list.getTaskDuration(todoId) : 0
+            }
             isHabitList: list.isHabitList
             icon: list.isHabitList ? (task.icon || "") : ""
             showStreak: list.isHabitList
