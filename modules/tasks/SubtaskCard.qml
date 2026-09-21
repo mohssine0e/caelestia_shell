@@ -157,10 +157,14 @@ Item {
                 // ── Checkbox ────────────────────────────────────
                 MaterialIcon {
                     id: parentCheckbox
-                    text: root.isDone ? "check_box" : "check_box_outline_blank"
+                    text: root.effectiveHasChildren
+                        ? (root.isDone ? "check_box" : "check_box_outline_blank")
+                        : (root.isDone ? "check_circle" : "radio_button_unchecked")
                     fill: root.isDone ? 1 : 0
                     font: Tokens.font.icon.small
-                    color: Colours.palette.m3primary
+                    color: (!root.effectiveHasChildren && !root.isDone)
+                            ? Colours.palette.m3onSurface
+                            : Colours.palette.m3primary
                     opacity: root.isDone ? 0.5 : 1
                     Behavior on color { CAnim {} }
 
@@ -182,7 +186,8 @@ Item {
                     text: root.title
                     font: Tokens.font.body.medium
                     elide: Text.ElideRight
-                    color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    color: root.isDone ? Colours.palette.m3onSurfaceVariant
+                        : (root.effectiveHasChildren ? Colours.palette.m3primary : Colours.palette.m3onSurface)
                     opacity: root.isDone ? 0.6 : 1
                     Behavior on color { CAnim {} }
 

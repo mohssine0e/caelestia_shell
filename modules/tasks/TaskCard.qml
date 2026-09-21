@@ -246,10 +246,11 @@ Item {
                         color: {
                             if (root.icon !== "") {
                                 return root.taskDone ? Colours.palette.m3primary
-                                                     : Colours.palette.m3onSurfaceVariant
+                                                    : Colours.palette.m3onSurfaceVariant
                             }
                             if (root.taskDone) return Colours.palette.m3primary
                             if (root.taskPartial) return Colours.palette.m3secondary
+                            if (root.nSub === 0) return Colours.palette.m3onSurface
                             return Colours.palette.m3outline
                         }
                         opacity: root.taskDone ? 0.5 : 1
@@ -280,7 +281,10 @@ Item {
                     font: Tokens.font.body.large
                     elide: Text.ElideRight
 
-                    color: root.taskDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    color: root.taskDone
+                        ? Colours.palette.m3onSurfaceVariant
+                        : (root.nSub === 0 ? Colours.palette.m3onSurface
+                                            : Colours.palette.m3primary)                    
                     opacity: root.taskDone ? 0.6 : 1
                     Behavior on color { enabled: root.animate; CAnim {} }
 
