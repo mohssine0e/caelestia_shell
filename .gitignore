@@ -6,3 +6,7 @@ build/
 logs
 
 docs/*
+# all the hidden files except .gitignore
+.*
+!.gitignore
+!.github
