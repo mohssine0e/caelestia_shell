@@ -70,7 +70,6 @@ Item {
                 padding: Tokens.padding.small
                 onClicked: {
                     if (root.currentValue !== modelData.value) {
-                        root.currentValue = modelData.value
                         root.activated(modelData.value)
                         if (modelData.action) modelData.action()
                     }
