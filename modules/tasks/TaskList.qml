@@ -681,8 +681,13 @@ FocusScope {
     }
 
     function save() {
-        // Compact JSON (no pretty) → ~30% smaller & faster, less main-thread block (P-A4)
-        storage.setText(JSON.stringify(list.tasks));
+        // // Compact JSON (no pretty) → ~30% smaller & faster, less main-thread block (P-A4)
+        // storage.setText(JSON.stringify(list.tasks));
+
+
+
+        storage.setText(JSON.stringify(list.tasks, null, 2));
+
     }
 
     function requestSave() {
