@@ -400,12 +400,17 @@ Item {
                         StyledText {
                             id: minutesLabel
                             anchors.centerIn: parent
-                            text: `${root.taskDuration}m`
+                            text: root.taskDuration >= 60
+                                ? `${Math.floor(root.taskDuration / 60)}h${root.taskDuration % 60 ? `${root.taskDuration % 60}` : ""}`
+                                : `${root.taskDuration}m`
                             font: Tokens.font.body.small
                             color: Colours.palette.m3onSurfaceVariant
                         }
                     }
                 }
+
+
+
 
                 // ── Progress ────────────────────────────────────
                 RowLayout {
@@ -440,6 +445,8 @@ Item {
                         }
                     }
                 }
+
+
 
                // ── Streak (habits only) ────────────────────────
                 RowLayout {
@@ -622,6 +629,7 @@ Item {
 
 
                         isHabitList: root.isHabitList
+                        showStreak: root.showStreak && root.isHabitList
                         subtaskDuration: {
                             const _t = root.taskMap ? root.taskMap[root.taskId] : null
                             return _t ? list.getSubtaskDuration(root.taskId, index) : 0

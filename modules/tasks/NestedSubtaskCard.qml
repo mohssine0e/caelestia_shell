@@ -22,6 +22,8 @@ Item {
     property bool isSelected: false
     property bool isEditing: false
 
+    property bool showStreak: false
+
     property bool isFirst: true
     property bool isLast: true
 
@@ -41,8 +43,20 @@ Item {
     // Where this row's content starts (same formula as the parent).
     readonly property real contentStartX: treeSpineX + tree.elbowLength + tree.contentGap
 
-    readonly property bool isDone: root.nestedData?.done ?? false
+        readonly property bool isDone: root.nestedData?.done ?? false
     readonly property string nestedId: root.nestedData?.id ?? ""
+    readonly property int streak: root.nestedData?.streak ?? 0
+    readonly property int bestStreak: root.nestedData?.bestStreak ?? 0
+
+    readonly property color streakColor: {
+        if (root.streak >= 20) return "#fe1d1d"
+        if (root.streak >= 10) return "#FF8C00"
+        if (root.streak >= 3)  return "#FFA500"
+        if (root.streak >= 1)  return Colours.palette.m3primary
+        return Colours.palette.m3outlineVariant
+    }
+    readonly property color bestStreakColor:
+        root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
     readonly property string editPrefill: `${root.nestedData?.title ?? ""} @${root.nestedData?.minutes || 0}`
 
     function commitRename(text) {
@@ -183,6 +197,53 @@ Item {
                     text: `${root.nestedData?.minutes || 0}m`
                     font: Tokens.font.body.small
                     color: Colours.palette.m3onSurfaceVariant
+                }
+            }
+        }
+
+                // ── Streak (habits only) ────────────────────────────────
+        RowLayout {
+            id: streakBadge
+            visible: root.showStreak
+                     && (root.streak > 0 || root.bestStreak > 0)
+                     && !root.isEditing
+            Layout.leftMargin: Tokens.spacing.small
+            Layout.alignment: Qt.AlignVCenter
+            spacing: 4
+
+            RowLayout {
+                spacing: 2
+                MaterialIcon {
+                    text: "local_fire_department"
+                    fill: 1
+                    fontStyle: Tokens.font.icon.small
+                    color: root.streakColor
+                    Behavior on color { CAnim { duration: 300 } }
+                }
+                StyledText {
+                    text: String(root.streak)
+                    font: Tokens.font.label.medium
+                    color: root.streakColor
+                    Behavior on color { CAnim { duration: 300 } }
+                }
+            }
+
+            RowLayout {
+                spacing: 1
+                opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
+
+                MaterialIcon {
+                    text: "emoji_events"
+                    fontStyle: Tokens.font.icon.small
+                    color: root.bestStreakColor
+                    fill: root.streak >= root.bestStreak ? 1 : 0
+                    Behavior on color { CAnim { duration: 300 } }
+                }
+                StyledText {
+                    text: String(root.bestStreak)
+                    font: Tokens.font.label.small
+                    color: root.bestStreakColor
+                    Behavior on color { CAnim { duration: 300 } }
                 }
             }
         }

@@ -21,13 +21,20 @@ data model used: for both tasks and habits // to keep for reference
     bestStreak: int,
     lastCompletedDate: string | null,           // for normal habits
     lastRelapseDate: string | null,             // for avoid habits
-    
+    createdAt: number,                          // ms epoch; anchor for streaks
+
     subtasks: [
         {
             id: string,
             title: string,
             done: bool,
-            minutes: int
+            minutes: int,
+            createdAt: number,
+            completionDates: string[],
+            lastCompletedDate: string | null,
+            streak: int,
+            bestStreak: int,
+            children: [ ...nested leaves, same shape... ]
         },
         ...
     ]
@@ -86,6 +93,10 @@ data model used: for both tasks and habits // to keep for reference
         if (newSubtask.children === undefined && task.subtasks[subtaskIndex])
             newSubtask.children = task.subtasks[subtaskIndex].children || [];
 
+        // If this subtask has children, its `done` is derived, not authored.
+        // Recompute it from the children before we sync it into the parent.
+        recomputeSubtaskFromChildren(newSubtask);
+
         var newSubtasks = [];
         for (var i = 0; i < task.subtasks.length; i++) {
             newSubtasks[i] = i === subtaskIndex ? newSubtask : task.subtasks[i];
@@ -109,6 +120,21 @@ data model used: for both tasks and habits // to keep for reference
             }
             t.done = allDone;
         }
+    }
+
+    // Recompute a subtask's `done` from its children (AND), then update its
+    // own completion archive + streak. This is the subtask-level analogue of
+    // `syncDone` and is what makes nested toggles affect their parent subtask.
+    function recomputeSubtaskFromChildren(subtask) {
+        if (!subtask || !subtask.children || subtask.children.length === 0)
+            return;
+        var allDone = true;
+        for (var i = 0; i < subtask.children.length; i++) {
+            if (!subtask.children[i].done) { allDone = false; break; }
+        }
+        if (subtask.done !== allDone)
+            subtask.done = allDone;
+        applySubtaskCompletion(subtask, subtask.done);
     }
 
     // ── Habit day (rolls at resetHour, default 02:00 local) ──
@@ -175,31 +201,63 @@ data model used: for both tasks and habits // to keep for reference
         var stored = datesFor(task);
         var isAvoid = task.type === "avoid";
         var cursor = today || habitDate();
-        var firstDay = isAvoid && task.createdAt ? habitDate(task.createdAt) : null;
 
-        // Without a creation date, an empty relapse archive can only prove
-        // that the current habit day is safe.
-        if (isAvoid && !firstDay && stored.length === 0)
-            return 1;
+        // `createdAt` is the hard floor for both types. For avoid it is
+        // mandatory: without it, an empty relapse archive would let the loop
+        // walk backwards forever and report a streak larger than the node's age.
+        var floor = null;
+        if (task.createdAt) {
+            floor = habitDate(task.createdAt);
+        } else if (isAvoid) {
+            // Legacy avoid node with no createdAt. Treat today as the only
+            // day we can honestly vouch for. The load-time migration
+            // (ensureHabitFields) backfills createdAt for future calls, so
+            // this branch only fires once per old record.
+            floor = cursor;
+        }
+
+        if (isAvoid && cursor < floor)
+            return 0;
 
         function countsFor(dateStr) {
             var inHistory = dayCompleted(stored, dateStr);
             return isAvoid ? !inHistory : inHistory;
         }
 
-        if (isAvoid && firstDay && cursor < firstDay)
-            return 0;
-
         if (!countsFor(cursor)) {
             if (isAvoid)
                 return 0;
             cursor = addDays(cursor, -1);
-            if ((firstDay && cursor < firstDay) || !countsFor(cursor))
+            if ((floor && cursor < floor) || !countsFor(cursor))
                 return 0;
         }
 
         var streak = 0;
-        while (countsFor(cursor) && (!firstDay || cursor >= firstDay)) {
+        while (countsFor(cursor) && (!floor || cursor >= floor)) {
+            streak++;
+            cursor = addDays(cursor, -1);
+        }
+        return streak;
+    }
+
+    // Pure: consecutive habit-days ending today (or yesterday if today isn't
+    // completed yet), floored at `createdAt`'s habit-day when provided.
+    function computeBuildStreak(dates, createdAt, today) {
+        var cursor = today;
+        var floor = createdAt ? habitDate(createdAt) : null;
+
+        function has(d) {
+            return Array.isArray(dates) && dates.indexOf(d) !== -1;
+        }
+
+        if (!has(cursor)) {
+            cursor = addDays(cursor, -1);
+            if ((floor && cursor < floor) || !has(cursor))
+                return 0;
+        }
+
+        var streak = 0;
+        while (has(cursor) && (!floor || cursor >= floor)) {
             streak++;
             cursor = addDays(cursor, -1);
         }
@@ -225,6 +283,20 @@ data model used: for both tasks and habits // to keep for reference
             subtask.bestStreak = subtask.streak;
             mutated = true;
         }
+        if (typeof subtask.createdAt !== "number") {
+            // Backfill: subtask streaks need an anchor for avoid-type parents,
+            // and it's harmless for build-type parents.
+            subtask.createdAt = Date.now();
+            mutated = true;
+        }
+        if (!Array.isArray(subtask.completionDates)) {
+            subtask.completionDates = [];
+            mutated = true;
+        }
+        if (subtask.lastCompletedDate === undefined) {
+            subtask.lastCompletedDate = null;
+            mutated = true;
+        }
         if (!Array.isArray(subtask.children)) {
             subtask.children = [];
             mutated = true;
@@ -232,10 +304,6 @@ data model used: for both tasks and habits // to keep for reference
             for (var k = 0; k < subtask.children.length; k++) {
                 if (ensureNestedFields(subtask.children[k]))
                     mutated = true;
-                if (subtask.children[k].completions !== undefined) {
-                    subtask.children[k].completions = undefined;
-                    mutated = true;
-                }
             }
         }
         return mutated;
@@ -252,20 +320,56 @@ data model used: for both tasks and habits // to keep for reference
         if (typeof n.minutes !== "number") { n.minutes = 0; mutated = true; }
         if (typeof n.streak !== "number" || n.streak < 0) { n.streak = 0; mutated = true; }
         if (typeof n.bestStreak !== "number" || n.bestStreak < 0) { n.bestStreak = n.streak; mutated = true; }
+        if (typeof n.createdAt !== "number") { n.createdAt = Date.now(); mutated = true; }
+        if (!Array.isArray(n.completionDates)) { n.completionDates = []; mutated = true; }
+        if (n.lastCompletedDate === undefined) { n.lastCompletedDate = null; mutated = true; }
         if (!n.id) { n.id = Date.now() + "-" + Math.floor(Math.random() * 1e6); mutated = true; }
         if (!Array.isArray(n.children)) { n.children = []; mutated = true; }
         return mutated;
     }
 
-    function updateSubtaskStreak(subtask, isDone) {
+    // Subtasks and nested children always behave like "build" nodes for streak
+    // purposes: their `done` flag means "completed", and `completionDates`
+    // records the days they were completed. Parent avoid-ness does not invert
+    // a child's own checkmark semantics.
+    function updateSubtaskStreak(subtask) {
+        if (!subtask) return;
         ensureSubtaskFields(subtask);
+
+        var today = habitDate();
+        subtask.streak = computeBuildStreak(
+            subtask.completionDates,
+            subtask.createdAt,
+            today
+        );
+        var best = subtask.bestStreak || 0;
+        subtask.bestStreak = best > subtask.streak ? best : subtask.streak;
+        subtask.lastCompletedDate = latestCompletionDate(subtask.completionDates);
     }
+
+    // Subtask/nested analogue of applyHabitCompletion, always "build" semantics.
+    // Mutates the node in place: updates completionDates, then recomputes streak.
+    function applySubtaskCompletion(subtask, isDone) {
+        if (!subtask) return;
+        ensureSubtaskFields(subtask);
+
+        var today = habitDate();
+        var dates = subtask.completionDates.slice();
+        var idx = dates.indexOf(today);
+
+        if (isDone && idx === -1)
+            dates.push(today);
+        else if (!isDone && idx !== -1)
+            dates.splice(idx, 1);
+
+        subtask.completionDates = dates;
+        updateSubtaskStreak(subtask);
+    }
+
     function applyHabitCompletion(task, isDone) {
         var today = habitDate();
         var completions = task.completionDates ? task.completionDates.slice() : [];
         var idx = completions.indexOf(today);
-
-
 
         // For BUILD: isDone=true → add today, isDone=false → remove today
         // For AVOID: isDone=true → remove today (not relapsed), isDone=false → add today (relapsed)
@@ -298,6 +402,14 @@ data model used: for both tasks and habits // to keep for reference
             t.lastCompletedDate = t.lastCompleted === undefined ? null : t.lastCompleted;
             if (t.lastCompleted !== undefined)
                 delete t.lastCompleted;
+            mutated = true;
+        }
+        if (typeof t.createdAt !== "number") {
+            // Anchor for avoid streaks. Backfilling with "now" means a legacy
+            // avoid task's streak restarts from today rather than reporting an
+            // unbounded value. That's the safest interpretation: we cannot
+            // reconstruct how long the user has actually been avoiding.
+            t.createdAt = Date.now();
             mutated = true;
         }
         return mutated;
@@ -336,17 +448,16 @@ data model used: for both tasks and habits // to keep for reference
                         newSubtasks = [];
                         for (var j = 0; j < (t.subtasks || []).length; j++) {
                             var s = t.subtasks[j];
-                            newSubtasks.push({
-                                id: s.id,
-                                title: s.title,
+                            // Preserve every field (completionDates, createdAt,
+                            // lastCompletedDate, streak, bestStreak, ...) and
+                            // only reset today's checkbox on the subtree. The
+                            // archives are the source of truth for streaks.
+                            newSubtasks.push(Object.assign({}, s, {
                                 done: false,
-                                minutes: s.minutes || 0,
-                                streak: s.streak || 0,
-                                bestStreak: s.bestStreak || 0,
                                 children: (s.children || []).map(function(c) {
                                     return Object.assign({}, c, { done: false, children: [] });
                                 })
-                            });
+                            }));
                         }
                         changed = true;
                     }
@@ -413,9 +524,8 @@ data model used: for both tasks and habits // to keep for reference
     function toggleTask(i) {
         if (i < 0 || i >= tasks.length) return;
 
-
         var task = tasks[i];
-        // ignore if they have no subtasks, to avoid mistakenly tooggling all subtasks 
+        // ignore if they have no subtasks, to avoid mistakenly toggling all subtasks 
         if (task.subtasks && task.subtasks.length > 0) return;
 
         var newDone = !task.done;
@@ -424,18 +534,13 @@ data model used: for both tasks and habits // to keep for reference
         var newSubtasks = [];
         for (var j = 0; j < task.subtasks.length; j++) {
             var s = task.subtasks[j];
-            newSubtasks[j] = {
-                id: s.id,
-                title: s.title,
+            newSubtasks[j] = Object.assign({}, s, {
                 done: newDone,
-                minutes: s.minutes || 0,
-                streak: s.streak || 0,
-                bestStreak: s.bestStreak || 0,
                 children: (s.children || []).map(function(c) {
                     return Object.assign({}, c, { done: newDone, children: [] });
                 })
-            };
-            updateSubtaskStreak(newSubtasks[j], newDone);
+            });
+            applySubtaskCompletion(newSubtasks[j], newDone);
         }
 
         var newTask = copyTask(task, { done: newDone, subtasks: newSubtasks });
@@ -504,6 +609,9 @@ data model used: for both tasks and habits // to keep for reference
             minutes: parsed.minutes,
             streak: 0,
             bestStreak: 0,
+            createdAt: Date.now(),
+            completionDates: [],
+            lastCompletedDate: null,
             children: []
         };
 
@@ -537,11 +645,14 @@ data model used: for both tasks and habits // to keep for reference
             minutes: sub.minutes || 0,
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0,
+            createdAt: sub.createdAt,
+            completionDates: (sub.completionDates || []).slice(),
+            lastCompletedDate: sub.lastCompletedDate || null,
             children: (sub.children || []).map(function(c) {
                 return Object.assign({}, c, { done: !sub.done, children: [] });
             })
         };
-        updateSubtaskStreak(newSub, newSub.done);
+        applySubtaskCompletion(newSub, newSub.done);
 
         updateSubtask(taskIndex, subtaskIndex, newSub);
         subtaskToggled(taskId, sub.id, !sub.done);
@@ -565,14 +676,16 @@ data model used: for both tasks and habits // to keep for reference
             id: sub.id,
             title: parsed.title,
             done: sub.done,
-            // minutes: parsed.minutes,
             minutes: sub.minutes || 0,
             streak: sub.streak || 0,
             bestStreak: sub.bestStreak || 0,
+            createdAt: sub.createdAt,
+            completionDates: (sub.completionDates || []).slice(),
+            lastCompletedDate: sub.lastCompletedDate || null,
             children: sub.children || []
         };
 
-        if(!sub.children || sub.children.length === 0) {
+        if (!sub.children || sub.children.length === 0) {
             newSub.minutes = parsed.minutes;
         }
         updateSubtask(taskIndex, subtaskIndex, newSub);
@@ -616,6 +729,9 @@ data model used: for both tasks and habits // to keep for reference
             minutes: parsed.minutes,
             streak: 0,
             bestStreak: 0,
+            createdAt: Date.now(),
+            completionDates: [],
+            lastCompletedDate: null,
             children: []
         };
 
@@ -639,9 +755,12 @@ data model used: for both tasks and habits // to keep for reference
             minutes: nested.minutes || 0,
             streak: nested.streak || 0,
             bestStreak: nested.bestStreak || 0,
+            createdAt: nested.createdAt,
+            completionDates: (nested.completionDates || []).slice(),
+            lastCompletedDate: nested.lastCompletedDate || null,
             children: []
         });
-        updateSubtaskStreak(newNested, newNested.done);
+        applySubtaskCompletion(newNested, newNested.done);
 
         var newChildren = sub.children.slice();
         newChildren[nestedIndex] = newNested;
@@ -666,6 +785,10 @@ data model used: for both tasks and habits // to keep for reference
         var newNested = Object.assign({}, nested, {
             title: parsed.title,
             minutes: parsed.minutes,
+            // carry the streak/history fields through the rename untouched
+            createdAt: nested.createdAt,
+            completionDates: (nested.completionDates || []).slice(),
+            lastCompletedDate: nested.lastCompletedDate || null,
             children: []
         });
         var newChildren = sub.children.slice();

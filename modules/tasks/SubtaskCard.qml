@@ -27,6 +27,7 @@ Item {
     property int selectedNestedIndex: -1
     property bool isSelected: false
     property bool isHabitList: false
+    property bool showStreak: false
 
     // Duration for this subtask. Passed in from TaskCard via
     // list.getSubtaskDuration(todoId, subIdx): sum of children when it has
@@ -95,6 +96,19 @@ Item {
 
     readonly property bool isDone: root.subtaskData?.done ?? false
     readonly property string title: root.subtaskData?.title ?? ""
+    readonly property int streak: root.subtaskData?.streak ?? 0
+    readonly property int bestStreak: root.subtaskData?.bestStreak ?? 0
+
+    // Same colour ramp as TaskCard, so parent and child read as one system.
+    readonly property color streakColor: {
+        if (root.streak >= 20) return "#fe1d1d"
+        if (root.streak >= 10) return "#FF8C00"
+        if (root.streak >= 3)  return "#FFA500"
+        if (root.streak >= 1)  return Colours.palette.m3primary
+        return Colours.palette.m3outlineVariant
+    }
+    readonly property color bestStreakColor:
+        root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
 
     onSubtaskIdChanged: {
         root.addingChild = false
@@ -266,21 +280,6 @@ Item {
                             commitEdit()
                     }
                 }
-                RowLayout {
-                    visible: root.nSubNested > 0 && !root.isEditing
-                    spacing: Tokens.spacing.small
-                    Layout.alignment: Qt.AlignVCenter
-
-                    StyledText {
-                        text: `${root.dSubNested}/${root.nSubNested}`
-                        font: Tokens.font.body.small
-                        color: root.isDone ? Colours.palette.m3primary
-                                        : Colours.palette.m3onSurfaceVariant
-                        opacity: 0.7
-                        Behavior on color { CAnim {} }
-                    }
-                }
-
             //    // ── Estimated time: clock + minutes stacked ────────────────
             //     StyledText {
             //         visible: !root.isEditing && root.subtaskDuration > 0
@@ -313,6 +312,70 @@ Item {
                                 : `${root.subtaskDuration}m`
                             font: Tokens.font.body.small
                             color: Colours.palette.m3onSurfaceVariant
+                        }
+                    }
+                }
+
+                RowLayout {
+                    visible: root.nSubNested > 0 && !root.isEditing
+                    spacing: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledText {
+                        text: `${root.dSubNested}/${root.nSubNested}`
+                        font: Tokens.font.body.small
+                        color: root.isDone ? Colours.palette.m3primary
+                                        : Colours.palette.m3onSurfaceVariant
+                        opacity: 0.7
+                        Behavior on color { CAnim {} }
+                    }
+                }
+
+                // ── Streak (habits only) ────────────────────────
+                RowLayout {
+                    id: streakBadge
+                    visible: root.showStreak
+                             && (root.streak > 0 || root.bestStreak > 0)
+                             && !root.isEditing
+                    Layout.leftMargin: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 4
+
+                    // Current streak indicator
+                    RowLayout {
+                        spacing: 2
+                        MaterialIcon {
+                            text: "local_fire_department"
+                            fill: 1
+                            fontStyle: Tokens.font.icon.small
+                            color: root.streakColor
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
+                        StyledText {
+                            text: String(root.streak)
+                            font: Tokens.font.label.medium
+                            color: root.streakColor
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
+                    }
+
+                    // Best streak badge
+                    RowLayout {
+                        spacing: 1
+                        opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
+
+                        MaterialIcon {
+                            text: "emoji_events"
+                            fontStyle: Tokens.font.icon.small
+                            color: root.bestStreakColor
+                            fill: root.streak >= root.bestStreak ? 1 : 0
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
+                        StyledText {
+                            text: String(root.bestStreak)
+                            font: Tokens.font.label.small
+                            color: root.bestStreakColor
+                            Behavior on color { CAnim { duration: 300 } }
                         }
                     }
                 }
@@ -420,8 +483,11 @@ Item {
                     parentSubtaskId: root.subtaskId
                     taskIndex: root.taskIndex
                     subtaskIndex: root.subtaskIndex
+
                     isHabitList: root.isHabitList
+                    showStreak: root.showStreak
                     isSelected: root.isSelected && root.selectedNestedIndex === index
+
                     isEditing: root.editingNestedId === (modelData?.id ?? "")
                     isFirst: index === 0
                     isLast: index === nestedRepeater.count - 1
