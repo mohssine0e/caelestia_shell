@@ -73,6 +73,9 @@ Item {
     property string editingSubId: ""
     property bool showStreak: false
 
+    property bool addingSubtask: false
+
+
     property string icon: ""
     readonly property int streak: root.taskData?.streak ?? 0
     readonly property int bestStreak: root.taskData?.bestStreak ?? 0
@@ -126,6 +129,13 @@ Item {
     // Returns null for collapsed/virtualized rows — callers guard for that.
     function subDelegate(subIdx) {
         return subRepeater.itemAt(subIdx)
+    }
+
+    function setExpanded(v) {
+        if (root.nav)
+            root.nav.setTaskExpanded(root.taskData?.todoId ?? "", v)
+        else
+            root.expanded = v
     }
 
     // One colour binding shared by the streak icon + number
@@ -517,6 +527,24 @@ Item {
                     }
 
                     IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "add"
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectionRequested(root.taskIndex)
+                                root.setExpanded(true)
+
+                                root.addingSubtask = true
+                                addSubtaskField.focus = true
+                            }
+                        }
+                    }
+
+                    IconButton {
                         id: deleteButton
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -694,6 +722,7 @@ Item {
 
                 // ── Add-subtask field ──────────────────────────
                 RowLayout {
+                    visible: root.addingSubtask
                     Layout.fillWidth: true
                     Layout.topMargin: 0
 
@@ -701,11 +730,9 @@ Item {
                         text: "add_circle_outline"
                         fontStyle: Tokens.font.icon.small
                         color: Colours.palette.m3primary
-                        opacity: addSubtaskField.focus ? 1 : 0.5
+                        opacity: 0.6
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
-
-                        Behavior on opacity { enabled: root.animate; CAnim {} }
                     }
 
                     StyledTextField {
@@ -742,7 +769,15 @@ Item {
                         Keys.onEscapePressed: {
                             clear()
                             focus = false
+                            root.addingSubtask = false
                             root.subtaskEditingCancelled()
+                        }
+
+                        onVisibleChanged:{
+                            if(visible){
+                                clear()
+                                forceActiveFocus()
+                            }
                         }
                     }
                 }

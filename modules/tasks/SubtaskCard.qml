@@ -56,6 +56,7 @@ Item {
 
     signal addChildRequested(int taskIdx, int subIdx, string title)
     signal addChildCancelled(int taskIdx, int subIdx)
+
     signal toggleNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal deleteNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal renameNestedRequested(int taskIdx, int subIdx, int nestedIdx, string newTitle)
@@ -63,8 +64,8 @@ Item {
     signal nestedEditingCancelled()
 
     readonly property var nestedChildren: root.subtaskData?.children ?? []
-    readonly property bool effectiveHasChildren:
-        root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
+
+    readonly property bool effectiveHasChildren: root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
     readonly property int visibleChildCount:
         (root.effectiveHasChildren && root.effectiveExpanded) ? Math.max(root.nestedChildren.length, root.addingChild ? 1 : 0) : 0
 
@@ -381,6 +382,7 @@ Item {
                 }
 
 
+                // ── Actions ─────────────────────────────────────
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
