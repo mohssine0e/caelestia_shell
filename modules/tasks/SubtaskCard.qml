@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -116,7 +117,15 @@ Item {
     }
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
-    readonly property string editPrefill: `${root.title} @${root.subtaskData?.minutes || 0}`
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + link through a rename; only the
+        // pieces that actually exist are appended.
+        const parts = [root.title]
+        parts.push("@" + (root.subtaskData?.minutes || 0))
+        const link = root.subtaskData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
     implicitHeight: mainCol.implicitHeight
     Layout.fillWidth: true
@@ -389,6 +398,27 @@ Item {
                     opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
+                    // Copy this subtask's title to the clipboard; icon flips to
+                    // "inventory" for 2s as feedback (Notification.vue idiom).
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: copyTimer.running ? "inventory" : "content_copy"
+                        onClicked: {
+                            Quickshell.clipboardText = root.title
+                            copyTimer.restart()
+                        }
+                    }
+
+                    // Open the subtask's link in the browser. Hidden when unset.
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "link"
+                        visible: (root.subtaskData?.link ?? "") !== ""
+                        onClicked: Qt.openUrlExternally(root.subtaskData?.link ?? "")
+                    }
+
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -441,6 +471,11 @@ Item {
                             acceptedButtons: Qt.LeftButton
                             onClicked: subDeleteButton.clicked()
                             onDoubleClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
+                        }
+
+                        Timer {
+                            id: copyTimer
+                            interval: 2000
                         }
 
                         SequentialAnimation {

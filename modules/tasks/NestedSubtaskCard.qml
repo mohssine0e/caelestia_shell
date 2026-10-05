@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -57,7 +58,15 @@ Item {
     }
     readonly property color bestStreakColor:
         root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
-    readonly property string editPrefill: `${root.nestedData?.title ?? ""} @${root.nestedData?.minutes || 0}`
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + link through a rename; only the
+        // pieces that actually exist are appended.
+        const parts = [root.nestedData?.title ?? ""]
+        parts.push("@" + (root.nestedData?.minutes || 0))
+        const link = root.nestedData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
     function commitRename(text) {
         // Ignore pure "@minutes" edits — they carry no title.
@@ -254,6 +263,27 @@ Item {
             opacity: (hover.hovered || root.isSelected) ? 1 : 0.3
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
+            // Copy this nested row's title to the clipboard; icon flips to
+            // "inventory" for 2s as feedback (Notification.vue idiom).
+            IconButton {
+                type: IconButton.Text
+                font: Tokens.font.icon.small
+                icon: copyTimer.running ? "inventory" : "content_copy"
+                onClicked: {
+                    Quickshell.clipboardText = root.nestedData?.title ?? ""
+                    copyTimer.restart()
+                }
+            }
+
+            // Open the nested row's link in the browser. Hidden when unset.
+            IconButton {
+                type: IconButton.Text
+                font: Tokens.font.icon.small
+                icon: "link"
+                visible: (root.nestedData?.link ?? "") !== ""
+                onClicked: Qt.openUrlExternally(root.nestedData?.link ?? "")
+            }
+
             IconButton {
                 type: IconButton.Text
                 font: Tokens.font.icon.small
@@ -267,5 +297,10 @@ Item {
                 onClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex, root.nestedIndex)
             }
         }
+    }
+
+    Timer {
+        id: copyTimer
+        interval: 2000
     }
 }

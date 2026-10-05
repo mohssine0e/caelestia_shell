@@ -22,6 +22,7 @@ FocusScope {
 
     property string statusFilter: "all"
     property string searchQuery: ""
+    property string categoryFilter: "all"
 
     readonly property string dataPath: Paths.home + "/" + list.dataType + ".json"
     
@@ -129,6 +130,25 @@ FocusScope {
 
     readonly property string searchLower: searchQuery.trim().toLowerCase()
 
+    // "all" plus every distinct category in the list, sorted. Re-evaluated
+    // whenever the task array is reassigned (add/rename/toggle), so a newly
+    // created category appears immediately and a renamed-away one drops out.
+    readonly property var categoryOptions: {
+        var opts = [{ text: qsTr("All"), value: "all" }]
+        var seen = {}
+        for (var i = 0; i < list.tasks.length; i++) {
+            var c = (list.tasks[i].category || "").trim()
+            if (c && !seen[c]) {
+                seen[c] = true
+                opts.push({ text: c, value: c })
+            }
+        }
+        opts.sort(function(a, b) {
+            return a.value < b.value ? -1 : a.value > b.value ? 1 : 0
+        })
+        return opts
+    }
+
     // THE filter (status + search). Used by the delegates' `visible`,
     // isTaskVisible() and visibleTaskCount, so the rules live in one place.
     function matchesFilter(task, todoId) {
@@ -136,6 +156,9 @@ FocusScope {
         var status = list.statusFilter
         if (status === "active" && task.done) return false
         if (status === "done" && !task.done) return false
+        var cat = list.categoryFilter.toLowerCase()
+        if (cat !== "all" && (task.category || "").toLowerCase() !== cat)
+            return false
         var q = list.searchLower
         if (q && getSearchText(todoId, task).indexOf(q) === -1) return false
         return true
@@ -382,6 +405,19 @@ FocusScope {
             dataManager.tasks = list.tasks;
         list.updateMaps();
         list.updateFilteredModel();
+        // If the active category no longer exists (every task renamed away),
+        // fall back to "all" rather than showing an empty, unfilterable view.
+        if (list.categoryFilter !== "all") {
+            var stillThere = false
+            for (var i = 0; i < list.tasks.length; i++) {
+                if ((list.tasks[i].category || "").toLowerCase() === list.categoryFilter.toLowerCase()) {
+                    stillThere = true
+                    break
+                }
+            }
+            if (!stillThere)
+                list.categoryFilter = "all"
+        }
     }
 
     onLoadedChanged: {
@@ -396,6 +432,13 @@ FocusScope {
     onStatusFilterChanged: {
         // Instant: the delegates hide/show via their visible bindings,
         // no model rebuild — just move the selection to a visible task.
+        navController.selectTask(list.firstVisibleIndex());
+        list.rebuildNavCounts();
+    }
+
+    onCategoryFilterChanged: {
+        // Same instant path as the status filter: delegates re-evaluate
+        // their visible binding; only the selection needs nudging.
         navController.selectTask(list.firstVisibleIndex());
         list.rebuildNavCounts();
     }
@@ -594,11 +637,12 @@ FocusScope {
         var migrated = false;
         for (var i = 0; i < list.tasks.length; i++) {
             var task = list.tasks[i];
-            if (list.isHabitList) {
-                if (dataManager.ensureHabitFields(task))
-                    migrated = true;
+            // Backfill every task, not just habits: streak/completionDates
+            // plus the new link/category fields. updateStreaks is habit-only.
+            if (dataManager.ensureHabitFields(task))
+                migrated = true;
+            if (list.isHabitList)
                 dataManager.updateStreaks(task);
-            }
             for (var j = 0; j < (task.subtasks || []).length; j++) {
                 if (dataManager.ensureSubtaskFields(task.subtasks[j]))
                     migrated = true;

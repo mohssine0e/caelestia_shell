@@ -6,6 +6,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as QC
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -151,9 +152,18 @@ Item {
     // Prefill for the title edit field. Subtask-less tasks carry their
     // estimate inline as "@minutes" (even when it is 0); the submitted
     // text is parsed back into title + minutes by DataManager.renameTask.
-    readonly property string editPrefill: root.nSub === 0 && !root.isHabitList
-        ? `${root.taskTitle} @${root.taskData?.minutes || 0}`
-        : root.taskTitle
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + #category + link through a rename:
+        // only the pieces that actually exist are appended.
+        const parts = [root.taskTitle]
+        if (root.nSub === 0 && !root.isHabitList)
+            parts.push("@" + (root.taskData?.minutes || 0))
+        const cat = root.taskData?.category || ""
+        if (cat) parts.push("#" + cat)
+        const link = root.taskData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
 
     // ── Main Card ──────────────────────────────────────────────
@@ -516,6 +526,27 @@ Item {
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
 
+                    // Copy the row's title to the clipboard; icon flips to
+                    // "inventory" for 2s as feedback (Notification.vue idiom).
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: copyTimer.running ? "inventory" : "content_copy"
+                        onClicked: {
+                            Quickshell.clipboardText = root.taskTitle
+                            copyTimer.restart()
+                        }
+                    }
+
+                    // Open the row's link in the browser. Hidden when unset.
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "link"
+                        visible: (root.taskData?.link ?? "") !== ""
+                        onClicked: Qt.openUrlExternally(root.taskData?.link ?? "")
+                    }
+
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -565,6 +596,11 @@ Item {
                             acceptedButtons: Qt.LeftButton
                             onClicked: deleteButton.clicked()
                             onDoubleClicked: root.deleteRequested(root.taskIndex)
+                        }
+
+                        Timer {
+                            id: copyTimer
+                            interval: 2000
                         }
 
                         SequentialAnimation {

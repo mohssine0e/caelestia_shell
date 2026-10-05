@@ -71,6 +71,7 @@ FocusScope {
     property string activePage: "tasks"
     property string statusFilter: "all"
     property string searchQuery: ""
+    property string categoryFilter: "all"
     property string habitType: "build"
     property string habitIcon: "task_alt"
 
@@ -161,6 +162,36 @@ FocusScope {
                 givenHeight: 40
             }
 
+            // Category: "all" plus every distinct #category in the list.
+            // Same SplitButton + Variants idiom as StorageCard.
+            SplitButton {
+                type: SplitButton.Tonal
+                Layout.fillHeight: true
+                Layout.preferredWidth: 120
+                fallbackIcon: "tag"
+                fallbackText: qsTr("Category")
+                menuItems: categoryVariants.instances
+                active: categoryVariants.instances.find(m => m.value === root.categoryFilter)
+                    ?? categoryVariants.instances[0] ?? null
+                menu.onItemSelected: item => root.categoryFilter = (item as CategoryItem).value
+
+                Variants {
+                    id: categoryVariants
+                    model: root.activePage === "tasks"
+                        ? taskList.categoryOptions
+                        : dailyHabitsList.categoryOptions
+
+                    CategoryItem {}
+                }
+
+                component CategoryItem: MenuItem {
+                    required property var modelData
+                    text: modelData.text
+                    value: modelData.value
+                    activeIcon: "tag"
+                }
+            }
+
             // Daily: completions today + countdown to 2am reset
             RowLayout {
                 visible: root.activePage === "daily"
@@ -237,6 +268,7 @@ FocusScope {
             dataType: "tasks"
             statusFilter: root.statusFilter
             searchQuery: root.searchQuery
+            categoryFilter: root.categoryFilter
         }
 
         // ── Habit list ───────────────────────────────────────────
@@ -248,7 +280,8 @@ FocusScope {
             focus: root.activePage === "daily"
             dataType: "habits"
             statusFilter: root.statusFilter
-                        searchQuery: root.searchQuery
+            searchQuery: root.searchQuery
+            categoryFilter: root.categoryFilter
         }
         }
 

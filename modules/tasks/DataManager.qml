@@ -22,6 +22,8 @@ data model used: for both tasks and habits // to keep for reference
     lastCompletedDate: string | null,           // for normal habits
     lastRelapseDate: string | null,             // for avoid habits
     createdAt: number,                          // ms epoch; anchor for streaks
+    link: string,               // optional URL opened by the row's link button
+    category: string,           // optional #category token, lowercased
 
     subtasks: [
         {
@@ -29,6 +31,7 @@ data model used: for both tasks and habits // to keep for reference
             title: string,
             done: bool,
             minutes: int,
+            link: string,
             createdAt: number,
             completionDates: string[],
             lastCompletedDate: string | null,
@@ -297,6 +300,7 @@ data model used: for both tasks and habits // to keep for reference
             subtask.lastCompletedDate = null;
             mutated = true;
         }
+        if (typeof subtask.link !== "string") { subtask.link = ""; mutated = true; }
         if (!Array.isArray(subtask.children)) {
             subtask.children = [];
             mutated = true;
@@ -324,6 +328,7 @@ data model used: for both tasks and habits // to keep for reference
         if (!Array.isArray(n.completionDates)) { n.completionDates = []; mutated = true; }
         if (n.lastCompletedDate === undefined) { n.lastCompletedDate = null; mutated = true; }
         if (!n.id) { n.id = Date.now() + "-" + Math.floor(Math.random() * 1e6); mutated = true; }
+        if (typeof n.link !== "string") { n.link = ""; mutated = true; }
         if (!Array.isArray(n.children)) { n.children = []; mutated = true; }
         return mutated;
     }
@@ -412,6 +417,8 @@ data model used: for both tasks and habits // to keep for reference
             t.createdAt = Date.now();
             mutated = true;
         }
+        if (typeof t.link !== "string") { t.link = ""; mutated = true; }
+        if (typeof t.category !== "string") { t.category = ""; mutated = true; }
         return mutated;
     }
 
@@ -501,13 +508,17 @@ data model used: for both tasks and habits // to keep for reference
             priority: null,
             createdAt: Date.now(),
             subtasks: [],
-            completionDates: []
+            completionDates: [],
+            link: "",
+            category: ""
         };
 
         var parsed = parseCapturePrefix(title);
         if (!parsed.title) return;   // "@15" alone is not a task title
         newTask.title = parsed.title;
         newTask.minutes = parsed.minutes;
+        newTask.category = parsed.category;
+        newTask.link = parsed.link;
 
         if (habitMode) {
             newTask.streak = isAvoid ? 1 : 0;
@@ -571,6 +582,8 @@ data model used: for both tasks and habits // to keep for reference
         // rename must not overwrite their stored estimate.
         if (!task.subtasks || task.subtasks.length === 0)
             changes.minutes = parsed.minutes;
+        changes.category = parsed.category;
+        changes.link = parsed.link;
 
         var taskId = task.todoId;
         var oldTitle = task.title;
@@ -612,7 +625,8 @@ data model used: for both tasks and habits // to keep for reference
             createdAt: Date.now(),
             completionDates: [],
             lastCompletedDate: null,
-            children: []
+            children: [],
+            link: parsed.link
         };
 
         var newSubtasks = task.subtasks.slice();
@@ -648,6 +662,7 @@ data model used: for both tasks and habits // to keep for reference
             createdAt: sub.createdAt,
             completionDates: (sub.completionDates || []).slice(),
             lastCompletedDate: sub.lastCompletedDate || null,
+            link: sub.link || "",
             children: (sub.children || []).map(function(c) {
                 return Object.assign({}, c, { done: !sub.done, children: [] });
             })
@@ -682,12 +697,14 @@ data model used: for both tasks and habits // to keep for reference
             createdAt: sub.createdAt,
             completionDates: (sub.completionDates || []).slice(),
             lastCompletedDate: sub.lastCompletedDate || null,
+            link: sub.link || "",
             children: sub.children || []
         };
 
         if (!sub.children || sub.children.length === 0) {
             newSub.minutes = parsed.minutes;
         }
+        newSub.link = parsed.link;
         updateSubtask(taskIndex, subtaskIndex, newSub);
         subtaskRenamed(taskId, sub.id, oldTitle, parsed.title);
     }
@@ -732,7 +749,8 @@ data model used: for both tasks and habits // to keep for reference
             createdAt: Date.now(),
             completionDates: [],
             lastCompletedDate: null,
-            children: []
+            children: [],
+            link: parsed.link
         };
 
         var newChildren = (sub.children || []).slice();
@@ -785,6 +803,7 @@ data model used: for both tasks and habits // to keep for reference
         var newNested = Object.assign({}, nested, {
             title: parsed.title,
             minutes: parsed.minutes,
+            link: parsed.link,
             // carry the streak/history fields through the rename untouched
             createdAt: nested.createdAt,
             completionDates: (nested.completionDates || []).slice(),
@@ -856,8 +875,9 @@ function isDoneToday(task) {
         return idxMap;
     }
 
-    function getFilteredTasks(statusFilter, searchQuery) {
+    function getFilteredTasks(statusFilter, searchQuery, categoryFilter) {
         var q = searchQuery.trim().toLowerCase();
+        var cat = (categoryFilter || "all").toLowerCase();
         var result = [];
 
         for (var i = 0; i < tasks.length; i++) {
@@ -865,6 +885,9 @@ function isDoneToday(task) {
 
             if (statusFilter === "active" && t.done) continue;
             if (statusFilter === "done" && !t.done) continue;
+
+            if (cat !== "all" && (t.category || "").toLowerCase() !== cat)
+                continue;
 
             if (q) {
                 var matchTitle = t.title ? t.title.toLowerCase().indexOf(q) !== -1 : false;
@@ -891,6 +914,21 @@ function isDoneToday(task) {
             result.push(t.todoId);
         }
         return result;
+    }
+
+    // Distinct non-empty categories across all tasks, sorted.
+    function getCategories() {
+        var seen = {};
+        var list = [];
+        for (var i = 0; i < tasks.length; i++) {
+            var c = (tasks[i].category || "").trim();
+            if (c && !seen[c]) {
+                seen[c] = true;
+                list.push(c);
+            }
+        }
+        list.sort();
+        return list;
     }
 
     function getSubtaskMap(taskId) {
