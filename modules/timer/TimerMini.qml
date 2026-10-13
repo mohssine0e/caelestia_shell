@@ -115,7 +115,8 @@ FocusScope {
         width: parent.width
         implicitHeight: mainLayout.implicitHeight + Tokens.padding.small * 2
         height: implicitHeight
-        radius: Tokens.rounding.large
+        // radius: Tokens.rounding.large
+        radius: 2
         color: Colours.tPalette.m3surfaceContainer
         border.width: 1
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
