@@ -405,27 +405,16 @@ Item {
                 // ── Estimated time chip (tasks only) ────────────
                 // Right-aligned with the progress/streak cluster. Hidden
                 // for habits, while editing a subtask-less task (the
-                // estimate is inline in the edit field) and when unset.
+                // ── Minutes chip → timer dropdown ───────────────────
                 RowLayout {
                     visible: root.taskDuration > 0
                         && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
 
-                    StyledRect {
-                        implicitHeight: 20
-                        implicitWidth: minutesLabel.implicitWidth + Tokens.padding.small * 2
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3surfaceContainerHighest
-
-                        StyledText {
-                            id: minutesLabel
-                            anchors.centerIn: parent
-                            text: root.taskDuration >= 60
-                                ? `${Math.floor(root.taskDuration / 60)}h${root.taskDuration % 60 ? `${root.taskDuration % 60}` : ""}`
-                                : `${root.taskDuration}m`
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
+                    TaskTimerChip {
+                        taskId: root.taskData?.todoId ?? ""
+                        taskTitle: root.taskData?.title ?? ""
+                        minutes: root.taskDuration
                     }
                 }
 

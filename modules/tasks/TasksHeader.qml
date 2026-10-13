@@ -143,6 +143,16 @@ Item {
                 onActivated: root.pageChanged(value)
                 showOnlyActiveText: true
             }
+
+            // ── Pomodoro Timer Toggle ──────────────────────────
+            IconButton {
+                type: (ShellState.forActive()?.timer ?? false) ? IconButton.Filled : (FocusTimer.isRunning ? IconButton.Tonal : IconButton.Text)
+                icon: "timer"
+                onClicked: {
+                    const s = ShellState.forActive();
+                    if (s) s.timer = !s.timer;
+                }
+            }
         }
 
         // ── Bottom Row: Icon Picker ─────────────────────────────

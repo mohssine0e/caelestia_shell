@@ -12,6 +12,12 @@ PersistentProperties {
     property bool utilities
     property bool sidebar
     property bool tasks
+    property bool timer
+
+    // Timer mini (pill HUD) state — persisted
+    property real timerX: 0
+    property real timerY: 0
+    property bool timerExpanded: false
 
     // Dashboard state
     property int dashboardTab

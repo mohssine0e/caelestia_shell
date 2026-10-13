@@ -308,21 +308,10 @@ Item {
                         && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
 
-                    StyledRect {
-                        implicitHeight: 20
-                        implicitWidth: minutesLabel.implicitWidth + Tokens.padding.small * 2
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3surfaceContainerHighest
-
-                        StyledText {
-                            id: minutesLabel
-                            anchors.centerIn: parent
-                            text: root.subtaskDuration >= 60
-                                ? `${Math.floor(root.subtaskDuration / 60)}h${root.subtaskDuration % 60 ? `${root.subtaskDuration % 60}` : ""}`
-                                : `${root.subtaskDuration}m`
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
+                    TaskTimerChip {
+                        taskId: root.subtaskId || `${root.taskData?.todoId ?? ""}/${root.subtaskIndex}`
+                        taskTitle: root.subtaskData?.title ?? root.taskData?.title ?? ""
+                        minutes: root.subtaskDuration
                     }
                 }
 

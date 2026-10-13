@@ -188,25 +188,16 @@ Item {
             }
         }
 
-        // Minutes chip
+        // Minutes chip → timer dropdown
         RowLayout {
             visible: !root.isHabitList
                      && (root.nestedData?.minutes || 0) > 0
             Layout.alignment: Qt.AlignVCenter
 
-            StyledRect {
-                implicitHeight: 20
-                implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3surfaceContainerHighest
-
-                StyledText {
-                    id: subMinutesLabel
-                    anchors.centerIn: parent
-                    text: `${root.nestedData?.minutes || 0}m`
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
-                }
+            TaskTimerChip {
+                taskId: root.nestedId || `${root.parentSubtaskId}/${root.nestedIndex}`
+                taskTitle: root.nestedData?.title ?? ""
+                minutes: root.nestedData?.minutes || 0
             }
         }
 
