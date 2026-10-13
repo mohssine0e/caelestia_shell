@@ -21,8 +21,6 @@ FocusScope {
 
     readonly property alias card: card
 
-    property bool focused: true
-
     implicitWidth: 260
     implicitHeight: card.implicitHeight
 
@@ -38,9 +36,9 @@ FocusScope {
     readonly property bool bannerVisible: FocusTimer.linkedTaskTitle.length > 0
 
     readonly property var presetOrder: [
-        { value: "work",      minutes: 25 },
-        { value: "break",     minutes: 5  },
-        { value: "stopwatch", minutes: 0  }
+        { value: "work",       minutes: 25 },
+        { value: "shortBreak", minutes: 5  },
+        { value: "longBreak",  minutes: 15 }
     ]
 
     function cyclePreset(step) {
@@ -96,11 +94,8 @@ FocusScope {
     HoverHandler {
         id: hover
         onHoveredChanged: {
-            if (hovered) {
-                root.mini.expanded = true
-            } else if (!root.bannerVisible) {
-                root.mini.expanded = false
-            }
+            if (hovered) root.mini.expanded = true
+            else if (!root.bannerVisible) root.mini.expanded = false
         }
     }
 
@@ -115,14 +110,12 @@ FocusScope {
         width: parent.width
         implicitHeight: mainLayout.implicitHeight + Tokens.padding.small * 2
         height: implicitHeight
-        // radius: Tokens.rounding.large
+
         radius: 2
         color: Colours.tPalette.m3surfaceContainer
         border.width: 1
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-        opacity: root.focused ? 1.0 : 0.65
-        Behavior on opacity { CAnim {} }
         Behavior on border.color { CAnim {} }
 
         ColumnLayout {
@@ -140,6 +133,7 @@ FocusScope {
                 spacing: Tokens.spacing.small
 
                 Item {
+                    id: ringContainer
                     implicitWidth: root.ringSize
                     implicitHeight: root.ringSize
                     Layout.alignment: Qt.AlignVCenter
@@ -158,15 +152,15 @@ FocusScope {
 
                         ShapePath {
                             fillColor: "transparent"
-                            strokeColor: parent.parent.trackColour
+                            strokeColor: ringContainer.trackColour
                             strokeWidth: root.ringStroke
                             capStyle: ShapePath.RoundCap
 
                             PathAngleArc {
-                                radiusX: parent.parent.ringRadius
-                                radiusY: parent.parent.ringRadius
-                                centerX: parent.parent.width / 2
-                                centerY: parent.parent.height / 2
+                                radiusX: ringContainer.ringRadius
+                                radiusY: ringContainer.ringRadius
+                                centerX: ringContainer.width / 2
+                                centerY: ringContainer.height / 2
                                 startAngle: -90
                                 sweepAngle: 360
                             }
@@ -174,17 +168,17 @@ FocusScope {
 
                         ShapePath {
                             fillColor: "transparent"
-                            strokeColor: parent.parent.activeColour
+                            strokeColor: ringContainer.activeColour
                             strokeWidth: root.ringStroke
                             capStyle: ShapePath.RoundCap
 
                             PathAngleArc {
-                                radiusX: parent.parent.ringRadius
-                                radiusY: parent.parent.ringRadius
-                                centerX: parent.parent.width / 2
-                                centerY: parent.parent.height / 2
+                                radiusX: ringContainer.ringRadius
+                                radiusY: ringContainer.ringRadius
+                                centerX: ringContainer.width / 2
+                                centerY: ringContainer.height / 2
                                 startAngle: -90
-                                sweepAngle: 360 * parent.parent.progress
+                                sweepAngle: 360 * ringContainer.progress
                             }
 
                             Behavior on strokeColor { CAnim {} }
@@ -249,11 +243,11 @@ FocusScope {
                     givenHeight: 36
 
                     model: [
-                        { icon: "work",      text: qsTr("Work"),      value: "work",      minutes: 25 },
-                        { icon: "coffee",    text: qsTr("Break"),     value: "break",     minutes: 5  },
-                        { icon: "timer",     text: qsTr("Stopwatch"), value: "stopwatch", minutes: 0  }
+                        { icon: "work",   text: qsTr("Work"),  value: "work",       minutes: 25 },
+                        { icon: "coffee", text: qsTr("Short"), value: "shortBreak", minutes: 5  },
+                        { icon: "hotel",  text: qsTr("Long"),  value: "longBreak",  minutes: 15 }
                     ]
-                    currentValue: (FocusTimer.mode === "shortBreak" || FocusTimer.mode === "longBreak") ? "break" : FocusTimer.mode
+                    currentValue: FocusTimer.mode
                     showOnlyActiveText: true
 
                     onActivated: value => {

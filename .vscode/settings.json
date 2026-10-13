@@ -2,5 +2,8 @@
   "editor.defaultFormatter": "theqtcompany.qt-qml",
   "[cpp]": {
     "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "[lua]": {
+    "editor.defaultFormatter": "sumneko.lua"
   }
 }
