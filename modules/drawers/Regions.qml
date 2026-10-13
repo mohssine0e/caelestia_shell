@@ -76,7 +76,7 @@ Region {
         panel: root.panels.tasks
         y: root.win.height - height
         height: panel.height * (1 - root.panels.tasks.offsetScale) + root.borderThickness
-    }
+    } 
 
     component R: Region {
         required property Item panel

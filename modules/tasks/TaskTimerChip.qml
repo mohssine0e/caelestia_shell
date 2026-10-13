@@ -8,10 +8,9 @@ import qs.components
 import qs.components.controls
 import qs.services
 
-// Per-card time chip with an inline timer dropdown.
-// Replaces the static "12m" pill in TaskCard / SubtaskCard / NestedSubtaskCard.
-// Click (or the trailing caret) opens the menu; picking a row starts the
-// FocusTimer with that duration.
+// Per-card time chip with 1-click focus timer start.
+// Clicking starts the focus timer with the task's duration and opens the HUD.
+// If already linked to this task, clicking toggles play/pause.
 StyledRect {
     id: root
 
@@ -38,10 +37,15 @@ StyledRect {
         id: state
         color: root.running || root.linked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
         onClicked: {
-            if (timerMenu.expanded)
-                timerMenu.expanded = false
-            else
-                timerMenu.expanded = true
+            if (root.linked) {
+                FocusTimer.toggle();
+            } else {
+                FocusTimer.startForTask(root.taskId, root.taskTitle, root.minutes);
+            }
+            // Show the floating HUD window
+            const st = ShellState.forActive();
+            if (st)
+                st.timer = true;
         }
     }
 
@@ -52,7 +56,7 @@ StyledRect {
 
         MaterialIcon {
             Layout.alignment: Qt.AlignVCenter
-            text: root.running ? "pause_circle" : "schedule"
+            text: root.running ? "pause" : root.linked ? "play_arrow" : "schedule"
             fontStyle: Tokens.font.icon.small
             color: root.running || root.linked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
         }
@@ -63,58 +67,10 @@ StyledRect {
             font: Tokens.font.label.small
             color: root.running || root.linked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
         }
-
-        MaterialIcon {
-            Layout.alignment: Qt.AlignVCenter
-            text: "arrow_drop_down"
-            fontStyle: Tokens.font.icon.small
-            color: root.running || root.linked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
-        }
     }
 
     HoverHandler {
         id: hover
         cursorShape: Qt.PointingHandCursor
-    }
-
-    Menu {
-        id: timerMenu
-        attachTo: root
-        attachSideY: Menu.Bottom
-        thisSideY: Menu.Top
-        marginY: Tokens.spacing.extraSmall
-        items: timerItems.instances
-        onItemSelected: item => {
-            const opt = (item as TimerOpt)
-            const mins = opt.minutesOverride > 0 ? opt.minutesOverride : root.minutes
-            if (opt.action === "toggle" && root.linked) {
-                FocusTimer.toggle()
-            } else {
-                FocusTimer.startForTask(root.taskId, root.taskTitle, mins)
-            }
-            // Reveal the floating mini.
-            const st = ShellState.forActive()
-            if (st)
-                st.timer = true
-        }
-    }
-
-    Variants {
-        id: timerItems
-        model: [
-            { kind: "start", label: qsTr("Start %1m focus").arg(root.minutes) },
-            { kind: "preset", label: qsTr("25m pomodoro"), mins: 25 },
-            { kind: "preset", label: qsTr("5m break"), mins: 5 },
-            { kind: "toggle", label: root.linked ? (FocusTimer.isRunning ? qsTr("Pause timer") : qsTr("Resume timer")) : qsTr("Custom… (starts %1m)").arg(root.minutes) }
-        ]
-        TimerOpt {}
-    }
-
-    component TimerOpt: MenuItem {
-        required property var modelData
-        readonly property string action: modelData.kind === "toggle" ? "toggle" : "start"
-        readonly property int minutesOverride: modelData.mins ?? 0
-        text: modelData.label ?? ""
-        icon: modelData.kind === "toggle" ? (FocusTimer.isRunning ? "pause" : "play_arrow") : "timer"
     }
 }
