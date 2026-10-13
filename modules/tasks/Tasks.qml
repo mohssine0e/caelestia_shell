@@ -150,7 +150,7 @@ FocusScope {
 
             BtnSwitcher {
                 id: statusFilterSwitcher
-                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignVCenter
                 model: [
                     { icon: "format_list_bulleted", text: qsTr("All"), value: "all" },
                     { icon: "pending", text: qsTr("Active"), value: "active" },
@@ -166,7 +166,7 @@ FocusScope {
             // Same SplitButton + Variants idiom as StorageCard.
             SplitButton {
                 type: SplitButton.Tonal
-                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignVCenter
                 Layout.preferredWidth: 120
                 fallbackIcon: "tag"
                 fallbackText: qsTr("Category")
@@ -196,7 +196,7 @@ FocusScope {
             RowLayout {
                 visible: root.activePage === "daily"
                 spacing: Tokens.spacing.small
-                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignVCenter
 
                 MaterialIcon {
                     text: "local_fire_department"
@@ -224,6 +224,7 @@ FocusScope {
             StyledTextField {
                 implicitHeight: statusFilterSwitcher.givenHeight
                 verticalPadding: Tokens.padding.small
+                Layout.alignment: Qt.AlignVCenter
 
                 Layout.preferredWidth: 250
                 leadingIcon: "search"
@@ -236,8 +237,8 @@ FocusScope {
                     clear()
                     Qt.callLater(() => {
                         (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
-                    })                }
-
+                    })
+                }
 
                 Keys.onEscapePressed: {
                     clear()
@@ -255,7 +256,6 @@ FocusScope {
             implicitHeight: 1
             color: Colours.palette.m3outlineVariant
             opacity: 0.4
-            visible: root.activePage === "tasks"
         }
 
         // ── Task list ────────────────────────────────────────────

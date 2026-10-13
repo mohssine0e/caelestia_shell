@@ -192,12 +192,16 @@ FocusScope {
         onTaskToggled: (taskId, newState) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.updateFilteredModel()
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.updateFilteredModel()
+            list.rebuildNavCounts()
             list.editingTaskId = ""
             list.renameJustCommitted = true
             renameCommitGuard.restart()
@@ -302,6 +306,8 @@ FocusScope {
         id: searchDebounce
         interval: 80
         onTriggered: {
+            list.updateFilteredModel()
+            list.ensureSelectionVisible()
             navController.selectTask(list.firstVisibleIndex())
             list.rebuildNavCounts()
         }
@@ -327,15 +333,19 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        // Keep BOTH search and status filtering in each delegate's visible
-        // binding so switching filters (like typing) never rebuilds the
-        // model — the model only changes when the set of task ids does.
-        var filteredIds = dataManager.getFilteredTasks("", "");
+        var filteredIds = [];
+        var allIds = dataManager.getFilteredTasks("", "");
+        for (var i = 0; i < allIds.length; i++) {
+            var tid = allIds[i];
+            if (list.matchesFilter(list.taskMap[tid], tid)) {
+                filteredIds.push(tid);
+            }
+        }
 
         if (filteredModel.count === filteredIds.length) {
             var same = true;
-            for (var i = 0; i < filteredIds.length; i++) {
-                if (filteredModel.get(i).todoId !== filteredIds[i]) {
+            for (var j = 0; j < filteredIds.length; j++) {
+                if (filteredModel.get(j).todoId !== filteredIds[j]) {
                     same = false;
                     break;
                 }
@@ -344,39 +354,31 @@ FocusScope {
         }
 
         filteredModel.clear();
-        for (var i = 0; i < filteredIds.length; i++) {
-            filteredModel.append({ todoId: filteredIds[i] });
+        for (var k = 0; k < filteredIds.length; k++) {
+            filteredModel.append({ todoId: filteredIds[k] });
         }
     }
 
     // Mirrors the delegates' visible binding (status filter + search).
     function isTaskVisible(index) {
-        var entry = filteredModel.get(index);
-        if (!entry) return false;
-        return list.matchesFilter(list.taskMap[entry.todoId], entry.todoId);
+        return index >= 0 && index < filteredModel.count;
     }
 
     // Nearest visible index searching from `from` in `dir` (+1 / -1) with
     // wrap-around; -1 when nothing is visible.
     function nextVisibleIndex(from, dir) {
         var count = filteredModel.count;
-        for (var step = 1; step <= count; step++) {
-            var idx = ((from + dir * step) % count + count) % count;
-            if (list.isTaskVisible(idx)) return idx;
-        }
-        return -1;
+        if (count === 0) return -1;
+        if (from < 0) return dir > 0 ? 0 : count - 1;
+        return (from + dir + count) % count;
     }
 
     function firstVisibleIndex() {
-        for (var i = 0; i < filteredModel.count; i++)
-            if (list.isTaskVisible(i)) return i;
-        return -1;
+        return filteredModel.count > 0 ? 0 : -1;
     }
 
     function lastVisibleIndex() {
-        for (var i = filteredModel.count - 1; i >= 0; i--)
-            if (list.isTaskVisible(i)) return i;
-        return -1;
+        return filteredModel.count > 0 ? filteredModel.count - 1 : -1;
     }
 
     // Keep the selection on a visible task after data changes (e.g. a task
@@ -430,30 +432,22 @@ FocusScope {
     }
 
     onStatusFilterChanged: {
-        // Instant: the delegates hide/show via their visible bindings,
-        // no model rebuild — just move the selection to a visible task.
+        list.updateFilteredModel();
+        list.ensureSelectionVisible();
         navController.selectTask(list.firstVisibleIndex());
         list.rebuildNavCounts();
     }
 
     onCategoryFilterChanged: {
-        // Same instant path as the status filter: delegates re-evaluate
-        // their visible binding; only the selection needs nudging.
+        list.updateFilteredModel();
+        list.ensureSelectionVisible();
         navController.selectTask(list.firstVisibleIndex());
         list.rebuildNavCounts();
     }
 
     onSearchQueryChanged: searchDebounce.restart()
 
-    readonly property int visibleTaskCount: {
-        var count = 0
-        for (var i = 0; i < filteredModel.count; i++) {
-            var todoId = filteredModel.get(i).todoId
-            if (list.matchesFilter(list.taskMap[todoId], todoId))
-                count++
-        }
-        return count
-    }
+    readonly property int visibleTaskCount: filteredModel.count
 
     property string editingTaskId: ""
     property string editingSubId: ""
@@ -523,7 +517,7 @@ FocusScope {
             }
             arr.push({
                 todoId: todoId,
-                visible: list.matchesFilter(task, todoId),
+                visible: true,
                 nSub: subs.length,
                 nestedCounts: nested,
                 subIds: subIds
@@ -774,9 +768,8 @@ FocusScope {
             required property int index
 
             width: ListView.view ? ListView.view.width : parent ? parent.width : 0
-            // Collapse hidden filtered items to 0 height so they don't reserve space in ListView
-            height: visible ? implicitHeight : 0
-            visible: list.matchesFilter(task, todoId)
+            height: implicitHeight
+            visible: true
 
             property var taskMap: list.taskMap
             property var taskIndexMap: list.taskIndexMap

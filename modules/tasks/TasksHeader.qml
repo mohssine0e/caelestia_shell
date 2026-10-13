@@ -87,6 +87,7 @@ Item {
             StyledTextField {
                 id: captureField
                 Layout.preferredWidth: 500
+                Layout.alignment: Qt.AlignVCenter
                 implicitHeight: pageSwitch.implicitHeight + 4
                 leadingIcon: root.activePage === "daily" ? root.habitIcon : "checklist"
                 borderWidth: 1
@@ -113,7 +114,8 @@ Item {
             BtnSwitcher {
                 id: habitTypeSwitch
                 visible: root.showHabitControls
-                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignVCenter
+                givenHeight: pageSwitch.implicitHeight
                 model: [
                     { icon: "build", text: qsTr("Build"), value: "build" },
                     { icon: "block", text: qsTr("Avoid"), value: "avoid" }
@@ -134,7 +136,7 @@ Item {
             // ── Page Switcher ──────────────────────────────────
             BtnSwitcher {
                 id: pageSwitch
-                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignVCenter
                 model: [
                     { icon: "checklist", text: "Tasks", value: "tasks", action: () => root.pageChanged("tasks") },
                     { icon: "wb_sunny", text: "Daily", value: "daily", action: () => root.pageChanged("daily") }
