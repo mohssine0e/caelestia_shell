@@ -2,6 +2,7 @@ pragma Singleton
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Caelestia
 import qs.services
 
@@ -12,7 +13,10 @@ Singleton {
     property bool isRunning: false
     property int remainingSeconds: 25 * 60
     property int totalDurationSeconds: 25 * 60
-    property string mode: "work" // "work" | "shortBreak" | "longBreak" | "custom"
+    property string mode: "work" // "work" | "break" | "stopwatch" | "custom"
+
+    // ── Stopwatch elapsed counter ────────────────────────────────
+    property int elapsedSeconds: 0
 
     // ── Linked Task Context ──────────────────────────────────────
     property string linkedTaskId: ""
@@ -22,23 +26,47 @@ Singleton {
     property int sessionsToday: 0
     property string sessionDate: ""
 
+    // ── Pomodoro Cycle Tracking ─────────────────────────────────
+    property int pomodorosInCycle: 0
+
+    // ── Sound chime process ─────────────────────────────────────
+    Process {
+        id: soundProc
+    }
+
+    function playChime(): void {
+        const sounds = [
+            "/usr/share/sounds/freedesktop/stereo/complete.oga",
+            "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga",
+            "/usr/share/sounds/freedesktop/stereo/bell.oga"
+        ];
+        // Use pw-play or canberra-gtk-play
+        soundProc.exec(["pw-play", sounds[0]]);
+    }
+
     // ── Computed Progress ────────────────────────────────────────
-    readonly property real progress: totalDurationSeconds > 0
-        ? Math.max(0, Math.min(1, 1 - (remainingSeconds / totalDurationSeconds)))
-        : 0
+    readonly property real progress: {
+        if (mode === "stopwatch") {
+            // Smooth pulsating or continuous 60s cycle for stopwatch ring
+            return (elapsedSeconds % 60) / 60.0;
+        }
+        return totalDurationSeconds > 0
+            ? Math.max(0, Math.min(1, 1 - (remainingSeconds / totalDurationSeconds)))
+            : 0;
+    }
 
     readonly property string formattedTime: {
-    const total = Math.max(0, remainingSeconds);
-    const hours = Math.floor(total / 3600);
-    const mins  = Math.floor((total % 3600) / 60);
-    const secs  = total % 60;
+        const total = mode === "stopwatch" ? Math.max(0, elapsedSeconds) : Math.max(0, remainingSeconds);
+        const hours = Math.floor(total / 3600);
+        const mins  = Math.floor((total % 3600) / 60);
+        const secs  = total % 60;
 
-    const mm = (hours > 0 && mins < 10) ? "0" + mins : String(mins);
-    const ss = secs < 10 ? "0" + secs : String(secs);
+        const mm = (hours > 0 && mins < 10) ? "0" + mins : String(mins);
+        const ss = secs < 10 ? "0" + secs : String(secs);
 
-    if (hours > 0) return `${hours}:${mm}:${ss}`;
-    return `${mm < 10 ? "0" + mm : mm}:${ss}`;
-}
+        if (hours > 0) return `${hours}:${mm}:${ss}`;
+        return `${mm < 10 ? "0" + mm : mm}:${ss}`;
+    }
 
     // ── Internal 1s Ticker ───────────────────────────────────────
     Timer {
@@ -47,7 +75,9 @@ Singleton {
         repeat: true
         running: root.isRunning
         onTriggered: {
-            if (root.remainingSeconds > 1) {
+            if (root.mode === "stopwatch") {
+                root.elapsedSeconds += 1;
+            } else if (root.remainingSeconds > 1) {
                 root.remainingSeconds -= 1;
             } else {
                 root.remainingSeconds = 0;
@@ -63,30 +93,41 @@ Singleton {
         if (root.sessionDate !== today) {
             root.sessionDate = today;
             root.sessionsToday = 0;
+            root.pomodorosInCycle = 0;
         }
     }
 
     Component.onCompleted: checkDayRollover()
 
     function onTimerFinished(): void {
-        // Count a completed work session
+        checkDayRollover();
+
+        // Play audio chime
+        playChime();
+
         if (root.mode === "work" || root.mode === "custom") {
-            checkDayRollover();
             root.sessionsToday += 1;
+            root.pomodorosInCycle += 1;
+
+            const title = Tr.tr("Focus Session Complete!");
+            const msg = root.linkedTaskTitle.length > 0
+                ? Tr.tr("Time is up for task: %1. Take a break!").arg(root.linkedTaskTitle)
+                : Tr.tr("Great job! Take a 5m break.");
+
+            Toaster.toast(title, msg, "check_circle");
+            setPreset("break", 5);
+        } else {
+            // Break finished
+            const title = Tr.tr("Break Finished!");
+            const msg = Tr.tr("Ready to start your next focus session?");
+            Toaster.toast(title, msg, "coffee");
+            setPreset("work", 25);
         }
-
-        const title = root.mode === "work" ? Tr.tr("Focus Session Complete!") : Tr.tr("Break Finished!");
-        const msg = root.linkedTaskTitle.length > 0
-            ? Tr.tr("Time is up for task: %1").arg(root.linkedTaskTitle)
-            : (root.mode === "work" ? Tr.tr("Great job! Take a short break.") : Tr.tr("Ready to focus again?"));
-        const icon = root.mode === "work" ? "check_circle" : "coffee";
-
-        Toaster.toast(title, msg, icon);
     }
 
     // ── Public Controls ──────────────────────────────────────────
     function start(): void {
-        if (remainingSeconds <= 0)
+        if (mode !== "stopwatch" && remainingSeconds <= 0)
             reset();
         isRunning = true;
     }
@@ -102,12 +143,12 @@ Singleton {
 
     function reset(): void {
         isRunning = false;
-        if (mode === "work") {
+        if (mode === "stopwatch") {
+            elapsedSeconds = 0;
+        } else if (mode === "work") {
             setPreset("work", 25);
-        } else if (mode === "shortBreak") {
-            setPreset("shortBreak", 5);
-        } else if (mode === "longBreak") {
-            setPreset("longBreak", 15);
+        } else if (mode === "break" || mode === "shortBreak" || mode === "longBreak") {
+            setPreset("break", 5);
         } else {
             remainingSeconds = totalDurationSeconds;
         }
@@ -115,33 +156,31 @@ Singleton {
 
     function setPreset(newMode: string, minutes: int): void {
         mode = newMode;
-        totalDurationSeconds = Math.max(1, minutes) * 60;
-        remainingSeconds = totalDurationSeconds;
+        if (newMode === "stopwatch") {
+            elapsedSeconds = 0;
+            totalDurationSeconds = 0;
+            remainingSeconds = 0;
+        } else {
+            totalDurationSeconds = Math.max(1, minutes) * 60;
+            remainingSeconds = totalDurationSeconds;
+        }
     }
 
-    // ── Adjust the current duration by ±N minutes ────────────────
-    // Called from keyboard (Up/Down) in the timer pill.
-    // Extends/shrinks both totalDurationSeconds and remainingSeconds
-    // so progress stays sensible. Clamps to [1 min, 240 min].
+    // ── Adjust current duration by ±N minutes ────────────────────
     function adjustMinutes(delta: int): void {
-        if (!delta) return;
+        if (!delta || mode === "stopwatch") return;
 
         const MIN_SECONDS = 60;
         const MAX_SECONDS = 240 * 60;
 
-        // New total = old total + delta*60, clamped
         let newTotal = totalDurationSeconds + delta * 60;
         newTotal = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, newTotal));
 
-        // New remaining = old remaining + delta*60, clamped to [0, newTotal]
         let newRemaining = remainingSeconds + delta * 60;
         newRemaining = Math.max(0, Math.min(newTotal, newRemaining));
 
         totalDurationSeconds = newTotal;
         remainingSeconds = newRemaining;
-
-        // If paused and remaining == 0 (only possible if user pushed down past 0),
-        // keep it at 0; user can press play to reset from preset.
     }
 
     function startForTask(taskId: string, title: string, minutes: int): void {

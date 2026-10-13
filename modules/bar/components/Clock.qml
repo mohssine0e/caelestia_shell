@@ -172,7 +172,9 @@ StyledRect {
 
                 MaterialIcon {
                     anchors.centerIn: parent
-                    text: timerBtn.isRunning ? "timer" : "hourglass_top"
+                    text: timerBtn.isRunning
+                        ? (FocusTimer.mode === "stopwatch" ? "timer" : (FocusTimer.mode === "work" ? "bolt" : "coffee"))
+                        : "hourglass_top"
                     fontStyle: Tokens.font.icon.small
                     color: timerBtn.isRunning ? Colours.palette.m3onPrimary : root.colour
                 }

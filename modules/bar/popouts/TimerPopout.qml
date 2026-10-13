@@ -45,17 +45,40 @@ Item {
 
                 StyledText {
                     text: FocusTimer.mode === "work" ? qsTr("Focus Timer")
-                        : FocusTimer.mode === "shortBreak" ? qsTr("Short Break")
-                        : FocusTimer.mode === "longBreak" ? qsTr("Long Break")
+                        : (FocusTimer.mode === "break" || FocusTimer.mode === "shortBreak" || FocusTimer.mode === "longBreak") ? qsTr("Break")
+                        : FocusTimer.mode === "stopwatch" ? qsTr("Stopwatch")
                         : qsTr("Task Timer")
                     font: Tokens.font.title.small
                     color: Colours.palette.m3onSurface
                 }
 
-                StyledText {
-                    text: FocusTimer.formattedTime
-                    font: Tokens.font.headline.small
-                    color: FocusTimer.isRunning ? Colours.palette.m3primary : Colours.palette.m3outline
+                RowLayout {
+                    spacing: Tokens.spacing.extraSmall
+
+                    StyledText {
+                        text: FocusTimer.formattedTime
+                        font: Tokens.font.headline.small
+                        color: FocusTimer.isRunning ? Colours.palette.m3primary : Colours.palette.m3outline
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    // Daily completed pomodoros chip
+                    StyledRect {
+                        visible: FocusTimer.sessionsToday > 0
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3primaryContainer
+                        implicitHeight: 18
+                        implicitWidth: sessText.implicitWidth + 10
+
+                        StyledText {
+                            id: sessText
+                            anchors.centerIn: parent
+                            text: qsTr("%1 done").arg(FocusTimer.sessionsToday)
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onPrimaryContainer
+                        }
+                    }
                 }
             }
 
@@ -74,18 +97,18 @@ Item {
             }
         }
 
-        // ── Mode Switcher ────────────────────────────────────────────
+        // ── Mode Switcher (Work, Break, Stopwatch) ───────────────────
         BtnSwitcher {
             id: switcher
             Layout.fillWidth: true
             givenHeight: 36
 
             model: [
-                { icon: "work",   text: qsTr("Work"),  value: "work",       minutes: 25 },
-                { icon: "coffee", text: qsTr("Short"), value: "shortBreak", minutes: 5  },
-                { icon: "hotel",  text: qsTr("Long"),  value: "longBreak",  minutes: 15 }
+                { icon: "work",      text: qsTr("Work"),      value: "work",      minutes: 25 },
+                { icon: "coffee",    text: qsTr("Break"),     value: "break",     minutes: 5  },
+                { icon: "timer",     text: qsTr("Stopwatch"), value: "stopwatch", minutes: 0  }
             ]
-            currentValue: FocusTimer.mode
+            currentValue: (FocusTimer.mode === "shortBreak" || FocusTimer.mode === "longBreak") ? "break" : FocusTimer.mode
             showOnlyActiveText: true
 
             onActivated: value => {

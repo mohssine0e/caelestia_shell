@@ -38,9 +38,9 @@ FocusScope {
     readonly property bool bannerVisible: FocusTimer.linkedTaskTitle.length > 0
 
     readonly property var presetOrder: [
-        { value: "work",       minutes: 25 },
-        { value: "shortBreak", minutes: 5  },
-        { value: "longBreak",  minutes: 15 }
+        { value: "work",      minutes: 25 },
+        { value: "break",     minutes: 5  },
+        { value: "stopwatch", minutes: 0  }
     ]
 
     function cyclePreset(step) {
@@ -248,11 +248,11 @@ FocusScope {
                     givenHeight: 36
 
                     model: [
-                        { icon: "work",   text: qsTr("Work"),  value: "work",       minutes: 25 },
-                        { icon: "coffee", text: qsTr("Short"), value: "shortBreak", minutes: 5  },
-                        { icon: "hotel",  text: qsTr("Long"),  value: "longBreak",  minutes: 15 }
+                        { icon: "work",      text: qsTr("Work"),      value: "work",      minutes: 25 },
+                        { icon: "coffee",    text: qsTr("Break"),     value: "break",     minutes: 5  },
+                        { icon: "timer",     text: qsTr("Stopwatch"), value: "stopwatch", minutes: 0  }
                     ]
-                    currentValue: FocusTimer.mode
+                    currentValue: (FocusTimer.mode === "shortBreak" || FocusTimer.mode === "longBreak") ? "break" : FocusTimer.mode
                     showOnlyActiveText: true
 
                     onActivated: value => {
