@@ -22,6 +22,7 @@ FocusScope {
 
     property string statusFilter: "all"
     property string searchQuery: ""
+    property string categoryFilter: "all"
 
     readonly property string dataPath: Paths.home + "/" + list.dataType + ".json"
     
@@ -93,6 +94,23 @@ FocusScope {
         return val
     }
 
+        function getSubtaskDuration(todoId, subIdx) {
+        var task = taskMap[todoId]
+        if (!task) return 0
+        var sub = (task.subtasks || [])[subIdx]
+        if (!sub) return 0
+
+        var kids = sub.children || []
+        if (kids.length > 0) {
+            var val = 0
+            for (var i = 0; i < kids.length; i++) val += (kids[i].minutes || 0)
+            return val
+        }
+        return sub.minutes || 0
+    }
+
+    
+
     // One lower-cased haystack per task (title + subtask titles) so a search
     // is a single indexOf per task instead of toLowerCase() on every subtask.
     function getSearchText(todoId, task) {
@@ -112,6 +130,25 @@ FocusScope {
 
     readonly property string searchLower: searchQuery.trim().toLowerCase()
 
+    // "all" plus every distinct category in the list, sorted. Re-evaluated
+    // whenever the task array is reassigned (add/rename/toggle), so a newly
+    // created category appears immediately and a renamed-away one drops out.
+    readonly property var categoryOptions: {
+        var opts = [{ text: qsTr("All"), value: "all" }]
+        var seen = {}
+        for (var i = 0; i < list.tasks.length; i++) {
+            var c = (list.tasks[i].category || "").trim()
+            if (c && !seen[c]) {
+                seen[c] = true
+                opts.push({ text: c, value: c })
+            }
+        }
+        opts.sort(function(a, b) {
+            return a.value < b.value ? -1 : a.value > b.value ? 1 : 0
+        })
+        return opts
+    }
+
     // THE filter (status + search). Used by the delegates' `visible`,
     // isTaskVisible() and visibleTaskCount, so the rules live in one place.
     function matchesFilter(task, todoId) {
@@ -119,6 +156,9 @@ FocusScope {
         var status = list.statusFilter
         if (status === "active" && task.done) return false
         if (status === "done" && !task.done) return false
+        var cat = list.categoryFilter.toLowerCase()
+        if (cat !== "all" && (task.category || "").toLowerCase() !== cat)
+            return false
         var q = list.searchLower
         if (q && getSearchText(todoId, task).indexOf(q) === -1) return false
         return true
@@ -152,12 +192,16 @@ FocusScope {
         onTaskToggled: (taskId, newState) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.updateFilteredModel()
+            list.rebuildNavCounts()
             list.requestSave()
         }
 
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
+            list.updateFilteredModel()
+            list.rebuildNavCounts()
             list.editingTaskId = ""
             list.renameJustCommitted = true
             renameCommitGuard.restart()
@@ -262,6 +306,8 @@ FocusScope {
         id: searchDebounce
         interval: 80
         onTriggered: {
+            list.updateFilteredModel()
+            list.ensureSelectionVisible()
             navController.selectTask(list.firstVisibleIndex())
             list.rebuildNavCounts()
         }
@@ -287,15 +333,19 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        // Keep BOTH search and status filtering in each delegate's visible
-        // binding so switching filters (like typing) never rebuilds the
-        // model — the model only changes when the set of task ids does.
-        var filteredIds = dataManager.getFilteredTasks("", "");
+        var filteredIds = [];
+        var allIds = dataManager.getFilteredTasks("", "");
+        for (var i = 0; i < allIds.length; i++) {
+            var tid = allIds[i];
+            if (list.matchesFilter(list.taskMap[tid], tid)) {
+                filteredIds.push(tid);
+            }
+        }
 
         if (filteredModel.count === filteredIds.length) {
             var same = true;
-            for (var i = 0; i < filteredIds.length; i++) {
-                if (filteredModel.get(i).todoId !== filteredIds[i]) {
+            for (var j = 0; j < filteredIds.length; j++) {
+                if (filteredModel.get(j).todoId !== filteredIds[j]) {
                     same = false;
                     break;
                 }
@@ -304,39 +354,31 @@ FocusScope {
         }
 
         filteredModel.clear();
-        for (var i = 0; i < filteredIds.length; i++) {
-            filteredModel.append({ todoId: filteredIds[i] });
+        for (var k = 0; k < filteredIds.length; k++) {
+            filteredModel.append({ todoId: filteredIds[k] });
         }
     }
 
     // Mirrors the delegates' visible binding (status filter + search).
     function isTaskVisible(index) {
-        var entry = filteredModel.get(index);
-        if (!entry) return false;
-        return list.matchesFilter(list.taskMap[entry.todoId], entry.todoId);
+        return index >= 0 && index < filteredModel.count;
     }
 
     // Nearest visible index searching from `from` in `dir` (+1 / -1) with
     // wrap-around; -1 when nothing is visible.
     function nextVisibleIndex(from, dir) {
         var count = filteredModel.count;
-        for (var step = 1; step <= count; step++) {
-            var idx = ((from + dir * step) % count + count) % count;
-            if (list.isTaskVisible(idx)) return idx;
-        }
-        return -1;
+        if (count === 0) return -1;
+        if (from < 0) return dir > 0 ? 0 : count - 1;
+        return (from + dir + count) % count;
     }
 
     function firstVisibleIndex() {
-        for (var i = 0; i < filteredModel.count; i++)
-            if (list.isTaskVisible(i)) return i;
-        return -1;
+        return filteredModel.count > 0 ? 0 : -1;
     }
 
     function lastVisibleIndex() {
-        for (var i = filteredModel.count - 1; i >= 0; i--)
-            if (list.isTaskVisible(i)) return i;
-        return -1;
+        return filteredModel.count > 0 ? filteredModel.count - 1 : -1;
     }
 
     // Keep the selection on a visible task after data changes (e.g. a task
@@ -365,6 +407,19 @@ FocusScope {
             dataManager.tasks = list.tasks;
         list.updateMaps();
         list.updateFilteredModel();
+        // If the active category no longer exists (every task renamed away),
+        // fall back to "all" rather than showing an empty, unfilterable view.
+        if (list.categoryFilter !== "all") {
+            var stillThere = false
+            for (var i = 0; i < list.tasks.length; i++) {
+                if ((list.tasks[i].category || "").toLowerCase() === list.categoryFilter.toLowerCase()) {
+                    stillThere = true
+                    break
+                }
+            }
+            if (!stillThere)
+                list.categoryFilter = "all"
+        }
     }
 
     onLoadedChanged: {
@@ -377,23 +432,22 @@ FocusScope {
     }
 
     onStatusFilterChanged: {
-        // Instant: the delegates hide/show via their visible bindings,
-        // no model rebuild — just move the selection to a visible task.
+        list.updateFilteredModel();
+        list.ensureSelectionVisible();
+        navController.selectTask(list.firstVisibleIndex());
+        list.rebuildNavCounts();
+    }
+
+    onCategoryFilterChanged: {
+        list.updateFilteredModel();
+        list.ensureSelectionVisible();
         navController.selectTask(list.firstVisibleIndex());
         list.rebuildNavCounts();
     }
 
     onSearchQueryChanged: searchDebounce.restart()
 
-    readonly property int visibleTaskCount: {
-        var count = 0
-        for (var i = 0; i < filteredModel.count; i++) {
-            var todoId = filteredModel.get(i).todoId
-            if (list.matchesFilter(list.taskMap[todoId], todoId))
-                count++
-        }
-        return count
-    }
+    readonly property int visibleTaskCount: filteredModel.count
 
     property string editingTaskId: ""
     property string editingSubId: ""
@@ -463,7 +517,7 @@ FocusScope {
             }
             arr.push({
                 todoId: todoId,
-                visible: list.matchesFilter(task, todoId),
+                visible: true,
                 nSub: subs.length,
                 nestedCounts: nested,
                 subIds: subIds
@@ -577,11 +631,12 @@ FocusScope {
         var migrated = false;
         for (var i = 0; i < list.tasks.length; i++) {
             var task = list.tasks[i];
-            if (list.isHabitList) {
-                if (dataManager.ensureHabitFields(task))
-                    migrated = true;
+            // Backfill every task, not just habits: streak/completionDates
+            // plus the new link/category fields. updateStreaks is habit-only.
+            if (dataManager.ensureHabitFields(task))
+                migrated = true;
+            if (list.isHabitList)
                 dataManager.updateStreaks(task);
-            }
             for (var j = 0; j < (task.subtasks || []).length; j++) {
                 if (dataManager.ensureSubtaskFields(task.subtasks[j]))
                     migrated = true;
@@ -664,8 +719,13 @@ FocusScope {
     }
 
     function save() {
-        // Compact JSON (no pretty) → ~30% smaller & faster, less main-thread block (P-A4)
-        storage.setText(JSON.stringify(list.tasks));
+        // // Compact JSON (no pretty) → ~30% smaller & faster, less main-thread block (P-A4)
+        // storage.setText(JSON.stringify(list.tasks));
+
+
+
+        storage.setText(JSON.stringify(list.tasks, null, 2));
+
     }
 
     function requestSave() {
@@ -708,9 +768,8 @@ FocusScope {
             required property int index
 
             width: ListView.view ? ListView.view.width : parent ? parent.width : 0
-            // Collapse hidden filtered items to 0 height so they don't reserve space in ListView
-            height: visible ? implicitHeight : 0
-            visible: list.matchesFilter(task, todoId)
+            height: implicitHeight
+            visible: true
 
             property var taskMap: list.taskMap
             property var taskIndexMap: list.taskIndexMap
@@ -736,7 +795,10 @@ FocusScope {
             })()
 
             // Memoized per task (identity-validated, mutated in place)
-            readonly property var progressData: list.getProgressData(todoId)
+            readonly property var progressData: {
+                const _t = taskMap[todoId]
+                return _t ? list.getProgressData(todoId) : list._emptyProgress
+            }
 
             taskData: task
             taskIndex: absIdx
@@ -750,7 +812,10 @@ FocusScope {
             nSub: progressData.total
             dSub: progressData.done
             prog: progressData.ratio
-            taskDuration: list.getTaskDuration(todoId)
+            taskDuration: {
+                const _t =taskMap[todoId]
+                return _t ? list.getTaskDuration(todoId) : 0
+            }
             isHabitList: list.isHabitList
             icon: list.isHabitList ? (task.icon || "") : ""
             showStreak: list.isHabitList

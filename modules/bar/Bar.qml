@@ -72,6 +72,17 @@ ColumnLayout {
             popouts.currentName = id.toLowerCase();
             popouts.currentCenter = (ch.item as Item).mapToItem(root, 0, (ch.item as Item).implicitHeight / 2).y ?? 0;
             popouts.hasCurrent = true;
+        } else if (id === "clock") {
+            const clock = ch.item as Clock;
+            if (clock?.timerBtn) {
+                const btnPos = mapToItem(clock.timerBtn, width / 2, y);
+                if (clock.timerBtn.contains(btnPos)) {
+                    popouts.currentName = "timer";
+                    popouts.currentCenter = Qt.binding(() => clock.timerBtn.mapToItem(root, 0, clock.timerBtn.implicitHeight / 2).y);
+                    popouts.hasCurrent = true;
+                    return;
+                }
+            }
         }
     }
 
@@ -160,6 +171,8 @@ ColumnLayout {
                 delegate: EntryWrapper {
                     Clock {
                         objectName: "taskbarClock"
+                        bar: root
+                        popouts: root.popouts
                     }
                 }
             }

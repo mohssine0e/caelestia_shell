@@ -12,6 +12,15 @@ Item {
 
     readonly property bool shouldBeActive: screenState.tasks
 
+    // The Loader loads once at startup while the popout is invisible, so the
+    // onLoaded focus grab is silently dropped (Qt ignores focus requests on
+    // hidden items). Re-grab here every time the popout opens, otherwise Q,
+    // / and the list shortcuts do nothing until the user clicks inside first.
+    onShouldBeActiveChanged: {
+        if (root.shouldBeActive)
+            Qt.callLater(() => content.item?.forceActiveFocus())
+    }
+
     property real offsetScale: shouldBeActive ? 0 : 1
 
     visible: offsetScale < 1

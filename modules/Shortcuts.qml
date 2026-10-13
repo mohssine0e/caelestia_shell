@@ -121,6 +121,17 @@ Scope {
         }
     }
 
+    CustomShortcut {
+        name: "timer"
+        description: "Toggle pomodoro timer"
+        onPressed: {
+            if (root.hasFullscreen)
+                return;
+            const screenState = ShellState.forActive();
+            screenState.timer = !screenState.timer;
+        }
+    }
+
     IpcHandler {
         function toggle(drawer: string): void {
             if (list().split("\n").includes(drawer)) {

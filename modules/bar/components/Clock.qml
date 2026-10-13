@@ -2,9 +2,11 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Caelestia.Config
 import Caelestia.I18n
 import qs.components
+import qs.components.controls
 import qs.services
 
 StyledRect {
@@ -19,6 +21,10 @@ StyledRect {
         const scale = text === "11" ? 1.15 : Math.min(1.05, Math.max(hourMetrics.width, minMetrics.width) / metricWidth);
         return root.font.width(scale * 100).letterSpacing(scale).build();
     }
+
+    required property var bar
+    required property var popouts
+    readonly property alias timerBtn: timerBtn
 
     implicitWidth: Tokens.sizes.bar.innerWidth
     implicitHeight: layout.implicitHeight + root.padding * 2
@@ -140,6 +146,53 @@ StyledRect {
                 text: Time.amPmStr.toLowerCase()
                 font: Tokens.font.body.builders.small.scale(0.9).build()
                 color: root.colour
+            }
+        }
+
+        // ── Timer Launcher Button (Popout trigger) ───────────────────
+        Item {
+            id: timerBtn
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Tokens.spacing.extraSmall / 2
+            implicitWidth: 24
+            implicitHeight: 24
+
+            readonly property bool isRunning: FocusTimer.isRunning
+            readonly property bool isWinOpen: ShellState.forActive()?.timer ?? false
+            readonly property bool isPopoutOpen: root.popouts?.hasCurrent && root.popouts?.currentName === "timer"
+
+            StyledRect {
+                anchors.fill: parent
+                radius: Tokens.rounding.full
+                color: timerBtn.isRunning ? Colours.palette.m3primary
+                    : (timerBtn.isPopoutOpen || timerBtn.isWinOpen) ? Colours.tPalette.m3surfaceContainerHigh
+                    : "transparent"
+
+                Behavior on color { CAnim {} }
+
+                MaterialIcon {
+                    anchors.centerIn: parent
+                    text: timerBtn.isRunning
+                        ? (FocusTimer.mode === "stopwatch" ? "timer" : (FocusTimer.mode === "work" ? "bolt" : "coffee"))
+                        : "hourglass_top"
+                    fontStyle: Tokens.font.icon.small
+                    color: timerBtn.isRunning ? Colours.palette.m3onPrimary : root.colour
+                }
+            }
+
+            StateLayer {
+                radius: Tokens.rounding.full
+                onClicked: {
+                    if (root.popouts) {
+                        if (root.popouts.hasCurrent && root.popouts.currentName === "timer") {
+                            root.popouts.hasCurrent = false;
+                        } else {
+                            root.popouts.currentName = "timer";
+                            root.popouts.currentCenter = Qt.binding(() => timerBtn.mapToItem(root.bar, 0, timerBtn.implicitHeight / 2).y);
+                            root.popouts.hasCurrent = true;
+                        }
+                    }
+                }
             }
         }
     }

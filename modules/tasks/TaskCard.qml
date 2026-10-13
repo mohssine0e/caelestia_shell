@@ -6,6 +6,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as QC
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -73,6 +74,9 @@ Item {
     property string editingSubId: ""
     property bool showStreak: false
 
+    property bool addingSubtask: false
+
+
     property string icon: ""
     readonly property int streak: root.taskData?.streak ?? 0
     readonly property int bestStreak: root.taskData?.bestStreak ?? 0
@@ -128,6 +132,13 @@ Item {
         return subRepeater.itemAt(subIdx)
     }
 
+    function setExpanded(v) {
+        if (root.nav)
+            root.nav.setTaskExpanded(root.taskData?.todoId ?? "", v)
+        else
+            root.expanded = v
+    }
+
     // One colour binding shared by the streak icon + number
     readonly property color streakColor: {
         if (root.streak >= 20) return "#fe1d1d"
@@ -136,13 +147,23 @@ Item {
         if (root.streak >= 1)  return Colours.palette.m3primary
         return Colours.palette.m3outlineVariant
     }
+    readonly property color bestStreakColor: root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
 
     // Prefill for the title edit field. Subtask-less tasks carry their
     // estimate inline as "@minutes" (even when it is 0); the submitted
     // text is parsed back into title + minutes by DataManager.renameTask.
-    readonly property string editPrefill: root.nSub === 0 && !root.isHabitList
-        ? `${root.taskTitle} @${root.taskData?.minutes || 0}`
-        : root.taskTitle
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + #category + link through a rename:
+        // only the pieces that actually exist are appended.
+        const parts = [root.taskTitle]
+        if (root.nSub === 0 && !root.isHabitList)
+            parts.push("@" + (root.taskData?.minutes || 0))
+        const cat = root.taskData?.category || ""
+        if (cat) parts.push("#" + cat)
+        const link = root.taskData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
 
     // ── Main Card ──────────────────────────────────────────────
@@ -246,10 +267,11 @@ Item {
                         color: {
                             if (root.icon !== "") {
                                 return root.taskDone ? Colours.palette.m3primary
-                                                     : Colours.palette.m3onSurfaceVariant
+                                                    : Colours.palette.m3onSurfaceVariant
                             }
                             if (root.taskDone) return Colours.palette.m3primary
                             if (root.taskPartial) return Colours.palette.m3secondary
+                            if (root.nSub === 0) return Colours.palette.m3onSurface
                             return Colours.palette.m3outline
                         }
                         opacity: root.taskDone ? 0.5 : 1
@@ -278,9 +300,13 @@ Item {
 
                     text: root.taskTitle
                     font: Tokens.font.body.large
-                    elide: Text.ElideRight
 
-                    color: root.taskDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+                    wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
+                    color: root.taskDone
+                        ? Colours.palette.m3onSurfaceVariant
+                        : (root.nSub === 0 ? Colours.palette.m3onSurface
+                                            : Colours.palette.m3primary)                    
                     opacity: root.taskDone ? 0.6 : 1
                     Behavior on color { enabled: root.animate; CAnim {} }
 
@@ -379,28 +405,21 @@ Item {
                 // ── Estimated time chip (tasks only) ────────────
                 // Right-aligned with the progress/streak cluster. Hidden
                 // for habits, while editing a subtask-less task (the
-                // estimate is inline in the edit field) and when unset.
+                // ── Minutes chip → timer dropdown ───────────────────
                 RowLayout {
-                    visible: !root.isHabitList
-                        && root.taskDuration > 0
+                    visible: root.taskDuration > 0
                         && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
 
-                    StyledRect {
-                        implicitHeight: 20
-                        implicitWidth: minutesLabel.implicitWidth + Tokens.padding.small * 2
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3surfaceContainerHighest
-
-                        StyledText {
-                            id: minutesLabel
-                            anchors.centerIn: parent
-                            text: `${root.taskDuration}m`
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
+                    TaskTimerChip {
+                        taskId: root.taskData?.todoId ?? ""
+                        taskTitle: root.taskData?.title ?? ""
+                        minutes: root.taskDuration
                     }
                 }
+
+
+
 
                 // ── Progress ────────────────────────────────────
                 RowLayout {
@@ -419,8 +438,8 @@ Item {
                     }
 
                     StyledRect {
-                        implicitWidth: 120
-                        implicitHeight: 4
+                        implicitWidth: 150
+                        implicitHeight: 10
                         radius: Tokens.rounding.full
                         color: Colours.tPalette.m3surfaceContainerHighest
 
@@ -435,6 +454,8 @@ Item {
                         }
                     }
                 }
+
+
 
                // ── Streak (habits only) ────────────────────────
                 RowLayout {
@@ -464,20 +485,25 @@ Item {
 
                     // Best Streak Target Badge (shows when bestStreak exceeds current streak)
                     RowLayout {
-                        visible: root.bestStreak > root.streak
                         spacing: 1
-                        opacity: 0.65
+                        opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
 
                         MaterialIcon {
-                            text: "emoji_events" // Trophy icon for best record target
+                            id: trophy
+                            text: "emoji_events"
                             fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3onSurfaceVariant
+                            color: bestStreakColor
+                            fill: root.streak >= root.bestStreak ? 1 : 0
+
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
 
                         StyledText {
                             text: String(root.bestStreak)
                             font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
+                            color: bestStreakColor
+
+                            Behavior on color { enabled: root.animate; CAnim { duration: 300 } }
                         }
                     }
                 }
@@ -489,6 +515,27 @@ Item {
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
 
+                    // Copy the row's title to the clipboard; icon flips to
+                    // "inventory" for 2s as feedback (Notification.vue idiom).
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: copyTimer.running ? "inventory" : "content_copy"
+                        onClicked: {
+                            Quickshell.clipboardText = root.taskTitle
+                            copyTimer.restart()
+                        }
+                    }
+
+                    // Open the row's link in the browser. Hidden when unset.
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "link"
+                        visible: (root.taskData?.link ?? "") !== ""
+                        onClicked: Qt.openUrlExternally(root.taskData?.link ?? "")
+                    }
+
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -496,6 +543,24 @@ Item {
                         onClicked: {
                             root.selectionRequested(root.taskIndex)
                             root.editingStarted(root.taskId)
+                        }
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "add"
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectionRequested(root.taskIndex)
+                                root.setExpanded(true)
+
+                                root.addingSubtask = true
+                                addSubtaskField.focus = true
+                            }
                         }
                     }
 
@@ -520,6 +585,11 @@ Item {
                             acceptedButtons: Qt.LeftButton
                             onClicked: deleteButton.clicked()
                             onDoubleClicked: root.deleteRequested(root.taskIndex)
+                        }
+
+                        Timer {
+                            id: copyTimer
+                            interval: 2000
                         }
 
                         SequentialAnimation {
@@ -595,13 +665,33 @@ Item {
 
                         readonly property var sub: root.subtasks[index] ?? root.emptySub
 
+                        // ── Nested progress, computed inline from sub.children ──
+                        readonly property int _nNested: sub.children ? sub.children.length : 0
+                        readonly property int _dNested: {
+                            if (!sub.children) return 0
+                            var d = 0
+                            for (var i = 0; i < sub.children.length; i++)
+                                if (sub.children[i].done) d++
+                            return d
+                        }
                         taskData: root.taskData
                         taskIndex: root.taskIndex
                         subtaskData: sub
                         subtaskIndex: index
                         subtaskId: sub.id ?? ""
 
+
                         isHabitList: root.isHabitList
+                        showStreak: root.showStreak && root.isHabitList
+                        subtaskDuration: {
+                            const _t = root.taskMap ? root.taskMap[root.taskId] : null
+                            return _t ? list.getSubtaskDuration(root.taskId, index) : 0
+                        }
+
+                        // ── Nested progress props ──
+                        nSubNested: _nNested
+                        dSubNested: _dNested
+
                         isEditing: root.editingSubId === `${root.taskId}__${sub.id}`
                         isSelected: root.isSelected && root.selectedSubtaskIndex === index
                         nav: root.nav
@@ -657,6 +747,7 @@ Item {
 
                 // ── Add-subtask field ──────────────────────────
                 RowLayout {
+                    visible: root.addingSubtask
                     Layout.fillWidth: true
                     Layout.topMargin: 0
 
@@ -664,11 +755,9 @@ Item {
                         text: "add_circle_outline"
                         fontStyle: Tokens.font.icon.small
                         color: Colours.palette.m3primary
-                        opacity: addSubtaskField.focus ? 1 : 0.5
+                        opacity: 0.6
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 18
-
-                        Behavior on opacity { enabled: root.animate; CAnim {} }
                     }
 
                     StyledTextField {
@@ -705,7 +794,15 @@ Item {
                         Keys.onEscapePressed: {
                             clear()
                             focus = false
+                            root.addingSubtask = false
                             root.subtaskEditingCancelled()
+                        }
+
+                        onVisibleChanged:{
+                            if(visible){
+                                clear()
+                                forceActiveFocus()
+                            }
                         }
                     }
                 }

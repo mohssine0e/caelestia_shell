@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -18,12 +19,21 @@ Item {
     required property int subtaskIndex
     required property string subtaskId
     required property bool isEditing
+
+
+    required property int nSubNested
+    required property int dSubNested
+
     property string editingNestedId: ""
-    // Scope cursor from TaskList: which nested row (if any) is highlighted
-    // while this subtask is selected (-1 = this row itself).
     property int selectedNestedIndex: -1
     property bool isSelected: false
     property bool isHabitList: false
+    property bool showStreak: false
+
+    // Duration for this subtask. Passed in from TaskCard via
+    // list.getSubtaskDuration(todoId, subIdx): sum of children when it has
+    // any, own minutes otherwise (same rule as taskDuration).
+    required property int subtaskDuration
 
     property bool isFirst: false
     property bool isLast: false
@@ -32,13 +42,10 @@ Item {
 
     property bool expanded: false
 
-    // Expansion is owned by TaskNavigationController when one is wired in
-    // (falls back to the local property otherwise).
     property var nav: null
     readonly property bool effectiveExpanded:
         root.nav ? (root.nav.expandedSubtasks[`${root.taskData?.todoId}/${root.subtaskId}`] ?? false) : root.expanded
 
-    // Expansion toggle routed through the controller when wired in.
     function setExpanded(v) {
         if (root.nav)
             root.nav.setSubExpanded(root.taskData?.todoId ?? "", root.subtaskId, v)
@@ -46,28 +53,23 @@ Item {
             root.expanded = v
     }
 
-    // ── Add-child state ─────────────────────────────────────────
     property bool addingChild: false
 
     signal addChildRequested(int taskIdx, int subIdx, string title)
     signal addChildCancelled(int taskIdx, int subIdx)
+
     signal toggleNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal deleteNestedRequested(int taskIdx, int subIdx, int nestedIdx)
     signal renameNestedRequested(int taskIdx, int subIdx, int nestedIdx, string newTitle)
     signal nestedEditingStarted(string nestedId)
     signal nestedEditingCancelled()
 
-    // Dynamic: show the section when there is real data or a pending add field.
-    // (Previously a static 2-row preview.)
     readonly property var nestedChildren: root.subtaskData?.children ?? []
-    readonly property bool effectiveHasChildren:
-        root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
+
+    readonly property bool effectiveHasChildren: root.hasChildren || root.nestedChildren.length > 0 || root.addingChild
     readonly property int visibleChildCount:
         (root.effectiveHasChildren && root.effectiveExpanded) ? Math.max(root.nestedChildren.length, root.addingChild ? 1 : 0) : 0
 
-    // ╔════════════════════════════════════════════════════════════╗
-    // ║  TREE STYLE                                                ║
-    // ╚════════════════════════════════════════════════════════════╝
     readonly property var tree: QtObject {
         readonly property real lineWidth: 2
         readonly property real cornerRadius: 8
@@ -80,12 +82,10 @@ Item {
         readonly property real selectedContentShift: 15
     }
 
-    // ── Derived tree geometry ───────────────────────────────────
     readonly property real contentStartX:
         tree.spineX + tree.elbowLength + tree.contentGap
     readonly property real childSpineX:
         Math.round(contentStartX + parentCheckbox.x + parentCheckbox.width / 2)
-    // Where a child's content (checkbox) would sit
     readonly property real childContentX:
         childSpineX + tree.elbowLength + tree.contentGap
 
@@ -98,24 +98,43 @@ Item {
 
     readonly property bool isDone: root.subtaskData?.done ?? false
     readonly property string title: root.subtaskData?.title ?? ""
+    readonly property int streak: root.subtaskData?.streak ?? 0
+    readonly property int bestStreak: root.subtaskData?.bestStreak ?? 0
+
+    // Same colour ramp as TaskCard, so parent and child read as one system.
+    readonly property color streakColor: {
+        if (root.streak >= 20) return "#fe1d1d"
+        if (root.streak >= 10) return "#FF8C00"
+        if (root.streak >= 3)  return "#FFA500"
+        if (root.streak >= 1)  return Colours.palette.m3primary
+        return Colours.palette.m3outlineVariant
+    }
+    readonly property color bestStreakColor:
+        root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
 
     onSubtaskIdChanged: {
         root.addingChild = false
     }
 
     readonly property string editId: `${root.taskData.todoId}__${root.subtaskId}`
-    readonly property string editPrefill: `${root.title} @${root.subtaskData?.minutes || 0}`
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + link through a rename; only the
+        // pieces that actually exist are appended.
+        const parts = [root.title]
+        parts.push("@" + (root.subtaskData?.minutes || 0))
+        const link = root.subtaskData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
     implicitHeight: mainCol.implicitHeight
     Layout.fillWidth: true
 
-    // ── TREE LINES ──────────────────────────────────────────────
     TreeConnector {
         anchors.fill: parent
         rowHeight: rowContainer.height
         spineX: root.tree.spineX
         isLast: root.isLast
-        // showDot: !root.effectiveHasChildren
         showDot: true
         selected: root.isSelected
 
@@ -134,7 +153,6 @@ Item {
         anchors.top: parent.top
         spacing: 0
 
-        // ── THIS ROW ────────────────────────────────────────────
         Item {
             id: rowContainer
             Layout.fillWidth: true
@@ -142,7 +160,6 @@ Item {
 
             HoverHandler { id: subRowHover }
 
-            // ── Content Row ─────────────────────────────────────
             RowLayout {
                 id: subRow
                 anchors.left: parent.left
@@ -154,35 +171,43 @@ Item {
 
                 Behavior on anchors.leftMargin { Anim { type: Anim.FastSpatial } }
 
-                // ── Checkbox ────────────────────────────────────
                 MaterialIcon {
                     id: parentCheckbox
-                    text: root.isDone ? "check_box" : "check_box_outline_blank"
+                    text: root.effectiveHasChildren
+                        ? (root.isDone ? "check_box" : "check_box_outline_blank")
+                        : (root.isDone ? "check_circle" : "radio_button_unchecked")
                     fill: root.isDone ? 1 : 0
                     font: Tokens.font.icon.small
-                    color: Colours.palette.m3primary
+                    color: (!root.effectiveHasChildren && !root.isDone)
+                            ? Colours.palette.m3onSurface
+                            : Colours.palette.m3primary
                     opacity: root.isDone ? 0.5 : 1
                     Behavior on color { CAnim {} }
 
                     MouseArea {
                         anchors.fill: parent
                         anchors.margins: -4
-                        cursorShape: Qt.PointingHandCursor
+                        cursorShape: root.effectiveHasChildren ? Qt.ArrowCursor : Qt.PointingHandCursor
+                        enabled: !root.effectiveHasChildren
                         onClicked: {
-                            root.toggleRequested(root.taskIndex, root.subtaskIndex)
-                            root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                            if (!root.effectiveHasChildren) {
+                                root.toggleRequested(root.taskIndex, root.subtaskIndex)
+                                root.selectionRequested(root.taskIndex, root.subtaskIndex)
+                            }
                         }
                     }
                 }
 
-                // ── Title ───────────────────────────────────────
                 StyledText {
                     visible: !root.isEditing
                     Layout.fillWidth: true
                     text: root.title
                     font: Tokens.font.body.medium
-                    elide: Text.ElideRight
-                    color: root.isDone ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+                    wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
+
+                    color: root.isDone ? Colours.palette.m3onSurfaceVariant
+                        : (root.effectiveHasChildren ? Colours.palette.m3primary : Colours.palette.m3onSurface)
                     opacity: root.isDone ? 0.6 : 1
                     Behavior on color { CAnim {} }
 
@@ -209,7 +234,6 @@ Item {
                     }
                 }
 
-                // ── Edit Field ──────────────────────────────────
                 StyledTextField {
                     visible: root.isEditing
                     Layout.fillWidth: true
@@ -266,36 +290,124 @@ Item {
                             commitEdit()
                     }
                 }
+            //    // ── Estimated time: clock + minutes stacked ────────────────
+            //     StyledText {
+            //         visible: !root.isEditing && root.subtaskDuration > 0
+            //         Layout.alignment: Qt.AlignVCenter
 
-                // ── Estimated time chip ─────────────────────────
+            //         text: root.subtaskDuration >= 60
+            //             ? `${Math.floor(root.subtaskDuration / 60)}h${root.subtaskDuration % 60 ? `${root.subtaskDuration % 60}` : ""}`
+            //             : `${root.subtaskDuration}m`
+            //         font: Tokens.font.label.small
+            //         color: Colours.palette.m3onSurfaceVariant
+            //         opacity: 0.7
+            //     }
+
                 RowLayout {
-                    visible: !root.isHabitList && !root.isEditing && (root.subtaskData?.minutes || 0) > 0
+                    visible: root.subtaskDuration > 0
+                        && !(root.nSub === 0 && root.isEditing)
                     Layout.alignment: Qt.AlignVCenter
 
-                    StyledRect {
-                        implicitHeight: 20
-                        implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3surfaceContainerHighest
+                    TaskTimerChip {
+                        taskId: root.subtaskId || `${root.taskData?.todoId ?? ""}/${root.subtaskIndex}`
+                        taskTitle: root.subtaskData?.title ?? root.taskData?.title ?? ""
+                        minutes: root.subtaskDuration
+                    }
+                }
 
+                RowLayout {
+                    visible: root.nSubNested > 0 && !root.isEditing
+                    spacing: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledText {
+                        text: `${root.dSubNested}/${root.nSubNested}`
+                        font: Tokens.font.body.small
+                        color: root.isDone ? Colours.palette.m3primary
+                                        : Colours.palette.m3onSurfaceVariant
+                        opacity: 0.7
+                        Behavior on color { CAnim {} }
+                    }
+                }
+
+                // ── Streak (habits only) ────────────────────────
+                RowLayout {
+                    id: streakBadge
+                    visible: root.showStreak
+                             && (root.streak > 0 || root.bestStreak > 0)
+                             && !root.isEditing
+                    Layout.leftMargin: Tokens.spacing.small
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 4
+
+                    // Current streak indicator
+                    RowLayout {
+                        spacing: 2
+                        MaterialIcon {
+                            text: "local_fire_department"
+                            fill: 1
+                            fontStyle: Tokens.font.icon.small
+                            color: root.streakColor
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
                         StyledText {
-                            id: subMinutesLabel
-                            anchors.centerIn: parent
-                            text: `${root.subtaskData?.minutes || 0}m`
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurfaceVariant
+                            text: String(root.streak)
+                            font: Tokens.font.label.medium
+                            color: root.streakColor
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
+                    }
+
+                    // Best streak badge
+                    RowLayout {
+                        spacing: 1
+                        opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
+
+                        MaterialIcon {
+                            text: "emoji_events"
+                            fontStyle: Tokens.font.icon.small
+                            color: root.bestStreakColor
+                            fill: root.streak >= root.bestStreak ? 1 : 0
+                            Behavior on color { CAnim { duration: 300 } }
+                        }
+                        StyledText {
+                            text: String(root.bestStreak)
+                            font: Tokens.font.label.small
+                            color: root.bestStreakColor
+                            Behavior on color { CAnim { duration: 300 } }
                         }
                     }
                 }
 
-                // ── Action Buttons ──────────────────────────────
+
+                // ── Actions ─────────────────────────────────────
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0
+                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
-                    // Add-child button
+                    // Copy this subtask's title to the clipboard; icon flips to
+                    // "inventory" for 2s as feedback (Notification.vue idiom).
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: copyTimer.running ? "inventory" : "content_copy"
+                        onClicked: {
+                            Quickshell.clipboardText = root.title
+                            copyTimer.restart()
+                        }
+                    }
+
+                    // Open the subtask's link in the browser. Hidden when unset.
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "link"
+                        visible: (root.subtaskData?.link ?? "") !== ""
+                        onClicked: Qt.openUrlExternally(root.subtaskData?.link ?? "")
+                    }
+
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -308,12 +420,11 @@ Item {
                                 root.selectionRequested(root.taskIndex, root.subtaskIndex)
                                 root.setExpanded(true)
                                 root.addingChild = true
-                                addChildField.focus=true
+                                addChildField.focus = true
                             }
                         }
                     }
 
-                    // Edit button
                     IconButton {
                         type: IconButton.Text
                         font: Tokens.font.icon.small
@@ -329,7 +440,6 @@ Item {
                         }
                     }
 
-                    // Delete button
                     IconButton {
                         id: subDeleteButton
                         type: IconButton.Text
@@ -352,6 +462,11 @@ Item {
                             onDoubleClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
                         }
 
+                        Timer {
+                            id: copyTimer
+                            interval: 2000
+                        }
+
                         SequentialAnimation {
                             id: shakeAnim
                             onFinished: {
@@ -370,7 +485,6 @@ Item {
             }
         }
 
-        // ── NESTED ROWS (dynamic: one level from subtaskData.children) ──
         ColumnLayout {
             id: nestedColumn
             Layout.fillWidth: true
@@ -395,8 +509,11 @@ Item {
                     parentSubtaskId: root.subtaskId
                     taskIndex: root.taskIndex
                     subtaskIndex: root.subtaskIndex
+
                     isHabitList: root.isHabitList
+                    showStreak: root.showStreak
                     isSelected: root.isSelected && root.selectedNestedIndex === index
+
                     isEditing: root.editingNestedId === (modelData?.id ?? "")
                     isFirst: index === 0
                     isLast: index === nestedRepeater.count - 1
@@ -421,13 +538,11 @@ Item {
                 }
             }
 
-            // ── Add-child inline input ──────────────────────────
             RowLayout {
                 visible: root.addingChild
                 Layout.fillWidth: true
                 Layout.leftMargin: root.childContentX
                 Layout.topMargin: 0
-
 
                 MaterialIcon {
                     text: "add_circle_outline"
@@ -452,10 +567,8 @@ Item {
                     leftPadding: 5
                     rightPadding: 5
 
-
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                            // Ignore pure "@minutes" input — it has no title.
                             if (TitleParse.hasTitle(text)) {
                                 root.addChildRequested(root.taskIndex, root.subtaskIndex, text)
                                 clear()
@@ -463,7 +576,7 @@ Item {
                             event.accepted = true
                         }
                     }
-                    Keys.onEscapePressed:{
+                    Keys.onEscapePressed: {
                         clear()
                         focus = false
                         root.addingChild = false

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import "TitleParse.js" as TitleParse
 import Caelestia
 import Caelestia.Config
@@ -22,6 +23,8 @@ Item {
     property bool isSelected: false
     property bool isEditing: false
 
+    property bool showStreak: false
+
     property bool isFirst: true
     property bool isLast: true
 
@@ -41,9 +44,29 @@ Item {
     // Where this row's content starts (same formula as the parent).
     readonly property real contentStartX: treeSpineX + tree.elbowLength + tree.contentGap
 
-    readonly property bool isDone: root.nestedData?.done ?? false
+        readonly property bool isDone: root.nestedData?.done ?? false
     readonly property string nestedId: root.nestedData?.id ?? ""
-    readonly property string editPrefill: `${root.nestedData?.title ?? ""} @${root.nestedData?.minutes || 0}`
+    readonly property int streak: root.nestedData?.streak ?? 0
+    readonly property int bestStreak: root.nestedData?.bestStreak ?? 0
+
+    readonly property color streakColor: {
+        if (root.streak >= 20) return "#fe1d1d"
+        if (root.streak >= 10) return "#FF8C00"
+        if (root.streak >= 3)  return "#FFA500"
+        if (root.streak >= 1)  return Colours.palette.m3primary
+        return Colours.palette.m3outlineVariant
+    }
+    readonly property color bestStreakColor:
+        root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+    readonly property string editPrefill: (function() {
+        // Round-trips title + @minutes + link through a rename; only the
+        // pieces that actually exist are appended.
+        const parts = [root.nestedData?.title ?? ""]
+        parts.push("@" + (root.nestedData?.minutes || 0))
+        const link = root.nestedData?.link || ""
+        if (link) parts.push("!" + link)
+        return parts.join(" ")
+    })()
 
     function commitRename(text) {
         // Ignore pure "@minutes" edits — they carry no title.
@@ -92,9 +115,10 @@ Item {
 
         // Checkbox
         MaterialIcon {
-            text: root.isDone ? "check_box" : "check_box_outline_blank"
+            text: root.isDone ? "check_circle" : "radio_button_unchecked"
             fontStyle: Tokens.font.icon.small
-            color: Colours.palette.m3primary
+            color: root.isDone ? Colours.palette.m3primary : Colours.palette.m3onSurface
+
             opacity: 0.9
 
             TapHandler {
@@ -109,8 +133,11 @@ Item {
             Layout.fillWidth: true
             text: root.nestedData?.title ?? ""
             font: Tokens.font.body.medium
-            elide: Text.ElideRight
-            color: root.isDone ? Colours.palette.m3outline : Colours.palette.m3secondary
+            elide: root.isSelected ? Text.ElideNone : Text.ElideRight
+            wrapMode: root.isSelected ? Text.Wrap : Text.NoWrap
+
+            color: root.isDone ? Colours.palette.m3outline : Colours.palette.m3onSurface
+
             opacity: root.isDone ? 0.6 : 0.8
 
             TapHandler {
@@ -161,24 +188,62 @@ Item {
             }
         }
 
-        // Minutes chip
+        // Minutes chip → timer dropdown
         RowLayout {
             visible: !root.isHabitList
                      && (root.nestedData?.minutes || 0) > 0
             Layout.alignment: Qt.AlignVCenter
 
-            StyledRect {
-                implicitHeight: 20
-                implicitWidth: subMinutesLabel.implicitWidth + Tokens.padding.small * 2
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3surfaceContainerHighest
+            TaskTimerChip {
+                taskId: root.nestedId || `${root.parentSubtaskId}/${root.nestedIndex}`
+                taskTitle: root.nestedData?.title ?? ""
+                minutes: root.nestedData?.minutes || 0
+            }
+        }
 
+                // ── Streak (habits only) ────────────────────────────────
+        RowLayout {
+            id: streakBadge
+            visible: root.showStreak
+                     && (root.streak > 0 || root.bestStreak > 0)
+                     && !root.isEditing
+            Layout.leftMargin: Tokens.spacing.small
+            Layout.alignment: Qt.AlignVCenter
+            spacing: 4
+
+            RowLayout {
+                spacing: 2
+                MaterialIcon {
+                    text: "local_fire_department"
+                    fill: 1
+                    fontStyle: Tokens.font.icon.small
+                    color: root.streakColor
+                    Behavior on color { CAnim { duration: 300 } }
+                }
                 StyledText {
-                    id: subMinutesLabel
-                    anchors.centerIn: parent
-                    text: `${root.nestedData?.minutes || 0}m`
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
+                    text: String(root.streak)
+                    font: Tokens.font.label.medium
+                    color: root.streakColor
+                    Behavior on color { CAnim { duration: 300 } }
+                }
+            }
+
+            RowLayout {
+                spacing: 1
+                opacity: root.streak >= root.bestStreak ? 0.8 : 0.3
+
+                MaterialIcon {
+                    text: "emoji_events"
+                    fontStyle: Tokens.font.icon.small
+                    color: root.bestStreakColor
+                    fill: root.streak >= root.bestStreak ? 1 : 0
+                    Behavior on color { CAnim { duration: 300 } }
+                }
+                StyledText {
+                    text: String(root.bestStreak)
+                    font: Tokens.font.label.small
+                    color: root.bestStreakColor
+                    Behavior on color { CAnim { duration: 300 } }
                 }
             }
         }
@@ -186,8 +251,29 @@ Item {
         // Actions (hover-reveal only)
         RowLayout {
             spacing: 0
-            opacity: (hover.hovered || root.isSelected) ? 1 : 0
+            opacity: (hover.hovered || root.isSelected) ? 1 : 0.3
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
+
+            // Copy this nested row's title to the clipboard; icon flips to
+            // "inventory" for 2s as feedback (Notification.vue idiom).
+            IconButton {
+                type: IconButton.Text
+                font: Tokens.font.icon.small
+                icon: copyTimer.running ? "inventory" : "content_copy"
+                onClicked: {
+                    Quickshell.clipboardText = root.nestedData?.title ?? ""
+                    copyTimer.restart()
+                }
+            }
+
+            // Open the nested row's link in the browser. Hidden when unset.
+            IconButton {
+                type: IconButton.Text
+                font: Tokens.font.icon.small
+                icon: "link"
+                visible: (root.nestedData?.link ?? "") !== ""
+                onClicked: Qt.openUrlExternally(root.nestedData?.link ?? "")
+            }
 
             IconButton {
                 type: IconButton.Text
@@ -202,5 +288,10 @@ Item {
                 onClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex, root.nestedIndex)
             }
         }
+    }
+
+    Timer {
+        id: copyTimer
+        interval: 2000
     }
 }

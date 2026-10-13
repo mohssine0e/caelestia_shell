@@ -21,20 +21,20 @@ Item {
     implicitHeight: row.implicitHeight
 
 
+    // Background and border for the switcher
+    Rectangle {
+        anchors.fill: row
+        color: "transparent"
+        radius: Tokens.rounding.small
+        border.width: 1
+        border.color: Colours.palette.m3secondary
+    }
+
     RowLayout {
         id: row
         anchors.centerIn: parent
         spacing: 0
         clip: true
-        
-        // Background and border for the switcher
-        Rectangle {
-            anchors.fill: parent
-            color: "transparent"
-            radius: Tokens.rounding.small
-            border.width: 1
-            border.color: Colours.palette.m3secondary
-        }
 
         Repeater {
             model: root.model
