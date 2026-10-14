@@ -2,6 +2,7 @@
 import sys
 import json
 import os
+import re
 import time
 import urllib.request
 import urllib.parse
@@ -206,7 +207,170 @@ def classify_error(err_str, http_code=None):
         "message": err_str or "An error occurred while generating response."
     }
 
+PROFILE_PATH = os.path.expanduser("~/.config/caelestia/assistant_profile.json")
 HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
+
+DEFAULT_PROFILE = {
+    "os": "Linux (Hyprland)",
+    "languages": ["Python", "QML / Qt", "Bash"],
+    "style_preference": "Concise, standard library first, minimal dependencies",
+    "bilingual": "English for technical terms/code, Arabic for natural translation/explanation",
+    "custom_notes": "",
+    "last_updated": ""
+}
+
+def load_profile():
+    if os.path.exists(PROFILE_PATH):
+        try:
+            with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    prof = DEFAULT_PROFILE.copy()
+                    prof.update(data)
+                    return prof
+        except Exception:
+            pass
+    return DEFAULT_PROFILE.copy()
+
+def save_profile(profile_data):
+    os.makedirs(os.path.dirname(PROFILE_PATH), exist_ok=True)
+    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+        json.dump(profile_data, f, indent=2)
+    return {"success": True}
+
+def get_profile_prompt_prefix():
+    profile = load_profile()
+    parts = []
+    if profile.get("os"):
+        parts.append(f"OS: {profile['os']}")
+    langs = profile.get("languages", [])
+    if isinstance(langs, list) and langs:
+        parts.append(f"Tech: {', '.join(langs)}")
+    elif isinstance(langs, str) and langs.strip():
+        parts.append(f"Tech: {langs.strip()}")
+    if profile.get("style_preference"):
+        parts.append(f"Style: {profile['style_preference']}")
+    if profile.get("bilingual"):
+        parts.append(f"Language: {profile['bilingual']}")
+    if profile.get("custom_notes"):
+        parts.append(f"Notes: {profile['custom_notes']}")
+
+    if not parts:
+        return ""
+    return f"[Developer Profile Context: {' | '.join(parts)}]\n"
+
+STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
+    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
+    "can", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing",
+    "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't",
+    "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers",
+    "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in",
+    "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't",
+    "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought",
+    "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll",
+    "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their",
+    "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll",
+    "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very",
+    "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's",
+    "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
+    "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your",
+    "yours", "yourself", "yourselves"
+}
+
+CODE_TOKEN_PATTERN = re.compile(
+    r'(?:'
+    r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+'
+    r'|[a-zA-Z0-9]+_[a-zA-Z0-9_]+'
+    r'|[a-z]+[A-Z][a-zA-Z0-9]*'
+    r'|[A-Z][a-z]+[A-Z][a-zA-Z0-9]*'
+    r'|--[a-zA-Z0-9_-]+'
+    r'|[A-Z]{2,}(?:_[A-Z0-9]+)*'
+    r')'
+)
+
+def extract_keywords(text):
+    if not text:
+        return set()
+    words = re.findall(r'[a-zA-Z0-9_]+', text.lower())
+    return {w for w in words if len(w) >= 3 and w not in STOP_WORDS}
+
+def extract_code_tokens(text):
+    if not text:
+        return set()
+    matches = CODE_TOKEN_PATTERN.findall(text)
+    return {m for m in matches if len(m) >= 3}
+
+def find_relevant_history(current_text, current_prompt):
+    if not os.path.exists(HISTORY_PATH):
+        return None
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception:
+        return None
+
+    if not isinstance(history, list) or not history:
+        return None
+
+    query_combined = f"{current_prompt or ''} {current_text or ''}".strip()
+    if len(query_combined) < 5:
+        return None
+
+    query_code = extract_code_tokens(query_combined)
+    query_words = extract_keywords(query_combined)
+
+    best_item = None
+    best_score = 0.0
+
+    # Consider up to 100 most recent history items
+    for item in history[:100]:
+        # Strictly respect 'Forget this' exclusion toggle
+        if item.get("context_excluded"):
+            continue
+
+        item_text = (item.get("text") or "").strip()
+        item_prompt = (item.get("prompt") or "").strip()
+        item_answer = (item.get("answer") or "").strip()
+        item_combined = f"{item_prompt} {item_text}".strip()
+
+        if not item_combined or not item_answer:
+            continue
+
+        # Skip if identical query (avoid self-reference on repeated runs)
+        if item_combined == query_combined or (item_text == current_text and item_prompt == current_prompt):
+            continue
+
+        item_code = extract_code_tokens(item_combined)
+        item_words = extract_keywords(item_combined)
+
+        shared_code = query_code.intersection(item_code)
+        shared_words = query_words.intersection(item_words)
+        union_words = query_words.union(item_words)
+        jaccard = len(shared_words) / len(union_words) if union_words else 0.0
+
+        is_match = False
+        score = 0.0
+
+        # Strict Threshold Heuristic:
+        # 1. >= 2 shared technical code tokens
+        if len(shared_code) >= 2:
+            is_match = True
+            score = 1.0 + (len(shared_code) * 0.5) + jaccard
+        # 2. 1 shared code token + Jaccard similarity >= 0.40
+        elif len(shared_code) == 1 and jaccard >= 0.40:
+            is_match = True
+            score = 0.8 + jaccard
+        # 3. Jaccard similarity >= 0.65 with >= 3 shared keywords
+        elif jaccard >= 0.65 and len(shared_words) >= 3:
+            is_match = True
+            score = 0.6 + jaccard
+
+        if is_match and score > best_score:
+            best_score = score
+            best_item = item
+
+    return best_item
 
 def organize_history():
     if not os.path.exists(HISTORY_PATH):
@@ -256,13 +420,27 @@ def organize_history():
         return
 
     system_instruction = (
-        "You are an expert knowledge organizer. Analyze the provided list of reading/learning queries. "
-        "Generate 3 to 7 concise, high-level topical lowercase tags (e.g. 'python', 'regex', 'vocabulary', 'linux', 'science', 'math') "
-        "and assign 1 or 2 relevant tags to each item ID. "
+        "You are an expert knowledge organizer and developer mentor. Analyze the provided list of reading/learning queries.\n"
+        "1. Generate 3 to 7 concise, high-level topical lowercase tags (e.g. 'python', 'regex', 'vocabulary', 'linux', 'science', 'math') "
+        "and assign 1 or 2 relevant tags to each item ID.\n"
+        "2. Based on the queries, PROPOSE (do NOT force) an updated developer profile reflecting their tools, languages, and style.\n"
         "Respond ONLY with valid, raw JSON matching this schema without markdown codeblocks:\n"
-        "{\"tags\": [\"tag1\", \"tag2\"], \"mapping\": {\"id1\": [\"tag1\"], \"id2\": [\"tag2\"]}}"
+        "{\n"
+        "  \"tags\": [\"tag1\", \"tag2\"],\n"
+        "  \"mapping\": {\"id1\": [\"tag1\"], \"id2\": [\"tag2\"]},\n"
+        "  \"proposed_profile\": {\n"
+        "    \"os\": \"...\",\n"
+        "    \"languages\": [\"...\"],\n"
+        "    \"style_preference\": \"...\",\n"
+        "    \"bilingual\": \"...\",\n"
+        "    \"custom_notes\": \"...\"\n"
+        "  }\n"
+        "}"
     )
-    user_payload = json.dumps(items_to_tag)
+    user_payload = json.dumps({
+        "current_profile": load_profile(),
+        "items": items_to_tag
+    })
 
     response_text = ""
     for prov_name, key in providers:
@@ -272,7 +450,7 @@ def organize_history():
                 for model_name in candidate_models:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                     req_data = json.dumps({
-                        "contents": [{"parts": [{"text": f"{system_instruction}\n\nItems:\n{user_payload}"}]}],
+                        "contents": [{"parts": [{"text": f"{system_instruction}\n\nItems and Current Profile:\n{user_payload}"}]}],
                         "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
                     }).encode("utf-8")
                     req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
@@ -293,7 +471,7 @@ def organize_history():
                     "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": f"Items:\n{user_payload}"}
+                        {"role": "user", "content": f"Items and Current Profile:\n{user_payload}"}
                     ],
                     "temperature": 0.2,
                     "response_format": {"type": "json_object"}
@@ -324,6 +502,7 @@ def organize_history():
         parsed = json.loads(clean_text)
         tags = parsed.get("tags", [])
         mapping = parsed.get("mapping", {})
+        proposed_profile = parsed.get("proposed_profile")
 
         for item in history:
             item_id = str(item.get("id"))
@@ -333,9 +512,129 @@ def organize_history():
         with open(HISTORY_PATH, "w", encoding="utf-8") as f:
             json.dump(history, f, indent=2)
 
-        emit({"type": "organize_done", "tags": tags, "mapping": mapping})
+        emit({
+            "type": "organize_done",
+            "tags": tags,
+            "mapping": mapping,
+            "proposed_profile": proposed_profile
+        })
     except Exception as e:
         emit({"type": "error", "message": f"Failed to parse organization tags: {e}"})
+
+def generate_challenge(item_json_str):
+    try:
+        item = json.loads(item_json_str)
+    except Exception as e:
+        emit({"type": "error", "message": f"Invalid item JSON: {e}"})
+        return
+
+    config = load_config()
+    gemini_key = config.get("gemini_key", "").strip()
+    groq_key = config.get("groq_key", "").strip()
+    primary = config.get("primary", "gemini").lower()
+
+    providers = []
+    if primary == "groq":
+        if groq_key: providers.append(("groq", groq_key))
+        if gemini_key: providers.append(("gemini", gemini_key))
+    else:
+        if gemini_key: providers.append(("gemini", gemini_key))
+        if groq_key: providers.append(("groq", groq_key))
+
+    if not providers:
+        emit({"type": "error", "error_type": "auth", "message": "No API key configured."})
+        return
+
+    snippet = (item.get("text") or "")[:400].strip()
+    prompt = (item.get("prompt") or "")[:200].strip()
+    answer = (item.get("answer") or "")[:800].strip()
+
+    system_instruction = (
+        "You are an expert tutor creating a practical concept-check challenge for active recall.\n"
+        "Given the past query, context, and answer:\n"
+        "Generate ONE new, concise conceptual question testing the user's understanding of the underlying principle or edge case.\n"
+        "Do NOT quiz trivial phrasing from the past answer; test actual conceptual mastery.\n"
+        "Respond ONLY with valid, raw JSON matching this schema without markdown codeblocks:\n"
+        "{\n"
+        "  \"question\": \"The test question...\",\n"
+        "  \"hint\": \"A brief 1-sentence hint...\",\n"
+        "  \"solution\": \"The direct answer and explanation...\"\n"
+        "}"
+    )
+
+    user_payload = json.dumps({
+        "context_snippet": snippet,
+        "query_prompt": prompt,
+        "reference_answer": answer
+    })
+
+    response_text = ""
+    for prov_name, key in providers:
+        try:
+            if prov_name == "gemini":
+                candidate_models = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
+                for model_name in candidate_models:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+                    req_data = json.dumps({
+                        "contents": [{"parts": [{"text": f"{system_instruction}\n\nTarget Material:\n{user_payload}"}]}],
+                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
+                    }).encode("utf-8")
+                    req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
+                    try:
+                        with urllib.request.urlopen(req, timeout=15) as resp:
+                            resp_json = json.loads(resp.read().decode("utf-8"))
+                            candidates = resp_json.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    response_text = parts[0].get("text", "")
+                                    break
+                    except Exception:
+                        continue
+            elif prov_name == "groq":
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                req_data = json.dumps({
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": f"Target Material:\n{user_payload}"}
+                    ],
+                    "temperature": 0.3,
+                    "response_format": {"type": "json_object"}
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=req_data, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"
+                }, method="POST")
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    resp_json = json.loads(resp.read().decode("utf-8"))
+                    choices = resp_json.get("choices", [])
+                    if choices:
+                        response_text = choices[0].get("message", {}).get("content", "")
+
+            if response_text:
+                break
+        except Exception:
+            continue
+
+    if not response_text:
+        emit({"type": "error", "message": "Failed to generate concept challenge."})
+        return
+
+    try:
+        clean_text = response_text.strip()
+        if clean_text.startswith("```"):
+            clean_text = clean_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(clean_text)
+        emit({
+            "type": "challenge_done",
+            "item_id": str(item.get("id")),
+            "question": parsed.get("question", ""),
+            "hint": parsed.get("hint", ""),
+            "solution": parsed.get("solution", "")
+        })
+    except Exception as e:
+        emit({"type": "error", "message": f"Failed to parse challenge question: {e}"})
 
 def main():
     if len(sys.argv) < 2:
@@ -350,8 +649,22 @@ def main():
         emit(save_config(gemini_key, groq_key))
         sys.exit(0)
 
+    if cmd == "save_profile":
+        profile_json_str = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        try:
+            profile_data = json.loads(profile_json_str)
+            emit(save_profile(profile_data))
+        except Exception as e:
+            emit({"type": "error", "message": f"Failed to save profile: {e}"})
+        sys.exit(0)
+
     if cmd == "organize":
         organize_history()
+        sys.exit(0)
+
+    if cmd == "challenge":
+        item_json = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        generate_challenge(item_json)
         sys.exit(0)
 
     action = cmd
@@ -413,6 +726,23 @@ def main():
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
         user_payload = text_to_process
 
+    profile_prefix = get_profile_prompt_prefix()
+    if profile_prefix:
+        system_instruction = f"{profile_prefix}\n{system_instruction}"
+
+    recalled_item = find_relevant_history(text_to_process, custom_prompt)
+    recalled_meta = None
+    if recalled_item:
+        prior_title = (recalled_item.get("prompt") or recalled_item.get("text") or "")[:80].replace("\n", " ").strip()
+        prior_ans = (recalled_item.get("answer") or "")[:280].replace("\n", " ").strip()
+        context_injection = f"[Relevant Prior Context: User previously worked on \"{prior_title}\". Prior resolution: \"{prior_ans}\"]\n"
+        system_instruction = f"{context_injection}{system_instruction}"
+        recalled_meta = {
+            "id": str(recalled_item.get("id")),
+            "title": prior_title,
+            "timestamp": recalled_item.get("timestamp", 0)
+        }
+
     providers = []
     if primary == "groq":
         if groq_key: providers.append(("groq", groq_key, "Groq Llama 3.3"))
@@ -434,7 +764,8 @@ def main():
                 "type": "start",
                 "provider": prov_label,
                 "truncated": is_truncated,
-                "truncated_at": effective_limit
+                "truncated_at": effective_limit,
+                "recalled_from": recalled_meta
             })
             chosen_provider = prov_label
 
@@ -461,7 +792,8 @@ def main():
             "provider": chosen_provider,
             "latency_ms": elapsed_ms,
             "truncated": is_truncated,
-            "truncated_at": effective_limit
+            "truncated_at": effective_limit,
+            "recalled_from": recalled_meta
         })
     else:
         err_info = classify_error(last_err_str, last_http_code)

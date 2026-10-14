@@ -46,8 +46,25 @@ A fast, floating AI assistant heads-up display built for Caelestia on Quickshell
   - Runs strictly when the user clicks the organize icon.
   - LLM categorizes all queries into concise semantic tags (e.g. `#python`, `#regex`, `#arabic-vocab`, `#errors`).
   - Dynamic tag filter chips bar at top (`All`, `Starred`, and dynamic AI tags).
+- **Search & Tag Deletion**:
+  - Integrated search box (`/` shortcut) filtering queries, answers, snippet text, and tags in real time.
+  - Global tag deletion via the tag bar and item-level tag removal on expanded cards.
+- **Active Recall Review Mode (`school` icon)**:
+  - Accessible via the `school` header button whenever you have starred items (displays live star count badge).
+  - **Zero-Token Standard Review**: Flips through your starred items as flashcards. Tests your recall of the saved question/highlight, and reveals the stored answer on demand for free.
+  - **AI Concept Challenge (`psychology` button)**: Generates a brand new conceptual question testing your understanding of the underlying principle or edge case rather than testing verbatim phrasing. Includes a toggleable hint and solution reveal.
+  - **Rate-Capped Anti-Spam Guardrails**:
+    - **In-Memory Cache**: Challenges are cached per item ID so revisiting cards consumes 0 additional tokens.
+    - **15-Second Cooldown**: Enforces a countdown cooldown between new challenge generations to prevent accidental spam.
+  - **Card Shuffle**: Randomize card order for optimal active recall practice.
 
-### 6. Dual-Mode Input (Context-Bound & Standalone)
+### 6. Developer Dossier (`assistant_profile.json`)
+- **Dedicated Personalization**: Maintains a compact, editable user profile (~30–40 tokens injected into system instructions) matching your OS, tools, coding style, and languages.
+- **HUD Dossier View (`badge` icon)**: Flip into the Dossier view inside the same window to see what the assistant knows about you and when it was last updated.
+- **Safe AI Proposals (Never Silently Overwrites)**: When running AI Organize, the model proposes profile updates based on your recent activity. A prominent banner displays the diff with **`[Accept Changes]`** and **`[Discard]`** buttons. The active profile remains untouched until you explicitly accept.
+- **Direct Editing & Reset**: Click the `edit` button to modify any field directly (Environment, Languages, Coding Style, Bilingual Preferences, Custom Directives) or `restart_alt` to restore clean defaults.
+
+### 7. Dual-Mode Input (Context-Bound & Standalone)
 - **Preset Quick Actions (1–5)**:
   1. **Translate**: Auto-translates foreign text to Arabic (or English if the source text is Arabic).
   2. **Explain**: Breaks down difficult terms, jargon, or concepts in plain, beginner-friendly terms.
@@ -58,7 +75,23 @@ A fast, floating AI assistant heads-up display built for Caelestia on Quickshell
   - Contextual: Ask specific follow-ups about the captured text (e.g. *"What does paragraph 2 imply?"*).
   - Standalone: Ask questions independently even when no text is selected (e.g. *"What is the capital of Iceland?"*). The assistant answers directly without demanding prior selection.
 
-### 7. Performance & Error Handling
+### 7. High-Threshold Local Recall & "Forget This" Exclusion Toggle
+- **Zero-Token Local Context Matching**: When you ask a question or process text, the assistant examines your past history locally (0 tokens, pure Python standard library regex & set math) to check if you previously solved a closely related technical problem.
+- **Domain Code Token Heuristic (No Naive Word Lists)**:
+  - Avoids false recall by strictly extracting domain symbols: PascalCase (`FileView`, `SplitParser`), camelCase (`selectedText`), snake_case (`save_history`), qualified dot-notation (`Qt.palette`), uppercase constants (`SIGSEGV`), and CLI flags (`--type`).
+  - Strict qualification criteria:
+    - $\ge 2$ shared technical code tokens, OR
+    - $1$ shared code token + Jaccard similarity $\ge 0.40$ (on non-stopword keywords), OR
+    - Jaccard similarity $\ge 0.65$ with $\ge 3$ shared keywords.
+- **"Forget This" Exclusion Toggle (`visibility` / `visibility_off`)**:
+  - Every history item features an exclusion toggle button on both the summary row and the expanded card footer.
+  - Toggling an item to **"Excluded from AI context"** immediately prevents it from ever being recalled or injected as context for future queries.
+  - Excluded cards visually reflect their state with subtle warning borders and dedicated status pills.
+- **HUD Transparency Attribution Badge**:
+  - Whenever past context is injected into a query, the HUD renders an attribution pill above the response: `Context recalled from: "<title>"`.
+  - Includes a 1-click dismiss button (`close`) so the user always has full visibility and control over what influenced the answer.
+
+### 8. Performance & Error Handling
 - **Instant Cache**: Identical queries (action + snippet) are cached in memory for zero-latency instant switching.
 - **Categorized Error Badges**: Differentiates between API key errors (`vpn_key`), network timeouts (`wifi_off`), rate limits (`hourglass_empty`), and missing text (`content_paste_off`).
 - **On-HUD Key Configuration**: Built-in credential inputs to set Gemini or Groq keys without touching terminal configuration.

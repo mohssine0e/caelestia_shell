@@ -26,7 +26,42 @@ Singleton {
     property var history: []
     property bool isOrganizing: false
     property string activePrompt: ""
+    property var recalledContext: null
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
+
+    // Developer Dossier / Profile
+    readonly property var defaultProfile: ({
+        "os": "Linux (Hyprland)",
+        "languages": ["Python", "QML / Qt", "Bash"],
+        "style_preference": "Concise, standard library first, minimal dependencies",
+        "bilingual": "English for technical terms/code, Arabic for natural translation/explanation",
+        "custom_notes": "",
+        "last_updated": "2026-10-14"
+    })
+    property var profile: defaultProfile
+    property var proposedProfile: null
+    readonly property string profilePath: Quickshell.env("HOME") + "/.config/caelestia/assistant_profile.json"
+
+    FileView {
+        id: profileStorage
+        printErrors: false
+        path: root.profilePath
+        onLoaded: {
+            try {
+                const parsed = JSON.parse(text())
+                if (parsed && typeof parsed === "object") {
+                    root.profile = parsed
+                }
+            } catch (e) {
+                root.profile = root.defaultProfile
+            }
+        }
+        onLoadFailed: err => {
+            if (err === FileViewError.FileNotFound) {
+                Qt.callLater(() => root.saveProfile(root.defaultProfile))
+            }
+        }
+    }
 
     FileView {
         id: historyStorage
@@ -72,6 +107,7 @@ Singleton {
         }
         root.selectedText = ""
         root.isTruncated = false
+        root.recalledContext = null
     }
 
     Process {
@@ -153,6 +189,9 @@ Singleton {
                         if (msg.truncated_at !== undefined) {
                             root.truncatedAt = msg.truncated_at
                         }
+                        if (msg.recalled_from !== undefined) {
+                            root.recalledContext = msg.recalled_from
+                        }
                     } else if (msg.type === "chunk") {
                         root.isLoading = false
                         root.resultText += msg.text
@@ -165,6 +204,9 @@ Singleton {
                         }
                         if (msg.truncated_at !== undefined) {
                             root.truncatedAt = msg.truncated_at
+                        }
+                        if (msg.recalled_from !== undefined) {
+                            root.recalledContext = msg.recalled_from
                         }
                         root.errorMessage = ""
                         root.errorType = ""
@@ -295,6 +337,7 @@ Singleton {
             text: cleanText,
             answer: cleanAnswer,
             starred: false,
+            context_excluded: false,
             tags: []
         }
 
@@ -318,6 +361,19 @@ Singleton {
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(id)) {
                 list[i].starred = !list[i].starred
+                break
+            }
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function toggleContextExcluded(id) {
+        if (!root.history) return
+        const list = root.history.slice()
+        for (let i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id)) {
+                list[i].context_excluded = !list[i].context_excluded
                 break
             }
         }
@@ -398,6 +454,9 @@ Singleton {
                             }
                             root.history = updated
                         }
+                        if (msg.proposed_profile) {
+                            root.proposedProfile = msg.proposed_profile
+                        }
                     } else if (msg.type === "error") {
                         root.isOrganizing = false
                     }
@@ -415,6 +474,115 @@ Singleton {
         if (root.isOrganizing) return
         root.isOrganizing = true
         organizeProc.running = true
+    }
+
+    Process {
+        id: saveProfileProc
+        onExited: {
+            profileStorage.reload()
+        }
+    }
+
+    function saveProfile(profileData) {
+        if (!profileData) return
+        profileData.last_updated = new Date().toISOString().slice(0, 10)
+        root.profile = profileData
+
+        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
+        saveProfileProc.command = [
+            "python3", scriptPath, "save_profile",
+            JSON.stringify(profileData)
+        ]
+        saveProfileProc.running = true
+    }
+
+    function acceptProposedProfile() {
+        if (!root.proposedProfile) return
+        const merged = Object.assign({}, root.profile || root.defaultProfile, root.proposedProfile)
+        merged.last_updated = new Date().toISOString().slice(0, 10)
+        root.saveProfile(merged)
+        root.proposedProfile = null
+    }
+
+    function discardProposedProfile() {
+        root.proposedProfile = null
+    }
+
+    function resetProfile() {
+        const def = Object.assign({}, root.defaultProfile)
+        def.last_updated = new Date().toISOString().slice(0, 10)
+        root.saveProfile(def)
+        root.proposedProfile = null
+    }
+
+    // ── Starred Concept Challenge (Active Recall) ─────────────────
+    property var challengeCache: ({})
+    property bool isChallenging: false
+    property string activeChallengeItemId: ""
+    property int challengeCooldownSec: 0
+
+    Timer {
+        id: challengeCooldownTimer
+        interval: 1000
+        repeat: true
+        running: root.challengeCooldownSec > 0
+        onTriggered: {
+            if (root.challengeCooldownSec > 0) {
+                root.challengeCooldownSec -= 1
+            }
+        }
+    }
+
+    Process {
+        id: challengeProc
+        stdout: SplitParser {
+            onRead: data => {
+                const line = data.trim()
+                if (!line) return
+                try {
+                    const msg = JSON.parse(line)
+                    if (msg.type === "challenge_done") {
+                        root.isChallenging = false
+                        root.activeChallengeItemId = ""
+                        const cache = Object.assign({}, root.challengeCache)
+                        cache[msg.item_id] = {
+                            question: msg.question,
+                            hint: msg.hint,
+                            solution: msg.solution
+                        }
+                        root.challengeCache = cache
+                        root.challengeCooldownSec = 15
+                    } else if (msg.type === "error") {
+                        root.isChallenging = false
+                        root.activeChallengeItemId = ""
+                    }
+                } catch (e) {
+                    root.isChallenging = false
+                    root.activeChallengeItemId = ""
+                }
+            }
+        }
+        onExited: {
+            root.isChallenging = false
+            root.activeChallengeItemId = ""
+        }
+    }
+
+    function requestChallenge(item) {
+        if (!item || !item.id) return
+        if (root.challengeCache[String(item.id)]) return
+        if (root.isChallenging) return
+        if (root.challengeCooldownSec > 0) return
+
+        root.isChallenging = true
+        root.activeChallengeItemId = String(item.id)
+
+        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
+        challengeProc.command = [
+            "python3", scriptPath, "challenge",
+            JSON.stringify(item)
+        ]
+        challengeProc.running = true
     }
 
     function runAction(action, customPrompt) {
@@ -456,6 +624,7 @@ Singleton {
         root.errorType = ""
         root.resultText = ""
         root.isTruncated = false
+        root.recalledContext = null
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
         const args = ["python3", "-u", scriptPath, action, root.selectedText]

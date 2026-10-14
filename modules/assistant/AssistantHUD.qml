@@ -27,7 +27,13 @@ FocusScope {
     Component.onCompleted: Qt.callLater(() => root.forceActiveFocus())
 
     Keys.onEscapePressed: event => {
-        if (root.currentView === "history") {
+        if (root.currentView === "profile" && profileView.isEditing) {
+            profileView.isEditing = false
+            profileView.syncFromProfile()
+            event.accepted = true
+            return
+        }
+        if (root.currentView === "history" || root.currentView === "profile") {
             root.currentView = "assistant"
             event.accepted = true
             return
@@ -54,7 +60,7 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
-        if (root.currentView === "history") {
+        if (root.currentView === "history" || root.currentView === "profile") {
             event.accepted = false
             return
         }
@@ -117,7 +123,7 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "history") return 540
+            if (root.currentView === "history" || root.currentView === "profile") return 580
             return cardLayout.implicitHeight + Tokens.padding.medium * 2
         }
 
@@ -202,6 +208,29 @@ FocusScope {
                             font: Tokens.font.label.small
                             color: Colours.palette.m3onSurfaceVariant
                         }
+                    }
+                }
+
+                // Developer Dossier / Profile Button
+                IconButton {
+                    type: IconButton.Text
+                    icon: "badge"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    onClicked: root.currentView = "profile"
+
+                    // Pending proposed updates dot indicator
+                    StyledRect {
+                        visible: Assistant.proposedProfile !== null
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 2
+                        anchors.rightMargin: 2
+                        implicitWidth: 7
+                        implicitHeight: 7
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3primary
                     }
                 }
 
@@ -374,6 +403,56 @@ FocusScope {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: Assistant.runAction(chip.modelData.id)
                         }
+                    }
+                }
+            }
+
+            // ── 3B. Context Recall Transparency Badge ─────────────────
+            StyledRect {
+                visible: Assistant.recalledContext !== null
+                Layout.fillWidth: true
+                implicitHeight: 28
+                radius: Tokens.rounding.full
+                color: Qt.alpha(Colours.palette.m3primary, 0.12)
+                border.width: 1
+                border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Tokens.padding.small
+                    anchors.rightMargin: 4
+                    spacing: 6
+
+                    MaterialIcon {
+                        text: "history"
+                        fontStyle: Tokens.font.icon.small
+                        color: Colours.palette.m3primary
+                    }
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: {
+                            const ctx = Assistant.recalledContext
+                            if (!ctx) return ""
+                            return qsTr("Context recalled from: \"%1\"").arg(ctx.title || qsTr("past query"))
+                        }
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3onSurface
+                        elide: Text.ElideRight
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "close"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        padding: 0
+                        activeColour: "transparent"
+                        inactiveColour: "transparent"
+                        activeOnColour: Colours.palette.m3error
+                        inactiveOnColour: Colours.palette.m3outline
+                        onClicked: Assistant.recalledContext = null
                     }
                 }
             }
@@ -695,6 +774,15 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "history"
+            onBackRequested: root.currentView = "assistant"
+            onCloseRequested: root.closeRequested()
+        }
+
+        ProfileView {
+            id: profileView
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.medium
+            visible: root.currentView === "profile"
             onBackRequested: root.currentView = "assistant"
             onCloseRequested: root.closeRequested()
         }
