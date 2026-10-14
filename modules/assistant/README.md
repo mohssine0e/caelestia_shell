@@ -22,22 +22,20 @@ A fast, floating AI assistant heads-up display built for Caelestia on Quickshell
 - **Persistent View**: When new text is copied or highlighted, the **previous result stays intact** on screen so you never lose your reading position.
 - **On-Demand Regeneration**: The result area only clears and starts synthesizing when you actively click an action (1–5) or submit a custom question.
 
-### 4. Interactive Typography & Partial Copying
-- **Selectable Markdown**: Rendered using a read-only native `TextEdit` engine supporting markdown styling (`bold`, `headers`, `code`, bullet points).
-- **Mouse Drag Selection**: Highlight any specific sentence, word, or paragraph with your mouse.
-- **Smart Copy (`Ctrl+C` / Footer Button)**:
-  - If a portion of text is highlighted, copying grabs **only your selection**.
-  - If nothing is highlighted, it copies the **entire result**.
-  - Visual confirmation (`check` icon) displays for 1.8 seconds.
-- **Automatic RTL / Arabic Support**: Detects Arabic script and automatically aligns text to the right for natural reading.
+### 4. Native Typography, Formatting & TTS
+- **Pure English with Smart Glosses**: Answers and explanations are written in pure, fluent English. When difficult or advanced English terms are introduced, their Arabic translations are concisely annotated in parentheses (e.g. `ubiquitous (واسع الانتشار)`).
+- **Native Markdown Rendering**: Built using fast, reliable QtQuick `TextEdit` (`MarkdownText`) with full mouse and keyboard selection support.
+- **Audio Pronunciation (TTS)**: Built-in local Text-to-Speech via `espeak-ng`. Click the speaker (`volume_up`) icon to listen to Arabic and English pronunciation directly from the HUD or history cards.
+- **Mouse Drag Selection & Smart Copy**: Highlight any specific sentence, word, or paragraph to copy only your selection, or click the footer button to copy the entire response.
+- **Automatic RTL Support**: Dynamically detects Arabic characters and right-aligns text blocks for natural reading.
 
-### 5. Memory & History (Zero-Token Local Persistence)
+### 5. Memory & History (Modular Architecture & Single-Item Accordion)
+- **Modular Component Architecture**: Extracted into focused QML components (`HistorySearchBar.qml`, `HistoryAccordionList.qml`, `HistoryItemCard.qml`).
+- **Smooth Single-Item Expansion**: Enforces single-item expansion across the history accordion—expanding card B automatically collapses card A to keep scrolling predictable.
 - **In-Place View Flip**: Click the `history` icon in the header (or press `H`) to flip between Assistant and History views inside the same window without extra popups.
 - **Zero Cost on Save**: Every completed action or question is automatically saved to local storage (`~/.config/caelestia/assistant_history.json`) with zero LLM token consumption.
-- **Accordion History List**:
-  - Compact summary rows (Action icon, snippet, relative timestamp, star toggle, expand chevron).
-  - Tap any card to expand full original prompt/question, selectable markdown answer, and tags.
 - **Per-Item Actions**:
+  - **TTS Audio (🔊)**: Pronounce stored answers.
   - **Star (★)**: Bookmark key responses for quick filtering.
   - **Copy Answer**: Instant clipboard copy with visual feedback.
   - **Re-Open**: Restores the prompt and answer back into the active Assistant view.
@@ -49,14 +47,6 @@ A fast, floating AI assistant heads-up display built for Caelestia on Quickshell
 - **Search & Tag Deletion**:
   - Integrated search box (`/` shortcut) filtering queries, answers, snippet text, and tags in real time.
   - Global tag deletion via the tag bar and item-level tag removal on expanded cards.
-- **Active Recall Review Mode (`school` icon)**:
-  - Accessible via the `school` header button whenever you have starred items (displays live star count badge).
-  - **Zero-Token Standard Review**: Flips through your starred items as flashcards. Tests your recall of the saved question/highlight, and reveals the stored answer on demand for free.
-  - **AI Concept Challenge (`psychology` button)**: Generates a brand new conceptual question testing your understanding of the underlying principle or edge case rather than testing verbatim phrasing. Includes a toggleable hint and solution reveal.
-  - **Rate-Capped Anti-Spam Guardrails**:
-    - **In-Memory Cache**: Challenges are cached per item ID so revisiting cards consumes 0 additional tokens.
-    - **15-Second Cooldown**: Enforces a countdown cooldown between new challenge generations to prevent accidental spam.
-  - **Card Shuffle**: Randomize card order for optimal active recall practice.
 
 ### 6. Developer Dossier (`assistant_profile.json`)
 - **Dedicated Personalization**: Maintains a compact, editable user profile (~30–40 tokens injected into system instructions) matching your OS, tools, coding style, and languages.
@@ -91,10 +81,11 @@ A fast, floating AI assistant heads-up display built for Caelestia on Quickshell
   - Whenever past context is injected into a query, the HUD renders an attribution pill above the response: `Context recalled from: "<title>"`.
   - Includes a 1-click dismiss button (`close`) so the user always has full visibility and control over what influenced the answer.
 
-### 8. Performance & Error Handling
+### 8. Performance, Error Recovery & UI Engine Controls
 - **Instant Cache**: Identical queries (action + snippet) are cached in memory for zero-latency instant switching.
-- **Categorized Error Badges**: Differentiates between API key errors (`vpn_key`), network timeouts (`wifi_off`), rate limits (`hourglass_empty`), and missing text (`content_paste_off`).
-- **On-HUD Key Configuration**: Built-in credential inputs to set Gemini or Groq keys without touching terminal configuration.
+- **Categorized Error Badges & 1-Click Retry**: Differentiates between API key errors (`vpn_key`), network timeouts (`wifi_off`), rate limits (`hourglass_empty`), and missing text (`content_paste_off`). Includes a prominent **`[Retry]`** button and a **`[Capture Clipboard]`** helper to quickly recover without retyping.
+- **On-HUD Engine & Safeguard Controls**: Switch between preferred providers (`Gemini Flash` / `Groq Llama 3.3`) and configure character truncation limits (`12k`, `50k`, `100k`, `200k`) directly within the HUD setup view and Developer Dossier without editing JSON files manually.
+- **On-HUD Key Configuration**: Built-in credential inputs to set Gemini or Groq keys with immediate validation.
 
 ---
 

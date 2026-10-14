@@ -12,25 +12,32 @@ CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
 
 PROMPTS = {
     "translate": (
-        "You are an expert bilingual translator. Translate the following text into natural, accurate, and fluent Arabic. "
-        "Keep technical terms clear and provide short context/synonyms if a term has nuances. "
-        "Output the Arabic translation directly with brief notes only if strictly necessary."
+        "You are an expert bilingual reading tutor. Translate the following text into natural, fluent English. "
+        "Keep the entire primary explanation and response in pure English. "
+        "If and only if an advanced, nuanced, or rare technical English word or idiom is introduced, "
+        "include its concise Arabic meaning in parentheses right after it (e.g., 'ubiquitous (واسع الانتشار)')."
     ),
     "explain": (
-        "You are an expert tutor. Explain the following text simply and clearly (ELIF5 style), "
-        "breaking down complex ideas into intuitive parts. Use short bullet points where appropriate."
+        "You are an expert tutor. Explain the following text simply, clearly, and engagingly in pure English. "
+        "Break down complex ideas into intuitive parts using short bullet points. "
+        "Do NOT write Arabic sentences; write in pure English. If an advanced or difficult English word is used, "
+        "you may add its concise Arabic translation in parentheses (e.g., 'elucidate (يوضّح)')."
     ),
     "tldr": (
-        "Summarize the following text concisely. Provide key takeaways in 2-4 brief bullet points."
+        "Summarize the following text concisely in pure English. Provide key takeaways in 2-4 brief bullet points. "
+        "Write purely in English, adding a brief Arabic translation in parentheses only for difficult vocabulary."
     ),
     "rephrase": (
-        "Rewrite the following text in 3 different ways: 1) Professional / Formal, 2) Simple / Casual, 3) More vivid / impactful."
+        "Rewrite the following text in 3 different ways in pure English: 1) Professional / Formal, 2) Simple / Casual, 3) More vivid / impactful. "
+        "Write purely in English, adding a parenthetical Arabic gloss only if an advanced vocabulary word is used."
     ),
     "examples": (
-        "Provide 3 clear, realistic context examples or sentences showing how this concept, word, or pattern is used in real life."
+        "Provide 3 clear, realistic context examples or sentences showing how this concept, word, or pattern is used in real life. "
+        "Write all explanations and sentences in pure English. If a hard English word appears, place its Arabic translation in parentheses."
     ),
     "ask": (
-        "You are an expert assistant. Answer the user's question clearly and concisely based on the provided text."
+        "You are an expert assistant. Answer the user's question clearly, directly, and concisely in pure English. "
+        "Write purely in English, placing a concise Arabic gloss in parentheses only for difficult or advanced English terms."
     )
 }
 
@@ -79,19 +86,26 @@ def get_provider_ceiling(primary, gemini_key, groq_key):
     # Both configured and it's auto (or fallback): smaller of the two caps
     return 100000
 
-def save_config(gemini_key, groq_key):
+def save_config(gemini_key, groq_key, provider=None, max_chars=None):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     cfg = load_config()
     cfg["gemini_key"] = gemini_key.strip()
     cfg["groq_key"] = groq_key.strip()
+    if provider:
+        cfg["primary"] = provider.strip().lower()
+    if max_chars:
+        try:
+            cfg["max_chars"] = int(max_chars)
+        except (ValueError, TypeError):
+            pass
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     return {"success": True}
 
 def stream_gemini(api_key, system_instruction, user_text):
     candidate_models = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
         "gemini-flash-latest"
     ]
     last_err = None
@@ -646,7 +660,9 @@ def main():
     if cmd == "save_config":
         gemini_key = sys.argv[2] if len(sys.argv) > 2 else ""
         groq_key = sys.argv[3] if len(sys.argv) > 3 else ""
-        emit(save_config(gemini_key, groq_key))
+        provider = sys.argv[4] if len(sys.argv) > 4 else None
+        max_chars = sys.argv[5] if len(sys.argv) > 5 else None
+        emit(save_config(gemini_key, groq_key, provider, max_chars))
         sys.exit(0)
 
     if cmd == "save_profile":

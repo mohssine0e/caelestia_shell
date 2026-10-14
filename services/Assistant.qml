@@ -89,6 +89,28 @@ Singleton {
     property var responseCache: ({})
 
     readonly property string configPath: Quickshell.env("HOME") + "/.config/caelestia/assistant.json"
+    property string preferredProvider: "gemini"
+    property int maxChars: 12000
+    property string geminiKey: ""
+    property string groqKey: ""
+
+    FileView {
+        id: configStorage
+        printErrors: false
+        path: root.configPath
+        onLoaded: {
+            try {
+                const parsed = JSON.parse(text())
+                if (parsed && typeof parsed === "object") {
+                    root.preferredProvider = parsed.primary || "gemini"
+                    root.maxChars = parsed.max_chars || 12000
+                    root.geminiKey = parsed.gemini_key || ""
+                    root.groqKey = parsed.groq_key || ""
+                    root.hasApiKey = !!(root.geminiKey || root.groqKey)
+                }
+            } catch (e) {}
+        }
+    }
 
     // ── Clipboard polling & update ──────────────────────────────
     property bool isWatching: false
@@ -250,29 +272,92 @@ Singleton {
         if (apiProc.running) {
             apiProc.running = false
         }
+        if (ttsProc.running) {
+            ttsProc.running = false
+        }
+        root.isSpeaking = false
         root.isLoading = false
+    }
+
+    function retryAction() {
+        if (root.activeAction && root.activeAction.length > 0) {
+            root.runAction(root.activeAction, root.activePrompt)
+        } else if (root.selectedText && root.selectedText.length > 0) {
+            root.runAction("explain", "")
+        }
+    }
+
+    // ── Speech / TTS (Arabic & English Pronunciation) ─────────────
+    property bool isSpeaking: false
+
+    Process {
+        id: ttsProc
+        onExited: {
+            root.isSpeaking = false
+        }
+    }
+
+    function speakText(txt) {
+        if (root.isSpeaking) {
+            ttsProc.running = false
+            root.isSpeaking = false
+            return
+        }
+        if (!txt || txt.trim().length === 0) return
+
+        let clean = txt.replace(/```[\s\S]*?```/g, " ")
+                       .replace(/[`#*_~\[\]\(\)]/g, " ")
+                       .replace(/\s+/g, " ")
+                       .trim()
+        if (!clean) return
+
+        const hasArabic = /[\u0600-\u06FF]/.test(clean)
+        const voice = hasArabic ? "ar" : "en-us"
+        clean = clean.slice(0, 450)
+
+        ttsProc.command = ["espeak-ng", "-v", voice, clean]
+        root.isSpeaking = true
+        ttsProc.running = true
     }
 
     // ── Config write process (Safe argv execution) ────────────────
     Process {
         id: saveConfigProc
         onExited: {
+            configStorage.reload()
             if (root.activeAction) {
-                root.runAction(root.activeAction)
+                root.runAction(root.activeAction, root.activePrompt)
             }
         }
     }
 
-    function saveKeys(geminiKey, groqKey) {
+    function saveSettings(geminiKey, groqKey, provider, maxChars) {
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
+        const gKey = (geminiKey !== undefined ? geminiKey : root.geminiKey || "").trim()
+        const qKey = (groqKey !== undefined ? groqKey : root.groqKey || "").trim()
+        const prov = (provider || root.preferredProvider || "gemini").toLowerCase()
+        const mChars = String(maxChars || root.maxChars || 12000)
+
+        root.geminiKey = gKey
+        root.groqKey = qKey
+        root.preferredProvider = prov
+        root.maxChars = parseInt(mChars) || 12000
+        root.hasApiKey = !!(gKey || qKey)
+
         saveConfigProc.command = [
             "python3", scriptPath, "save_config",
-            (geminiKey || "").trim(),
-            (groqKey || "").trim()
+            gKey,
+            qKey,
+            prov,
+            mChars
         ]
         saveConfigProc.running = true
         root.errorMessage = ""
         root.errorType = ""
+    }
+
+    function saveKeys(geminiKey, groqKey) {
+        root.saveSettings(geminiKey, groqKey, root.preferredProvider, root.maxChars)
     }
 
     // ── Trigger HUD & grab current selection ──────────────────────

@@ -18,8 +18,8 @@ FocusScope {
     property string currentView: "assistant" // "assistant" or "history"
 
     focus: true
-    width: 540
-    implicitWidth: 540
+    width: (root.currentView === "profile" || root.currentView === "history") ? 600 : 540
+    implicitWidth: width
     implicitHeight: mainCard.implicitHeight
 
     signal closeRequested()
@@ -123,7 +123,7 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "history" || root.currentView === "profile") return 580
+            if (root.currentView === "history" || root.currentView === "profile") return 620
             return cardLayout.implicitHeight + Tokens.padding.medium * 2
         }
 
@@ -180,7 +180,7 @@ FocusScope {
                     }
                 }
 
-                // Provider Badge with Live Dot & Latency
+                // Provider Badge with Live Dot & Latency (Click to open settings/dossier)
                 StyledRect {
                     visible: Assistant.providerUsed.length > 0
                     implicitWidth: badgeRow.implicitWidth + Tokens.padding.small * 2
@@ -208,6 +208,13 @@ FocusScope {
                             font: Tokens.font.label.small
                             color: Colours.palette.m3onSurfaceVariant
                         }
+                    }
+
+                    StateLayer {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.currentView = "profile"
                     }
                 }
 
@@ -407,55 +414,7 @@ FocusScope {
                 }
             }
 
-            // ── 3B. Context Recall Transparency Badge ─────────────────
-            StyledRect {
-                visible: Assistant.recalledContext !== null
-                Layout.fillWidth: true
-                implicitHeight: 28
-                radius: Tokens.rounding.full
-                color: Qt.alpha(Colours.palette.m3primary, 0.12)
-                border.width: 1
-                border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
 
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Tokens.padding.small
-                    anchors.rightMargin: 4
-                    spacing: 6
-
-                    MaterialIcon {
-                        text: "history"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3primary
-                    }
-
-                    StyledText {
-                        Layout.fillWidth: true
-                        text: {
-                            const ctx = Assistant.recalledContext
-                            if (!ctx) return ""
-                            return qsTr("Context recalled from: \"%1\"").arg(ctx.title || qsTr("past query"))
-                        }
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3onSurface
-                        elide: Text.ElideRight
-                    }
-
-                    IconButton {
-                        type: IconButton.Text
-                        icon: "close"
-                        font: Tokens.font.icon.small
-                        implicitWidth: 20
-                        implicitHeight: 20
-                        padding: 0
-                        activeColour: "transparent"
-                        inactiveColour: "transparent"
-                        activeOnColour: Colours.palette.m3error
-                        inactiveOnColour: Colours.palette.m3outline
-                        onClicked: Assistant.recalledContext = null
-                    }
-                }
-            }
 
             // ── 4. Main Result View / Shimmer Skeleton ────────────────
             StyledRect {
@@ -573,28 +532,167 @@ FocusScope {
                         }
                     }
 
+                    // Error Action Row: Retry & Capture Clipboard
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: Assistant.hasApiKey && Assistant.errorType !== "auth"
+                        spacing: Tokens.spacing.small
+
+                        IconTextButton {
+                            type: IconTextButton.Filled
+                            icon: "refresh"
+                            text: qsTr("Retry")
+                            font: Tokens.font.label.small
+                            onClicked: Assistant.retryAction()
+                        }
+
+                        IconTextButton {
+                            visible: Assistant.errorType === "no_selection"
+                            type: IconTextButton.Tonal
+                            icon: "content_paste"
+                            text: qsTr("Capture Clipboard")
+                            font: Tokens.font.label.small
+                            onClicked: Assistant.checkClipboard()
+                        }
+                    }
+
+                    // Key & Engine Configuration View
                     ColumnLayout {
                         Layout.fillWidth: true
                         visible: !Assistant.hasApiKey || Assistant.errorType === "auth"
                         spacing: Tokens.spacing.extraSmall
 
+                        property string setupProvider: Assistant.preferredProvider || "gemini"
+                        property int setupTrunc: Assistant.maxChars || 12000
+
                         StyledTextField {
                             id: geminiInput
                             Layout.fillWidth: true
+                            text: Assistant.geminiKey
                             placeholderText: "Google Gemini API Key..."
                         }
 
                         StyledTextField {
                             id: groqInput
                             Layout.fillWidth: true
+                            text: Assistant.groqKey
                             placeholderText: "Groq API Key (Optional)..."
+                        }
+
+                        // Provider Selection Chips
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            spacing: 6
+
+                            StyledText {
+                                text: qsTr("Provider:")
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3outline
+                            }
+
+                            StyledRect {
+                                readonly property bool isGemini: parent.parent.setupProvider === "gemini"
+                                implicitWidth: geminiChipText.implicitWidth + 16
+                                implicitHeight: 24
+                                radius: Tokens.rounding.full
+                                color: isGemini ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
+
+                                StyledText {
+                                    id: geminiChipText
+                                    anchors.centerIn: parent
+                                    text: "Gemini Flash"
+                                    font: Tokens.font.label.small
+                                    color: parent.isGemini ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                }
+
+                                StateLayer {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: parent.parent.parent.setupProvider = "gemini"
+                                }
+                            }
+
+                            StyledRect {
+                                readonly property bool isGroq: parent.parent.setupProvider === "groq"
+                                implicitWidth: groqChipText.implicitWidth + 16
+                                implicitHeight: 24
+                                radius: Tokens.rounding.full
+                                color: isGroq ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
+
+                                StyledText {
+                                    id: groqChipText
+                                    anchors.centerIn: parent
+                                    text: "Groq Llama 3.3"
+                                    font: Tokens.font.label.small
+                                    color: parent.isGroq ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                }
+
+                                StateLayer {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: parent.parent.parent.setupProvider = "groq"
+                                }
+                            }
+                        }
+
+                        // Truncation Limit Chips
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            spacing: 6
+
+                            StyledText {
+                                text: qsTr("Max Chars:")
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3outline
+                            }
+
+                            Repeater {
+                                model: [
+                                    { label: "12k", val: 12000 },
+                                    { label: "50k", val: 50000 },
+                                    { label: "100k", val: 100000 }
+                                ]
+
+                                delegate: StyledRect {
+                                    id: truncChip
+                                    required property var modelData
+                                    readonly property bool isSel: parent.parent.setupTrunc === truncChip.modelData.val
+                                    implicitWidth: truncChipText.implicitWidth + 14
+                                    implicitHeight: 22
+                                    radius: Tokens.rounding.full
+                                    color: isSel ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
+
+                                    StyledText {
+                                        id: truncChipText
+                                        anchors.centerIn: parent
+                                        text: truncChip.modelData.label
+                                        font: Tokens.font.label.small
+                                        color: truncChip.isSel ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                    }
+
+                                    StateLayer {
+                                        anchors.fill: parent
+                                        radius: parent.radius
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: parent.parent.parent.setupTrunc = truncChip.modelData.val
+                                    }
+                                }
+                            }
                         }
 
                         TextButton {
                             Layout.alignment: Qt.AlignHCenter
-                            text: qsTr("Save Keys")
+                            Layout.topMargin: 4
+                            text: qsTr("Save Settings")
                             onClicked: {
-                                Assistant.saveKeys(geminiInput.text, groqInput.text)
+                                Assistant.saveSettings(
+                                    geminiInput.text,
+                                    groqInput.text,
+                                    parent.setupProvider,
+                                    parent.setupTrunc
+                                )
                             }
                         }
                     }
@@ -738,6 +836,19 @@ FocusScope {
                             customQuestionInput.text = ""
                         }
                     }
+                }
+
+                // Arabic / Text TTS Audio Pronunciation Button
+                IconButton {
+                    id: ttsBtn
+                    type: IconButton.Tonal
+                    icon: Assistant.isSpeaking ? "volume_off" : "volume_up"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 36
+                    implicitHeight: 36
+                    enabled: Assistant.resultText.length > 0
+                    opacity: enabled ? 1.0 : 0.4
+                    onClicked: Assistant.speakText(Assistant.resultText)
                 }
 
                 IconButton {
