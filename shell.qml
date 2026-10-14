@@ -10,6 +10,7 @@ import "modules/background"
 import "modules/areapicker"
 import "modules/lock"
 import "modules/timer"
+import "modules/assistant"
 import QtQuick
 import Quickshell
 import qs.services
@@ -32,6 +33,7 @@ ShellRoot {
     Drawers {}
     AreaPicker {}
     TimerFloating {}
+    AssistantFloating {}
     Lock {
         id: lock
     }

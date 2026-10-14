@@ -159,12 +159,32 @@ Scope {
         target: "drawers"
     }
 
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "assistant"
+        description: "Toggle reading assistant"
+        onPressed: Assistant.toggle()
+    }
+
     IpcHandler {
         function open(): void {
             WindowFactory.create();
         }
 
         target: "nexus"
+    }
+
+    IpcHandler {
+        function trigger(): void {
+            Assistant.trigger();
+        }
+
+        function toggle(): void {
+            Assistant.toggle();
+        }
+
+        target: "assistant"
     }
 
     IpcHandler {

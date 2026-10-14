@@ -13,6 +13,7 @@ PersistentProperties {
     property bool sidebar
     property bool tasks
     property bool timer
+    property bool assistant
 
     // Timer mini (pill HUD) state — persisted
     property real timerX: 0
