@@ -12,10 +12,10 @@ CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
 
 PROMPTS = {
     "translate": (
-        "You are an expert bilingual reading tutor. Translate the following text into natural, fluent English. "
-        "Keep the entire primary explanation and response in pure English. "
-        "If and only if an advanced, nuanced, or rare technical English word or idiom is introduced, "
-        "include its concise Arabic meaning in parentheses right after it (e.g., 'ubiquitous (واسع الانتشار)')."
+        "You are an expert translator. Translate the following text accurately and naturally. "
+        "If the input text is in English or another foreign language, translate it into clear modern Arabic. "
+        "If the input text is in Arabic, translate it into fluent English. "
+        "Provide only the direct, accurate translation without conversational preamble or conversational filler."
     ),
     "explain": (
         "You are an expert tutor. Explain the following text simply, clearly, and engagingly in pure English. "

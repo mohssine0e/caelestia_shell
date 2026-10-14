@@ -797,11 +797,17 @@ FocusScope {
                         selectedTextColor: Colours.palette.m3onSurface
                         renderType: TextEdit.NativeRendering
 
-                        // Detect Arabic script and automatically align right
-                        horizontalAlignment: {
-                            const isArabic = /[\u0600-\u06FF]/.test(text)
-                            return isArabic ? TextEdit.AlignRight : TextEdit.AlignLeft
+                        // Show Arabic way (RTL) ONLY when translating and result is Arabic; all other text is strictly LTR
+                        readonly property bool isArabicResult: {
+                            if (Assistant.activeAction !== "translate" || !text) return false
+                            const arabicMatches = text.match(/[\u0600-\u06FF]/g)
+                            const latinMatches = text.match(/[A-Za-z]/g)
+                            const arabicCount = arabicMatches ? arabicMatches.length : 0
+                            const latinCount = latinMatches ? latinMatches.length : 0
+                            return arabicCount > latinCount
                         }
+
+                        horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
                     }
                 }
             }

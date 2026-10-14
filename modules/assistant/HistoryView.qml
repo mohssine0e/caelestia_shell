@@ -683,6 +683,16 @@ FocusScope {
                                             selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
                                             selectedTextColor: Colours.palette.m3onSurface
                                             renderType: TextEdit.NativeRendering
+                                            readonly property bool isArabicResult: {
+                                                const act = itemCard.modelData ? itemCard.modelData.action : ""
+                                                if (act !== "translate" || !text) return false
+                                                const arabicMatches = text.match(/[\u0600-\u06FF]/g)
+                                                const latinMatches = text.match(/[A-Za-z]/g)
+                                                const arabicCount = arabicMatches ? arabicMatches.length : 0
+                                                const latinCount = latinMatches ? latinMatches.length : 0
+                                                return arabicCount > latinCount
+                                            }
+                                            horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
                                         }
                                     }
 
@@ -1088,6 +1098,16 @@ FocusScope {
                                     selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
                                     selectedTextColor: Colours.palette.m3onSurface
                                     renderType: TextEdit.NativeRendering
+                                    readonly property bool isArabicResult: {
+                                        const act = (reviewContainer.currentItem && reviewContainer.currentItem.action) ? reviewContainer.currentItem.action : ""
+                                        if (act !== "translate" || !text) return false
+                                        const arabicMatches = text.match(/[\u0600-\u06FF]/g)
+                                        const latinMatches = text.match(/[A-Za-z]/g)
+                                        const arabicCount = arabicMatches ? arabicMatches.length : 0
+                                        const latinCount = latinMatches ? latinMatches.length : 0
+                                        return arabicCount > latinCount
+                                    }
+                                    horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
                                 }
                             }
                         }
@@ -1192,6 +1212,7 @@ FocusScope {
                                         selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
                                         selectedTextColor: Colours.palette.m3onSurface
                                         renderType: TextEdit.NativeRendering
+                                        horizontalAlignment: TextEdit.AlignLeft
                                     }
                                 }
                             }
