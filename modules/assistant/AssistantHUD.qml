@@ -15,6 +15,7 @@ FocusScope {
     id: root
 
     property var windowRef: null
+    property string currentView: "assistant" // "assistant" or "history"
 
     focus: true
     width: 540
@@ -26,6 +27,11 @@ FocusScope {
     Component.onCompleted: Qt.callLater(() => root.forceActiveFocus())
 
     Keys.onEscapePressed: event => {
+        if (root.currentView === "history") {
+            root.currentView = "assistant"
+            event.accepted = true
+            return
+        }
         if (customQuestionInput.activeFocus) {
             if (customQuestionInput.text.length > 0) {
                 customQuestionInput.text = ""
@@ -48,6 +54,10 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
+        if (root.currentView === "history") {
+            event.accepted = false
+            return
+        }
         if (customQuestionInput.activeFocus || geminiInput.activeFocus || groqInput.activeFocus) {
             event.accepted = false
             return
@@ -81,7 +91,11 @@ FocusScope {
         }
 
         if (event.key === Qt.Key_Slash) {
-            customQuestionInput.forceActiveFocus()
+            if (root.currentView === "history") {
+                historyView.focusSearch()
+            } else {
+                customQuestionInput.forceActiveFocus()
+            }
             event.accepted = true
             return
         }
@@ -102,7 +116,14 @@ FocusScope {
         border.width: 1
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-        implicitHeight: cardLayout.implicitHeight + Tokens.padding.medium * 2
+        implicitHeight: {
+            if (root.currentView === "history") return 540
+            return cardLayout.implicitHeight + Tokens.padding.medium * 2
+        }
+
+        Behavior on implicitHeight {
+            Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
+        }
 
         ColumnLayout {
             id: cardLayout
@@ -110,6 +131,7 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             spacing: Tokens.spacing.small
+            visible: root.currentView === "assistant"
 
             // ── 1. Header Row & Provider Badge ────────────────────────
             RowLayout {
@@ -181,6 +203,15 @@ FocusScope {
                             color: Colours.palette.m3onSurfaceVariant
                         }
                     }
+                }
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "history"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    onClicked: root.currentView = "history"
                 }
 
                 IconButton {
@@ -657,6 +688,15 @@ FocusScope {
                     }
                 }
             }
+        }
+
+        HistoryView {
+            id: historyView
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.medium
+            visible: root.currentView === "history"
+            onBackRequested: root.currentView = "assistant"
+            onCloseRequested: root.closeRequested()
         }
     }
 }

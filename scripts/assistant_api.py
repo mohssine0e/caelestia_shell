@@ -206,6 +206,137 @@ def classify_error(err_str, http_code=None):
         "message": err_str or "An error occurred while generating response."
     }
 
+HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
+
+def organize_history():
+    if not os.path.exists(HISTORY_PATH):
+        emit({"type": "organize_done", "tags": [], "mapping": {}})
+        return
+
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception as e:
+        emit({"type": "error", "message": f"Could not read history: {e}"})
+        return
+
+    if not history or not isinstance(history, list):
+        emit({"type": "organize_done", "tags": [], "mapping": {}})
+        return
+
+    items_to_tag = []
+    for item in history[:100]:
+        snippet = (item.get("text") or item.get("prompt") or "")[:80].replace("\n", " ").strip()
+        if snippet:
+            items_to_tag.append({
+                "id": str(item.get("id")),
+                "action": item.get("action", ""),
+                "snippet": snippet
+            })
+
+    if not items_to_tag:
+        emit({"type": "organize_done", "tags": [], "mapping": {}})
+        return
+
+    config = load_config()
+    gemini_key = config.get("gemini_key", "").strip()
+    groq_key = config.get("groq_key", "").strip()
+    primary = config.get("primary", "gemini").lower()
+
+    providers = []
+    if primary == "groq":
+        if groq_key: providers.append(("groq", groq_key))
+        if gemini_key: providers.append(("gemini", gemini_key))
+    else:
+        if gemini_key: providers.append(("gemini", gemini_key))
+        if groq_key: providers.append(("groq", groq_key))
+
+    if not providers:
+        emit({"type": "error", "error_type": "auth", "message": "No API key configured."})
+        return
+
+    system_instruction = (
+        "You are an expert knowledge organizer. Analyze the provided list of reading/learning queries. "
+        "Generate 3 to 7 concise, high-level topical lowercase tags (e.g. 'python', 'regex', 'vocabulary', 'linux', 'science', 'math') "
+        "and assign 1 or 2 relevant tags to each item ID. "
+        "Respond ONLY with valid, raw JSON matching this schema without markdown codeblocks:\n"
+        "{\"tags\": [\"tag1\", \"tag2\"], \"mapping\": {\"id1\": [\"tag1\"], \"id2\": [\"tag2\"]}}"
+    )
+    user_payload = json.dumps(items_to_tag)
+
+    response_text = ""
+    for prov_name, key in providers:
+        try:
+            if prov_name == "gemini":
+                candidate_models = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
+                for model_name in candidate_models:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+                    req_data = json.dumps({
+                        "contents": [{"parts": [{"text": f"{system_instruction}\n\nItems:\n{user_payload}"}]}],
+                        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+                    }).encode("utf-8")
+                    req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
+                    try:
+                        with urllib.request.urlopen(req, timeout=15) as resp:
+                            resp_json = json.loads(resp.read().decode("utf-8"))
+                            candidates = resp_json.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    response_text = parts[0].get("text", "")
+                                    break
+                    except Exception:
+                        continue
+            elif prov_name == "groq":
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                req_data = json.dumps({
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": f"Items:\n{user_payload}"}
+                    ],
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"}
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=req_data, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"
+                }, method="POST")
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    resp_json = json.loads(resp.read().decode("utf-8"))
+                    choices = resp_json.get("choices", [])
+                    if choices:
+                        response_text = choices[0].get("message", {}).get("content", "")
+
+            if response_text:
+                break
+        except Exception:
+            continue
+
+    if not response_text:
+        emit({"type": "error", "message": "Failed to organize history with AI."})
+        return
+
+    try:
+        clean_text = response_text.strip()
+        if clean_text.startswith("```"):
+            clean_text = clean_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(clean_text)
+        tags = parsed.get("tags", [])
+        mapping = parsed.get("mapping", {})
+
+        for item in history:
+            item_id = str(item.get("id"))
+            if item_id in mapping:
+                item["tags"] = mapping[item_id]
+
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+
+        emit({"type": "organize_done", "tags": tags, "mapping": mapping})
+    except Exception as e:
+        emit({"type": "error", "message": f"Failed to parse organization tags: {e}"})
+
 def main():
     if len(sys.argv) < 2:
         emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
@@ -217,6 +348,10 @@ def main():
         gemini_key = sys.argv[2] if len(sys.argv) > 2 else ""
         groq_key = sys.argv[3] if len(sys.argv) > 3 else ""
         emit(save_config(gemini_key, groq_key))
+        sys.exit(0)
+
+    if cmd == "organize":
+        organize_history()
         sys.exit(0)
 
     action = cmd

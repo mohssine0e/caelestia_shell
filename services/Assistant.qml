@@ -22,6 +22,34 @@ Singleton {
     property bool isTruncated: false
     property int truncatedAt: 12000
 
+    // History & Memory
+    property var history: []
+    property bool isOrganizing: false
+    property string activePrompt: ""
+    readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
+
+    FileView {
+        id: historyStorage
+        printErrors: false
+        path: root.historyPath
+        onLoaded: {
+            try {
+                const parsed = JSON.parse(text())
+                if (Array.isArray(parsed)) {
+                    root.history = parsed
+                }
+            } catch (e) {
+                root.history = []
+            }
+        }
+        onLoadFailed: err => {
+            root.history = []
+            if (err === FileViewError.FileNotFound) {
+                Qt.callLater(() => historyStorage.setText("[]"))
+            }
+        }
+    }
+
     // In-memory query response cache
     property var responseCache: ({})
 
@@ -151,6 +179,9 @@ Singleton {
                             isTruncated: root.isTruncated,
                             truncatedAt: root.truncatedAt
                         }
+
+                        // Save to persistent history
+                        root.addToHistory(root.activeAction, root.selectedText, root.resultText, root.activePrompt)
                     } else if (msg.type === "error") {
                         root.isLoading = false
                         root.errorMessage = msg.message || "An error occurred."
@@ -229,9 +260,167 @@ Singleton {
         }
     }
 
+    // ── History Persistence & Management ────────────────────────
+    function saveHistory() {
+        if (historyStorage) {
+            historyStorage.setText(JSON.stringify(root.history, null, 2))
+        }
+    }
+
+    function addToHistory(action, text, answer, prompt) {
+        if (!answer || answer.trim().length === 0) return
+        if ((!text || text.trim().length === 0) && (!prompt || prompt.trim().length === 0)) return
+
+        const list = root.history ? root.history.slice() : []
+        const cleanText = (text || "").trim()
+        const cleanPrompt = (prompt || "").trim()
+        const cleanAnswer = answer.trim()
+
+        if (list.length > 0) {
+            const first = list[0]
+            if (first.action === action && first.text === cleanText && (first.prompt || "") === cleanPrompt) {
+                first.answer = cleanAnswer
+                first.timestamp = Date.now()
+                root.history = list
+                root.saveHistory()
+                return
+            }
+        }
+
+        const newItem = {
+            id: String(Date.now()),
+            timestamp: Date.now(),
+            action: action,
+            prompt: cleanPrompt,
+            text: cleanText,
+            answer: cleanAnswer,
+            starred: false,
+            tags: []
+        }
+
+        list.unshift(newItem)
+        if (list.length > 300) {
+            list.length = 300
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function deleteHistoryItem(id) {
+        if (!root.history) return
+        root.history = root.history.filter(item => String(item.id) !== String(id))
+        root.saveHistory()
+    }
+
+    function toggleStar(id) {
+        if (!root.history) return
+        const list = root.history.slice()
+        for (let i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id)) {
+                list[i].starred = !list[i].starred
+                break
+            }
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function clearHistory() {
+        root.history = []
+        root.saveHistory()
+    }
+
+    function removeTagFromItem(itemId, tagToRemove) {
+        if (!root.history || !tagToRemove) return
+        const list = root.history.slice()
+        const lower = tagToRemove.trim().toLowerCase()
+        for (let i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(itemId)) {
+                const currentTags = list[i].tags || []
+                list[i].tags = currentTags.filter(t => t.trim().toLowerCase() !== lower)
+                break
+            }
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function deleteTagEntirely(tagToDelete) {
+        if (!root.history || !tagToDelete) return
+        const list = root.history.slice()
+        const lower = tagToDelete.trim().toLowerCase()
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].tags && list[i].tags.length > 0) {
+                list[i].tags = list[i].tags.filter(t => t.trim().toLowerCase() !== lower)
+            }
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function clearAllTags() {
+        if (!root.history) return
+        const list = root.history.slice()
+        for (let i = 0; i < list.length; i++) {
+            list[i].tags = []
+        }
+        root.history = list
+        root.saveHistory()
+    }
+
+    function reopenItem(item) {
+        if (!item) return
+        root.selectedText = item.text || ""
+        root.resultText = item.answer || ""
+        root.activeAction = item.action || ""
+        root.errorMessage = ""
+        root.errorType = ""
+    }
+
+    Process {
+        id: organizeProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py", "organize"]
+        stdout: SplitParser {
+            onRead: data => {
+                const line = data.trim()
+                if (!line) return
+                try {
+                    const msg = JSON.parse(line)
+                    if (msg.type === "organize_done") {
+                        root.isOrganizing = false
+                        if (msg.mapping) {
+                            const updated = root.history.slice()
+                            for (let i = 0; i < updated.length; i++) {
+                                const id = String(updated[i].id)
+                                if (msg.mapping[id]) {
+                                    updated[i].tags = msg.mapping[id]
+                                }
+                            }
+                            root.history = updated
+                        }
+                    } else if (msg.type === "error") {
+                        root.isOrganizing = false
+                    }
+                } catch (e) {
+                    root.isOrganizing = false
+                }
+            }
+        }
+        onExited: {
+            root.isOrganizing = false
+        }
+    }
+
+    function organizeHistory() {
+        if (root.isOrganizing) return
+        root.isOrganizing = true
+        organizeProc.running = true
+    }
+
     function runAction(action, customPrompt) {
         customPrompt = customPrompt || ""
         root.activeAction = action
+        root.activePrompt = customPrompt
 
         const isAsk = (action === "ask" && customPrompt && customPrompt.trim().length > 0)
         const hasText = (root.selectedText && root.selectedText.trim().length > 0)
