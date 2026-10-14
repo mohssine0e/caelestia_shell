@@ -30,7 +30,7 @@ Singleton {
             onStreamFinished: {
                 const txt = text ? text.trim() : ""
                 if (txt.length > 0) {
-                    Assistant.handleNewSelection(txt)
+                    root.handleNewSelection(txt)
                 } else {
                     clipFallbackProc.running = true
                 }
@@ -50,7 +50,7 @@ Singleton {
             onStreamFinished: {
                 const txt = text ? text.trim() : ""
                 if (txt.length > 0) {
-                    Assistant.handleNewSelection(txt)
+                    root.handleNewSelection(txt)
                 }
             }
         }
@@ -73,7 +73,7 @@ Singleton {
 
     Timer {
         id: clipWatchTimer
-        interval: 350
+        interval: 800
         repeat: true
         running: root.isWatching
         onTriggered: root.checkClipboard()
@@ -92,9 +92,9 @@ Singleton {
                         root.providerUsed = res.provider || ""
                         root.errorMessage = ""
                         root.hasApiKey = true
-                    } else if (res.error === "NO_API_KEY") {
+                    } else if (res.error === "NO_API_KEY" || res.error === "AUTH_ERROR") {
                         root.hasApiKey = false
-                        root.errorMessage = res.message || "Please provide an API key."
+                        root.errorMessage = res.message || "Invalid or missing API key."
                     } else {
                         root.errorMessage = res.message || "An error occurred."
                     }
@@ -105,22 +105,24 @@ Singleton {
         }
     }
 
-    // ── Config write process (for saving keys from UI) ───────────
+    // ── Config write process (Safe argv execution, no shell string interpolation) ──
     Process {
         id: saveConfigProc
+        onExited: {
+            if (root.activeAction) {
+                root.runAction(root.activeAction)
+            }
+        }
     }
 
     function saveKeys(geminiKey, groqKey) {
-        const payload = JSON.stringify({
-            gemini_key: (geminiKey || "").trim(),
-            groq_key: (groqKey || "").trim()
-        })
+        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
         saveConfigProc.command = [
-            "python3", "-c",
-            `import os, json; p = os.path.expanduser('~/.config/caelestia/assistant.json'); os.makedirs(os.path.dirname(p), exist_ok=True); open(p, 'w').write('''${payload}''')`
+            "python3", scriptPath, "save_config",
+            (geminiKey || "").trim(),
+            (groqKey || "").trim()
         ]
         saveConfigProc.running = true
-        root.hasApiKey = true
         root.errorMessage = ""
     }
 
@@ -132,6 +134,7 @@ Singleton {
         }
         root.isWatching = true
         root.errorMessage = ""
+        root.resultText = ""
         root.checkClipboard()
     }
 

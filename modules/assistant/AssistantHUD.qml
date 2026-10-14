@@ -26,6 +26,19 @@ FocusScope {
     Component.onCompleted: Qt.callLater(() => root.forceActiveFocus())
 
     Keys.onEscapePressed: event => {
+        // If typing in input, let Esc clear the field first rather than closing the whole HUD
+        if (customQuestionInput.activeFocus) {
+            if (customQuestionInput.text.length > 0) {
+                customQuestionInput.text = ""
+                event.accepted = true
+                return
+            }
+        }
+        if (geminiInput.activeFocus || groqInput.activeFocus) {
+            root.forceActiveFocus()
+            event.accepted = true
+            return
+        }
         root.closeRequested()
         event.accepted = true
     }
@@ -52,8 +65,8 @@ FocusScope {
             return
         }
 
-        // 'c' or Ctrl+C to copy output
-        if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier || !event.modifiers)) {
+        // Ctrl+C (explicit modifier) to copy output
+        if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
             if (Assistant.resultText.length > 0) {
                 Quickshell.clipboardText = Assistant.resultText
                 event.accepted = true
@@ -132,19 +145,24 @@ FocusScope {
             // ── Selected Text Preview ─────────────────────────────────
             StyledRect {
                 Layout.fillWidth: true
-                implicitHeight: Math.min(70, textSnippet.implicitHeight + Tokens.padding.small * 2)
+                implicitHeight: Math.min(80, textSnippet.implicitHeight + Tokens.padding.small * 2)
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerHigh
 
                 Flickable {
+                    id: snippetFlick
                     anchors.fill: parent
                     anchors.margins: Tokens.padding.small
                     contentHeight: textSnippet.implicitHeight
                     clip: true
 
+                    StyledScrollBar.vertical: StyledScrollBar {
+                        flickable: snippetFlick
+                    }
+
                     StyledText {
                         id: textSnippet
-                        width: parent.width
+                        width: snippetFlick.width - (snippetFlick.contentHeight > snippetFlick.height ? Tokens.padding.small : 0)
                         text: Assistant.selectedText.length > 0
                             ? Assistant.selectedText
                             : qsTr("No text captured. Highlight text anywhere and press Super+H.")
@@ -158,8 +176,8 @@ FocusScope {
                 }
             }
 
-            // ── Action Chips Row ──────────────────────────────────────
-            Flow {
+            // ── Action Chips Row (RowLayout for proper width distribution) ──
+            RowLayout {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.extraSmall
 
@@ -176,7 +194,7 @@ FocusScope {
                         required property var modelData
 
                         readonly property bool isSelected: Assistant.activeAction === modelData.id
-                        implicitWidth: chipRow.implicitWidth + Tokens.padding.small * 2
+                        Layout.fillWidth: true
                         implicitHeight: 28
                         radius: Tokens.rounding.full
                         color: isSelected
@@ -216,12 +234,22 @@ FocusScope {
 
             // ── Result Content View ───────────────────────────────────
             StyledRect {
+                id: resultContainer
                 Layout.fillWidth: true
-                implicitHeight: 340
+                implicitHeight: {
+                    if (Assistant.isLoading) return 200
+                    if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 220
+                    if (Assistant.resultText.length === 0) return 140
+                    return 340
+                }
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLowest
                 border.width: 1
                 border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
+
+                Behavior on implicitHeight {
+                    Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
+                }
 
                 // Loading Spinner / Indicator
                 ColumnLayout {
@@ -298,7 +326,6 @@ FocusScope {
                             text: qsTr("Save Keys")
                             onClicked: {
                                 Assistant.saveKeys(geminiInput.text, groqInput.text)
-                                Assistant.runAction(Assistant.activeAction)
                             }
                         }
                     }
