@@ -20,6 +20,7 @@ Singleton {
     property string errorType: "" // "network", "auth", "rate_limit", "no_selection", "generic"
     property bool hasApiKey: true
     property bool isTruncated: false
+    property int truncatedAt: 12000
 
     // In-memory query response cache
     property var responseCache: ({})
@@ -83,15 +84,8 @@ Singleton {
         if (!txt || txt === root.lastSeenClipboard) return
         
         root.lastSeenClipboard = txt
-        
-        // Truncate text over 4000 characters
-        if (txt.length > 4000) {
-            root.selectedText = txt.slice(0, 4000)
-            root.isTruncated = true
-        } else {
-            root.selectedText = txt
-            root.isTruncated = false
-        }
+        root.selectedText = txt
+        root.isTruncated = false
 
         // Cancel any pending in-flight streaming
         root.cancelCurrentRequest()
@@ -125,6 +119,12 @@ Singleton {
                     const msg = JSON.parse(line)
                     if (msg.type === "start") {
                         root.providerUsed = msg.provider || ""
+                        if (msg.truncated !== undefined) {
+                            root.isTruncated = !!msg.truncated
+                        }
+                        if (msg.truncated_at !== undefined) {
+                            root.truncatedAt = msg.truncated_at
+                        }
                     } else if (msg.type === "chunk") {
                         root.isLoading = false
                         root.resultText += msg.text
@@ -132,6 +132,12 @@ Singleton {
                         root.isLoading = false
                         root.providerUsed = msg.provider || root.providerUsed
                         root.latencyMs = msg.latency_ms || 0
+                        if (msg.truncated !== undefined) {
+                            root.isTruncated = !!msg.truncated
+                        }
+                        if (msg.truncated_at !== undefined) {
+                            root.truncatedAt = msg.truncated_at
+                        }
                         root.errorMessage = ""
                         root.errorType = ""
                         root.hasApiKey = true
@@ -141,7 +147,9 @@ Singleton {
                         root.responseCache[cacheKey] = {
                             resultText: root.resultText,
                             provider: root.providerUsed,
-                            latencyMs: root.latencyMs
+                            latencyMs: root.latencyMs,
+                            isTruncated: root.isTruncated,
+                            truncatedAt: root.truncatedAt
                         }
                     } else if (msg.type === "error") {
                         root.isLoading = false
@@ -243,6 +251,8 @@ Singleton {
             root.resultText = cached.resultText
             root.providerUsed = cached.provider + " (cached)"
             root.latencyMs = 0
+            root.isTruncated = !!cached.isTruncated
+            root.truncatedAt = cached.truncatedAt || 12000
             root.errorMessage = ""
             root.errorType = ""
             root.isLoading = false
@@ -256,6 +266,7 @@ Singleton {
         root.errorMessage = ""
         root.errorType = ""
         root.resultText = ""
+        root.isTruncated = false
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
         const args = ["python3", "-u", scriptPath, action, root.selectedText]

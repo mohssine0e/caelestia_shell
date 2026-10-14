@@ -38,11 +38,20 @@ def emit(obj):
     sys.stdout.flush()
 
 def load_config():
-    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini"}
+    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini", "max_chars": 12000}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg.update(json.load(f))
+                data = json.load(f)
+                if isinstance(data, dict):
+                    cfg.update(data)
+                    # Normalize alternative key names from config schema
+                    if "gemini_api_key" in data and not cfg.get("gemini_key"):
+                        cfg["gemini_key"] = data["gemini_api_key"]
+                    if "groq_api_key" in data and not cfg.get("groq_key"):
+                        cfg["groq_key"] = data["groq_api_key"]
+                    if "preferred_provider" in data:
+                        cfg["primary"] = data["preferred_provider"]
         except Exception:
             pass
     if os.environ.get("GEMINI_API_KEY"):
@@ -50,6 +59,24 @@ def load_config():
     if os.environ.get("GROQ_API_KEY"):
         cfg["groq_key"] = os.environ.get("GROQ_API_KEY")
     return cfg
+
+def get_provider_ceiling(primary, gemini_key, groq_key):
+    prov = (primary or "").strip().lower()
+    has_gemini = bool(gemini_key and gemini_key.strip())
+    has_groq = bool(groq_key and groq_key.strip())
+
+    if prov == "gemini":
+        return 200000
+    if prov == "groq":
+        return 100000
+
+    if has_gemini and not has_groq:
+        return 200000
+    if has_groq and not has_gemini:
+        return 100000
+
+    # Both configured and it's auto (or fallback): smaller of the two caps
+    return 100000
 
 def save_config(gemini_key, groq_key):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -209,27 +236,47 @@ def main():
         })
         sys.exit(0)
 
-    user_payload = text
+    # Determine truncation limit and apply provider ceiling
+    raw_max_chars = config.get("max_chars")
+    try:
+        max_chars = int(raw_max_chars)
+        if max_chars <= 0:
+            max_chars = 12000
+    except (TypeError, ValueError):
+        max_chars = 12000
+
+    ceiling = get_provider_ceiling(primary, gemini_key, groq_key)
+    effective_limit = min(max_chars, ceiling)
+
+    is_truncated = False
+    if text and len(text) > effective_limit:
+        text_to_process = text[:effective_limit]
+        is_truncated = True
+    else:
+        text_to_process = text
+
+    user_payload = text_to_process
     if action == "ask":
-        if custom_prompt and text.strip():
+        if custom_prompt and text_to_process.strip():
             system_instruction = (
                 "You are an expert reading assistant. Answer the user's question clearly and concisely "
                 "using the provided context text as reference when relevant."
             )
-            user_payload = f"Context text:\n{text}\n\nUser Question: {custom_prompt}"
+            user_payload = f"Context text:\n{text_to_process}\n\nUser Question: {custom_prompt}"
         elif custom_prompt:
             system_instruction = (
                 "You are a helpful, knowledgeable, and concise AI assistant. "
                 "Directly and accurately answer the user's question."
             )
             user_payload = custom_prompt
-        elif text.strip():
+        elif text_to_process.strip():
             system_instruction = (
                 "You are an expert assistant. Explain or answer regarding the provided text clearly and concisely."
             )
-            user_payload = text
+            user_payload = text_to_process
     else:
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
+        user_payload = text_to_process
 
     providers = []
     if primary == "groq":
@@ -248,7 +295,12 @@ def main():
     for prov_name, key, prov_label in providers:
         try:
             # Emit start header so UI immediately knows provider
-            emit({"type": "start", "provider": prov_label})
+            emit({
+                "type": "start",
+                "provider": prov_label,
+                "truncated": is_truncated,
+                "truncated_at": effective_limit
+            })
             chosen_provider = prov_label
 
             if prov_name == "gemini":
@@ -272,7 +324,9 @@ def main():
         emit({
             "type": "done",
             "provider": chosen_provider,
-            "latency_ms": elapsed_ms
+            "latency_ms": elapsed_ms,
+            "truncated": is_truncated,
+            "truncated_at": effective_limit
         })
     else:
         err_info = classify_error(last_err_str, last_http_code)

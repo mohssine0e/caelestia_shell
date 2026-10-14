@@ -221,7 +221,11 @@ FocusScope {
                         StyledText {
                             id: truncText
                             anchors.centerIn: parent
-                            text: qsTr("Truncated (4k)")
+                            text: {
+                                const limit = Assistant.truncatedAt > 0 ? Assistant.truncatedAt : 12000
+                                const k = Math.round(limit / 1000)
+                                return qsTr("Truncated (%1k)").arg(k)
+                            }
                             font: Tokens.font.label.small
                             color: Colours.palette.m3error
                         }
