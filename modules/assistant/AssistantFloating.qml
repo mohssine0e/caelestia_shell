@@ -30,10 +30,14 @@ Scope {
                 onClosed: {
                     if (win.st) win.st.assistant = false
                     Assistant.isWatching = false
+                    Assistant.cancelCurrentRequest()
                 }
                 onVisibleChanged: {
-                    if (!visible && win.st && win.st.assistant)
-                        win.st.assistant = false
+                    if (!visible) {
+                        if (win.st && win.st.assistant)
+                            win.st.assistant = false
+                        Assistant.cancelCurrentRequest()
+                    }
                     Assistant.isWatching = visible
                 }
 

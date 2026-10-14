@@ -2,10 +2,10 @@
 import sys
 import json
 import os
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
-import subprocess
 
 CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
 
@@ -33,6 +33,10 @@ PROMPTS = {
     )
 }
 
+def emit(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
 def load_config():
     cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini"}
     if os.path.exists(CONFIG_PATH):
@@ -56,8 +60,7 @@ def save_config(gemini_key, groq_key):
         json.dump(cfg, f, indent=2)
     return {"success": True}
 
-def call_gemini(api_key, system_instruction, user_text):
-    # Verified working models in current environment
+def stream_gemini(api_key, system_instruction, user_text):
     candidate_models = [
         "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
@@ -65,7 +68,7 @@ def call_gemini(api_key, system_instruction, user_text):
     ]
     last_err = None
     for model_name in candidate_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
         payload = {
             "contents": [
                 {
@@ -80,26 +83,35 @@ def call_gemini(api_key, system_instruction, user_text):
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            },
+            headers={"Content-Type": "application/json"},
             method="POST"
         )
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                candidates = data.get("candidates", [])
-                if candidates and "content" in candidates[0]:
-                    parts = candidates[0]["content"].get("parts", [])
-                    if parts:
-                        return "".join(p.get("text", "") for p in parts)
+                emitted_any = False
+                for line in resp:
+                    line_str = line.decode("utf-8", errors="replace").strip()
+                    if line_str.startswith("data:"):
+                        raw_data = line_str[5:].strip()
+                        if not raw_data:
+                            continue
+                        try:
+                            parsed = json.loads(raw_data)
+                            candidates = parsed.get("candidates", [])
+                            if candidates and "content" in candidates[0]:
+                                parts = candidates[0]["content"].get("parts", [])
+                                for p in parts:
+                                    chunk_text = p.get("text", "")
+                                    if chunk_text:
+                                        emit({"type": "chunk", "text": chunk_text})
+                                        emitted_any = True
+                        except Exception:
+                            continue
+                return True
         except urllib.error.HTTPError as e:
             last_err = e
-            # Only retry next model if 404 (not found) or 503 (transient overload)
             if e.code in (404, 503):
                 continue
-            # If 400, 401, 403 (Invalid key or quota issue), re-raise immediately
             raise e
         except Exception as e:
             last_err = e
@@ -107,9 +119,9 @@ def call_gemini(api_key, system_instruction, user_text):
 
     if last_err:
         raise last_err
-    return "No response generated."
+    return False
 
-def call_groq(api_key, system_instruction, user_text):
+def stream_groq(api_key, system_instruction, user_text):
     url = "https://api.groq.com/openai/v1/chat/completions"
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -118,7 +130,8 @@ def call_groq(api_key, system_instruction, user_text):
             {"role": "user", "content": user_text}
         ],
         "temperature": 0.4,
-        "max_tokens": 1024
+        "max_tokens": 1024,
+        "stream": True
     }
     req = urllib.request.Request(
         url,
@@ -130,24 +143,53 @@ def call_groq(api_key, system_instruction, user_text):
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        choices = data.get("choices", [])
-        if choices and "message" in choices[0]:
-            return choices[0]["message"].get("content", "")
-    return "No response generated."
+        for line in resp:
+            line_str = line.decode("utf-8", errors="replace").strip()
+            if line_str.startswith("data:"):
+                raw = line_str[5:].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    d = json.loads(raw)
+                    delta = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    if delta:
+                        emit({"type": "chunk", "text": delta})
+                except Exception:
+                    continue
+    return True
+
+def classify_error(err_str, http_code=None):
+    if http_code in (400, 401, 403):
+        return {
+            "error_type": "auth",
+            "message": "Invalid API key or authentication failed."
+        }
+    if http_code == 429 or "rate" in err_str.lower() or "quota" in err_str.lower():
+        return {
+            "error_type": "rate_limit",
+            "message": "API rate limit reached. Please wait a few seconds."
+        }
+    if "unavailable" in err_str.lower() or "timeout" in err_str.lower() or "connection" in err_str.lower():
+        return {
+            "error_type": "network",
+            "message": "Network error or service unavailable. Check your connection."
+        }
+    return {
+        "error_type": "generic",
+        "message": err_str or "An error occurred while generating response."
+    }
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: assistant_api.py <action> [args...]"}))
+        emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
         sys.exit(1)
 
     cmd = sys.argv[1]
 
-    # Subcommand: secure config save via argv
     if cmd == "save_config":
         gemini_key = sys.argv[2] if len(sys.argv) > 2 else ""
         groq_key = sys.argv[3] if len(sys.argv) > 3 else ""
-        print(json.dumps(save_config(gemini_key, groq_key)))
+        emit(save_config(gemini_key, groq_key))
         sys.exit(0)
 
     action = cmd
@@ -160,10 +202,11 @@ def main():
     primary = config.get("primary", "gemini").lower()
 
     if not gemini_key and not groq_key:
-        print(json.dumps({
-            "error": "NO_API_KEY",
-            "message": "Please configure your Gemini or Groq API key in ~/.config/caelestia/assistant.json"
-        }))
+        emit({
+            "type": "error",
+            "error_type": "auth",
+            "message": "Please configure your Gemini or Groq API key."
+        })
         sys.exit(0)
 
     system_instruction = PROMPTS.get(action, PROMPTS["explain"])
@@ -171,56 +214,57 @@ def main():
     if action == "ask" and custom_prompt:
         user_payload = f"Context text:\n{text}\n\nUser Question: {custom_prompt}"
 
-    result = None
-    used_provider = ""
-    error_msg = ""
-    is_auth_error = False
-
-    # Determine execution order based on config primary
     providers = []
     if primary == "groq":
-        if groq_key: providers.append(("groq", groq_key))
-        if gemini_key: providers.append(("gemini", gemini_key))
+        if groq_key: providers.append(("groq", groq_key, "Groq Llama 3.3"))
+        if gemini_key: providers.append(("gemini", gemini_key, "Gemini Flash"))
     else:
-        if gemini_key: providers.append(("gemini", gemini_key))
-        if groq_key: providers.append(("groq", groq_key))
+        if gemini_key: providers.append(("gemini", gemini_key, "Gemini Flash"))
+        if groq_key: providers.append(("groq", groq_key, "Groq Llama 3.3"))
 
-    for prov_name, key in providers:
-        if prov_name == "gemini":
-            try:
-                result = call_gemini(key, system_instruction, user_payload)
-                used_provider = "Gemini Flash"
-                break
-            except urllib.error.HTTPError as e:
-                if e.code in (400, 401, 403):
-                    is_auth_error = True
-                error_msg = f"Gemini error: {e}"
-            except Exception as e:
-                error_msg = f"Gemini error: {e}"
-        elif prov_name == "groq":
-            try:
-                result = call_groq(key, system_instruction, user_payload)
-                used_provider = "Groq Llama 3.3"
-                break
-            except urllib.error.HTTPError as e:
-                if e.code in (400, 401, 403):
-                    is_auth_error = True
-                error_msg += f" | Groq error: {e}"
-            except Exception as e:
-                error_msg += f" | Groq error: {e}"
+    start_time = time.perf_counter()
+    success = False
+    last_err_str = ""
+    last_http_code = None
+    chosen_provider = ""
 
-    if result:
-        print(json.dumps({
-            "success": True,
-            "provider": used_provider,
-            "content": result.strip()
-        }))
+    for prov_name, key, prov_label in providers:
+        try:
+            # Emit start header so UI immediately knows provider
+            emit({"type": "start", "provider": prov_label})
+            chosen_provider = prov_label
+
+            if prov_name == "gemini":
+                stream_gemini(key, system_instruction, user_payload)
+            elif prov_name == "groq":
+                stream_groq(key, system_instruction, user_payload)
+
+            success = True
+            break
+        except urllib.error.HTTPError as e:
+            last_http_code = e.code
+            last_err_str = str(e)
+            if e.code in (400, 401, 403):
+                break  # Don't fallback on bad auth
+        except Exception as e:
+            last_err_str = str(e)
+
+    elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+
+    if success:
+        emit({
+            "type": "done",
+            "provider": chosen_provider,
+            "latency_ms": elapsed_ms
+        })
     else:
-        err_type = "AUTH_ERROR" if is_auth_error else "API_CALL_FAILED"
-        print(json.dumps({
-            "error": err_type,
-            "message": error_msg or "Failed to connect to AI providers."
-        }))
+        err_info = classify_error(last_err_str, last_http_code)
+        emit({
+            "type": "error",
+            "error_type": err_info["error_type"],
+            "latency_ms": elapsed_ms,
+            "message": err_info["message"]
+        })
 
 if __name__ == "__main__":
     main()

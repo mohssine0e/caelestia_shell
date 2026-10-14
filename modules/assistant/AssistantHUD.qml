@@ -26,7 +26,6 @@ FocusScope {
     Component.onCompleted: Qt.callLater(() => root.forceActiveFocus())
 
     Keys.onEscapePressed: event => {
-        // If typing in input, let Esc clear the field first rather than closing the whole HUD
         if (customQuestionInput.activeFocus) {
             if (customQuestionInput.text.length > 0) {
                 customQuestionInput.text = ""
@@ -44,13 +43,11 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
-        // If a text input inside is active, don't hijack its typing
         if (customQuestionInput.activeFocus || geminiInput.activeFocus || groqInput.activeFocus) {
             event.accepted = false
             return
         }
 
-        // Quick action switching with 1-5
         const actionMap = {
             [Qt.Key_1]: "translate",
             [Qt.Key_2]: "explain",
@@ -65,7 +62,6 @@ FocusScope {
             return
         }
 
-        // Ctrl+C (explicit modifier) to copy output
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
             if (Assistant.resultText.length > 0) {
                 Quickshell.clipboardText = Assistant.resultText
@@ -74,7 +70,6 @@ FocusScope {
             }
         }
 
-        // '/' to focus question input
         if (event.key === Qt.Key_Slash) {
             customQuestionInput.forceActiveFocus()
             event.accepted = true
@@ -106,7 +101,7 @@ FocusScope {
             anchors.margins: Tokens.padding.medium
             spacing: Tokens.spacing.small
 
-            // ── Header Row ───────────────────────────────────────────
+            // ── 1. Header Row & Provider Badge ────────────────────────
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
@@ -125,11 +120,57 @@ FocusScope {
 
                 Item { Layout.fillWidth: true }
 
-                StyledText {
+                // Word Count Badge in Header
+                StyledRect {
+                    visible: Assistant.selectedText.trim().length > 0
+                    implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
+                    implicitHeight: 24
+                    radius: Tokens.rounding.full
+                    color: Colours.palette.m3surfaceContainerHigh
+
+                    StyledText {
+                        id: countText
+                        anchors.centerIn: parent
+                        text: {
+                            const trimmed = Assistant.selectedText.trim()
+                            if (!trimmed) return ""
+                            const words = trimmed.split(/\s+/).length
+                            return words === 1 ? qsTr("1 word") : qsTr("%1 words").arg(words)
+                        }
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3outline
+                    }
+                }
+
+                // Provider Badge with Live Dot & Latency
+                StyledRect {
                     visible: Assistant.providerUsed.length > 0
-                    text: Assistant.providerUsed
-                    font: Tokens.font.label.small
-                    color: Colours.palette.m3primary
+                    implicitWidth: badgeRow.implicitWidth + Tokens.padding.small * 2
+                    implicitHeight: 24
+                    radius: Tokens.rounding.full
+                    color: Colours.palette.m3surfaceContainerHigh
+
+                    RowLayout {
+                        id: badgeRow
+                        anchors.centerIn: parent
+                        spacing: 6
+
+                        // Status dot
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: Colours.palette.m3primary
+                        }
+
+                        StyledText {
+                            text: Assistant.latencyMs > 0
+                                ? `${Assistant.providerUsed} • ${(Assistant.latencyMs / 1000).toFixed(1)}s`
+                                : Assistant.providerUsed
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
+                    }
                 }
 
                 IconButton {
@@ -142,12 +183,34 @@ FocusScope {
                 }
             }
 
-            // ── Selected Text Preview ─────────────────────────────────
+            // ── 2. Snippet Preview ────────────────────────────────────
             StyledRect {
+                id: snippetCard
                 Layout.fillWidth: true
-                implicitHeight: Math.min(80, textSnippet.implicitHeight + Tokens.padding.small * 2)
+                implicitHeight: Math.min(85, textSnippet.implicitHeight + Tokens.padding.small * 2)
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerHigh
+
+                // Truncated indicator badge
+                StyledRect {
+                    z: 3
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.margins: 4
+                    visible: Assistant.isTruncated
+                    radius: Tokens.rounding.full
+                    color: Qt.alpha(Colours.palette.m3error, 0.2)
+                    implicitWidth: truncText.implicitWidth + 8
+                    implicitHeight: 18
+
+                    StyledText {
+                        id: truncText
+                        anchors.centerIn: parent
+                        text: qsTr("Truncated (4k chars)")
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3error
+                    }
+                }
 
                 Flickable {
                     id: snippetFlick
@@ -166,9 +229,14 @@ FocusScope {
                         text: Assistant.selectedText.length > 0
                             ? Assistant.selectedText
                             : qsTr("No text captured. Highlight text anywhere and press Super+H.")
-                        font: Tokens.font.body.small
+                        font: {
+                            const words = Assistant.selectedText.trim().split(/\s+/).length
+                            return (words === 1 && Assistant.selectedText.trim().length > 0)
+                                ? Tokens.font.title.small
+                                : Tokens.font.body.small
+                        }
                         color: Assistant.selectedText.length > 0
-                            ? Colours.palette.m3onSurfaceVariant
+                            ? Colours.palette.m3onSurface
                             : Colours.palette.m3outline
                         wrapMode: Text.Wrap
                         elide: Text.ElideNone
@@ -176,7 +244,7 @@ FocusScope {
                 }
             }
 
-            // ── Action Chips Row (RowLayout for proper width distribution) ──
+            // ── 3. Action Chips Row with StateLayer Hover Glow ────────
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.extraSmall
@@ -191,11 +259,12 @@ FocusScope {
                     ]
 
                     delegate: StyledRect {
+                        id: chip
                         required property var modelData
 
                         readonly property bool isSelected: Assistant.activeAction === modelData.id
                         Layout.fillWidth: true
-                        implicitHeight: 28
+                        implicitHeight: 30
                         radius: Tokens.rounding.full
                         color: isSelected
                             ? Colours.palette.m3primary
@@ -207,39 +276,41 @@ FocusScope {
                             spacing: 4
 
                             MaterialIcon {
-                                text: modelData.icon
+                                text: chip.modelData.icon
                                 fontStyle: Tokens.font.icon.small
-                                color: isSelected
+                                color: chip.isSelected
                                     ? Colours.palette.m3onPrimary
                                     : Colours.palette.m3onSurfaceVariant
                             }
 
                             StyledText {
-                                text: `${modelData.key}. ${modelData.label}`
+                                text: chip.modelData.label
                                 font: Tokens.font.label.small
-                                color: isSelected
+                                color: chip.isSelected
                                     ? Colours.palette.m3onPrimary
                                     : Colours.palette.m3onSurfaceVariant
                             }
                         }
 
-                        MouseArea {
+                        StateLayer {
+                            id: stateLayer
                             anchors.fill: parent
+                            radius: chip.radius
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: Assistant.runAction(modelData.id)
+                            onClicked: Assistant.runAction(chip.modelData.id)
                         }
                     }
                 }
             }
 
-            // ── Result Content View ───────────────────────────────────
+            // ── 4. Main Result View / Shimmer Skeleton ────────────────
             StyledRect {
                 id: resultContainer
                 Layout.fillWidth: true
                 implicitHeight: {
-                    if (Assistant.isLoading) return 200
+                    if (Assistant.isLoading) return 220
                     if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 220
-                    if (Assistant.resultText.length === 0) return 140
+                    if (Assistant.resultText.length === 0) return 170
                     return 340
                 }
                 radius: Tokens.rounding.small
@@ -251,36 +322,65 @@ FocusScope {
                     Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
                 }
 
-                // Loading Spinner / Indicator
+                // 4A. Shimmer / Pulsing Skeleton Indicator
                 ColumnLayout {
                     anchors.centerIn: parent
+                    width: parent.width - Tokens.padding.large * 2
                     visible: Assistant.isLoading
-                    spacing: Tokens.spacing.small
+                    spacing: Tokens.spacing.medium
 
-                    MaterialIcon {
+                    RowLayout {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "progress_activity"
-                        fontStyle: Tokens.font.icon.large
-                        color: Colours.palette.m3primary
+                        spacing: Tokens.spacing.small
 
-                        RotationAnimation on rotation {
-                            from: 0
-                            to: 360
-                            duration: 1200
-                            loops: Animation.Infinite
-                            running: Assistant.isLoading
+                        MaterialIcon {
+                            text: "progress_activity"
+                            fontStyle: Tokens.font.icon.medium
+                            color: Colours.palette.m3primary
+
+                            RotationAnimation on rotation {
+                                from: 0
+                                to: 360
+                                duration: 1100
+                                loops: Animation.Infinite
+                                running: Assistant.isLoading
+                            }
+                        }
+
+                        StyledText {
+                            text: qsTr("Synthesizing answer...")
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurfaceVariant
                         }
                     }
 
-                    StyledText {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: qsTr("Thinking...")
-                        font: Tokens.font.body.small
-                        color: Colours.palette.m3onSurfaceVariant
+                    // Pulsing Skeleton Bars
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Repeater {
+                            model: [1.0, 0.85, 0.6]
+                            delegate: StyledRect {
+                                id: bar
+                                required property real modelData
+                                Layout.preferredWidth: (resultContainer.width - Tokens.padding.large * 2) * modelData
+                                implicitHeight: 12
+                                radius: Tokens.rounding.full
+                                color: Colours.palette.m3surfaceContainerHigh
+
+                                SequentialAnimation on opacity {
+                                    running: Assistant.isLoading
+                                    loops: Animation.Infinite
+                                    Anim { target: bar; property: "opacity"; from: 0.35; to: 0.85; duration: 750 }
+                                    Anim { target: bar; property: "opacity"; from: 0.85; to: 0.35; duration: 750 }
+                                }
+                            }
+                        }
                     }
                 }
 
-                // Error / Missing API Key View
+                // 4B. Error / Missing API Key View
                 ColumnLayout {
                     anchors.centerIn: parent
                     width: parent.width - Tokens.padding.medium * 2
@@ -289,9 +389,19 @@ FocusScope {
 
                     MaterialIcon {
                         Layout.alignment: Qt.AlignHCenter
-                        text: !Assistant.hasApiKey ? "key" : "warning"
+                        text: {
+                            if (!Assistant.hasApiKey || Assistant.errorType === "auth") return "vpn_key"
+                            if (Assistant.errorType === "network") return "wifi_off"
+                            if (Assistant.errorType === "rate_limit") return "hourglass_empty"
+                            if (Assistant.errorType === "no_selection") return "content_paste_off"
+                            return "error_outline"
+                        }
                         fontStyle: Tokens.font.icon.large
-                        color: Colours.palette.m3error
+                        color: {
+                            if (Assistant.errorType === "rate_limit") return Colours.palette.m3tertiary
+                            if (Assistant.errorType === "no_selection") return Colours.palette.m3outline
+                            return Colours.palette.m3error
+                        }
                     }
 
                     StyledText {
@@ -300,13 +410,16 @@ FocusScope {
                         wrapMode: Text.Wrap
                         text: Assistant.errorMessage
                         font: Tokens.font.body.small
-                        color: Colours.palette.m3error
+                        color: {
+                            if (Assistant.errorType === "rate_limit") return Colours.palette.m3tertiary
+                            if (Assistant.errorType === "no_selection") return Colours.palette.m3outline
+                            return Colours.palette.m3error
+                        }
                     }
 
-                    // Key setup mini inputs
                     ColumnLayout {
                         Layout.fillWidth: true
-                        visible: !Assistant.hasApiKey || Assistant.errorMessage.length > 0
+                        visible: !Assistant.hasApiKey || Assistant.errorType === "auth"
                         spacing: Tokens.spacing.extraSmall
 
                         StyledTextField {
@@ -331,31 +444,76 @@ FocusScope {
                     }
                 }
 
-                // Idle / Waiting for user choice
+                // 4C. Idle State with Keyboard Badges
                 ColumnLayout {
                     anchors.centerIn: parent
                     width: parent.width - Tokens.padding.large * 2
                     visible: !Assistant.isLoading && Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.resultText.length === 0
-                    spacing: Tokens.spacing.small
+                    spacing: Tokens.spacing.medium
 
-                    MaterialIcon {
+                    RowLayout {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "touch_app"
-                        fontStyle: Tokens.font.icon.large
-                        color: Colours.palette.m3outline
+                        spacing: 8
+
+                        MaterialIcon {
+                            text: "touch_app"
+                            fontStyle: Tokens.font.icon.medium
+                            color: Colours.palette.m3primary
+                        }
+
+                        StyledText {
+                            text: qsTr("Choose an action above or ask anything below")
+                            font: Tokens.font.body.medium
+                            color: Colours.palette.m3onSurface
+                        }
                     }
 
-                    StyledText {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        text: qsTr("Select an action above (1-5) or ask a question below")
-                        font: Tokens.font.body.medium
-                        color: Colours.palette.m3outline
-                        wrapMode: Text.Wrap
+                    // Keyboard Shortcuts Hint Badges
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: Tokens.spacing.small
+
+                        Repeater {
+                            model: [
+                                { key: "1-5", label: qsTr("Actions") },
+                                { key: "/",   label: qsTr("Question") },
+                                { key: "Ctrl+C", label: qsTr("Copy") },
+                                { key: "Esc", label: qsTr("Dismiss") }
+                            ]
+
+                            delegate: RowLayout {
+                                id: badgeGroup
+                                required property var modelData
+                                spacing: 4
+
+                                StyledRect {
+                                    implicitWidth: keyLabel.implicitWidth + 8
+                                    implicitHeight: 20
+                                    radius: Tokens.rounding.extraSmall
+                                    color: Colours.palette.m3surfaceContainerHigh
+                                    border.width: 1
+                                    border.color: Colours.palette.m3outlineVariant
+
+                                    StyledText {
+                                        id: keyLabel
+                                        anchors.centerIn: parent
+                                        text: badgeGroup.modelData.key
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3primary
+                                    }
+                                }
+
+                                StyledText {
+                                    text: badgeGroup.modelData.label
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3outline
+                                }
+                            }
+                        }
                     }
                 }
 
-                // Result Text
+                // 4D. Result Markdown Output
                 Flickable {
                     id: flick
                     anchors.fill: parent
@@ -372,6 +530,8 @@ FocusScope {
                         id: contentText
                         width: flick.width - Tokens.padding.small
                         text: Assistant.resultText
+                        lineHeight: 1.35
+                        lineHeightMode: Text.ProportionalHeight
                         font: Tokens.font.body.medium
                         color: Colours.palette.m3onSurface
                         wrapMode: Text.Wrap
@@ -386,7 +546,7 @@ FocusScope {
                 }
             }
 
-            // ── Footer / Custom Question Bar ──────────────────────────
+            // ── 5. Footer / Custom Question Bar ───────────────────────
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.small
@@ -420,7 +580,7 @@ FocusScope {
 
                 IconButton {
                     id: copyBtn
-                    type: IconButton.Tonal
+                    type: IconButton.Filled
                     property bool copied: false
                     icon: copied ? "check" : "content_copy"
                     font: Tokens.font.icon.small

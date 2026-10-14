@@ -14,9 +14,15 @@ Singleton {
     property string activeAction: "" // translate, explain, tldr, rephrase, examples, ask
     property string resultText: ""
     property string providerUsed: ""
+    property int latencyMs: 0
     property bool isLoading: false
     property string errorMessage: ""
+    property string errorType: "" // "network", "auth", "rate_limit", "no_selection", "generic"
     property bool hasApiKey: true
+    property bool isTruncated: false
+
+    // In-memory query response cache
+    property var responseCache: ({})
 
     readonly property string configPath: Quickshell.env("HOME") + "/.config/caelestia/assistant.json"
 
@@ -25,7 +31,7 @@ Singleton {
 
     Process {
         id: clipProc
-        command: ["wl-paste", "-p"]
+        command: ["wl-paste", "-p", "--type", "text"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const txt = text ? text.trim() : ""
@@ -45,7 +51,7 @@ Singleton {
 
     Process {
         id: clipFallbackProc
-        command: ["wl-paste"]
+        command: ["wl-paste", "--type", "text"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const txt = text ? text.trim() : ""
@@ -58,10 +64,23 @@ Singleton {
 
     function handleNewSelection(txt) {
         if (!txt || txt === root.selectedText) return
-        root.selectedText = txt
+        
+        // Truncate text over 4000 characters
+        if (txt.length > 4000) {
+            root.selectedText = txt.slice(0, 4000)
+            root.isTruncated = true
+        } else {
+            root.selectedText = txt
+            root.isTruncated = false
+        }
+
+        // Cancel any pending in-flight streaming
+        root.cancelCurrentRequest()
+
         // Reset previous result so user sees fresh text and can choose action
         root.resultText = ""
         root.errorMessage = ""
+        root.errorType = ""
         root.isLoading = false
     }
 
@@ -79,33 +98,65 @@ Singleton {
         onTriggered: root.checkClipboard()
     }
 
-    // ── AI Worker process ─────────────────────────────────────────
+    // ── Streaming AI Worker Process via SplitParser ──────────────
     Process {
         id: apiProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                root.isLoading = false
+        stdout: SplitParser {
+            onRead: data => {
+                const line = data.trim()
+                if (!line) return
                 try {
-                    const res = JSON.parse(text)
-                    if (res.success) {
-                        root.resultText = res.content
-                        root.providerUsed = res.provider || ""
+                    const msg = JSON.parse(line)
+                    if (msg.type === "start") {
+                        root.providerUsed = msg.provider || ""
+                    } else if (msg.type === "chunk") {
+                        root.isLoading = false
+                        root.resultText += msg.text
+                    } else if (msg.type === "done") {
+                        root.isLoading = false
+                        root.providerUsed = msg.provider || root.providerUsed
+                        root.latencyMs = msg.latency_ms || 0
                         root.errorMessage = ""
+                        root.errorType = ""
                         root.hasApiKey = true
-                    } else if (res.error === "NO_API_KEY" || res.error === "AUTH_ERROR") {
-                        root.hasApiKey = false
-                        root.errorMessage = res.message || "Invalid or missing API key."
-                    } else {
-                        root.errorMessage = res.message || "An error occurred."
+
+                        // Cache completed response
+                        const cacheKey = root.getCacheKey(root.activeAction, root.selectedText, "")
+                        root.responseCache[cacheKey] = {
+                            resultText: root.resultText,
+                            provider: root.providerUsed,
+                            latencyMs: root.latencyMs
+                        }
+                    } else if (msg.type === "error") {
+                        root.isLoading = false
+                        root.errorMessage = msg.message || "An error occurred."
+                        root.errorType = msg.error_type || "generic"
+                        if (msg.error_type === "auth") {
+                            root.hasApiKey = false
+                        }
                     }
                 } catch (e) {
-                    root.errorMessage = "Failed to parse API response."
+                    // Ignore malformed chunks
                 }
             }
         }
+        onExited: {
+            root.isLoading = false
+        }
     }
 
-    // ── Config write process (Safe argv execution, no shell string interpolation) ──
+    function getCacheKey(action, text, customPrompt) {
+        return `${action}:::${text.trim()}:::${(customPrompt || "").trim()}`
+    }
+
+    function cancelCurrentRequest() {
+        if (apiProc.running) {
+            apiProc.running = false
+        }
+        root.isLoading = false
+    }
+
+    // ── Config write process (Safe argv execution) ────────────────
     Process {
         id: saveConfigProc
         onExited: {
@@ -124,6 +175,7 @@ Singleton {
         ]
         saveConfigProc.running = true
         root.errorMessage = ""
+        root.errorType = ""
     }
 
     // ── Trigger HUD & grab current selection ──────────────────────
@@ -134,6 +186,7 @@ Singleton {
         }
         root.isWatching = true
         root.errorMessage = ""
+        root.errorType = ""
         root.resultText = ""
         root.checkClipboard()
     }
@@ -144,6 +197,7 @@ Singleton {
             if (st.assistant) {
                 st.assistant = false
                 root.isWatching = false
+                root.cancelCurrentRequest()
             } else {
                 root.trigger()
             }
@@ -153,18 +207,38 @@ Singleton {
     function runAction(action, customPrompt) {
         customPrompt = customPrompt || ""
         root.activeAction = action
+
         if (!root.selectedText || root.selectedText.trim().length === 0) {
-            root.errorMessage = "No text provided."
+            root.errorType = "no_selection"
+            root.errorMessage = "No text selected or copied."
             root.isLoading = false
             return
         }
 
+        // Check in-memory cache for instant replay
+        const cacheKey = root.getCacheKey(action, root.selectedText, customPrompt)
+        const cached = root.responseCache[cacheKey]
+        if (cached && !customPrompt) {
+            root.cancelCurrentRequest()
+            root.resultText = cached.resultText
+            root.providerUsed = cached.provider + " (cached)"
+            root.latencyMs = 0
+            root.errorMessage = ""
+            root.errorType = ""
+            root.isLoading = false
+            return
+        }
+
+        // Cancel previous request if still running
+        root.cancelCurrentRequest()
+
         root.isLoading = true
         root.errorMessage = ""
+        root.errorType = ""
         root.resultText = ""
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
-        const args = ["python3", scriptPath, action, root.selectedText]
+        const args = ["python3", "-u", scriptPath, action, root.selectedText]
         if (customPrompt.length > 0) {
             args.push(customPrompt)
         }
