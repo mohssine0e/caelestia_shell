@@ -28,6 +28,22 @@ Singleton {
 
     // ── Clipboard polling & update ──────────────────────────────
     property bool isWatching: false
+    property bool listenClipboard: true
+    property string lastSeenClipboard: ""
+
+    onListenClipboardChanged: {
+        if (listenClipboard && isWatching) {
+            checkClipboard()
+        }
+    }
+
+    function clearSelection() {
+        if (root.selectedText && root.selectedText.length > 0) {
+            root.lastSeenClipboard = root.selectedText
+        }
+        root.selectedText = ""
+        root.isTruncated = false
+    }
 
     Process {
         id: clipProc
@@ -63,7 +79,10 @@ Singleton {
     }
 
     function handleNewSelection(txt) {
-        if (!txt || txt === root.selectedText) return
+        if (!root.listenClipboard) return
+        if (!txt || txt === root.lastSeenClipboard) return
+        
+        root.lastSeenClipboard = txt
         
         // Truncate text over 4000 characters
         if (txt.length > 4000) {
@@ -76,15 +95,12 @@ Singleton {
 
         // Cancel any pending in-flight streaming
         root.cancelCurrentRequest()
-
-        // Reset previous result so user sees fresh text and can choose action
-        root.resultText = ""
         root.errorMessage = ""
         root.errorType = ""
-        root.isLoading = false
     }
 
     function checkClipboard() {
+        if (!root.listenClipboard) return
         if (!clipProc.running && !clipFallbackProc.running) {
             clipProc.running = true
         }
@@ -94,7 +110,7 @@ Singleton {
         id: clipWatchTimer
         interval: 800
         repeat: true
-        running: root.isWatching
+        running: root.isWatching && root.listenClipboard
         onTriggered: root.checkClipboard()
     }
 
@@ -187,8 +203,9 @@ Singleton {
         root.isWatching = true
         root.errorMessage = ""
         root.errorType = ""
-        root.resultText = ""
-        root.checkClipboard()
+        if (root.listenClipboard) {
+            root.checkClipboard()
+        }
     }
 
     function toggle() {
@@ -208,7 +225,10 @@ Singleton {
         customPrompt = customPrompt || ""
         root.activeAction = action
 
-        if (!root.selectedText || root.selectedText.trim().length === 0) {
+        const isAsk = (action === "ask" && customPrompt && customPrompt.trim().length > 0)
+        const hasText = (root.selectedText && root.selectedText.trim().length > 0)
+
+        if (!hasText && !isAsk) {
             root.errorType = "no_selection"
             root.errorMessage = "No text selected or copied."
             root.isLoading = false

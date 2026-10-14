@@ -38,6 +38,11 @@ FocusScope {
             event.accepted = true
             return
         }
+        if (contentText.activeFocus && contentText.selectedText.length > 0) {
+            contentText.deselect()
+            event.accepted = true
+            return
+        }
         root.closeRequested()
         event.accepted = true
     }
@@ -63,6 +68,11 @@ FocusScope {
         }
 
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
+            if (contentText.selectedText && contentText.selectedText.length > 0) {
+                Quickshell.clipboardText = contentText.selectedText
+                event.accepted = true
+                return
+            }
             if (Assistant.resultText.length > 0) {
                 Quickshell.clipboardText = Assistant.resultText
                 event.accepted = true
@@ -191,24 +201,51 @@ FocusScope {
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerHigh
 
-                // Truncated indicator badge
-                StyledRect {
+                // Snippet Actions: Truncated badge, Pause/Listen toggle, and Clear text button
+                RowLayout {
+                    id: snippetActions
                     z: 3
                     anchors.top: parent.top
                     anchors.right: parent.right
                     anchors.margins: 4
-                    visible: Assistant.isTruncated
-                    radius: Tokens.rounding.full
-                    color: Qt.alpha(Colours.palette.m3error, 0.2)
-                    implicitWidth: truncText.implicitWidth + 8
-                    implicitHeight: 18
+                    spacing: 4
 
-                    StyledText {
-                        id: truncText
-                        anchors.centerIn: parent
-                        text: qsTr("Truncated (4k chars)")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3error
+                    // Truncated indicator badge
+                    StyledRect {
+                        visible: Assistant.isTruncated
+                        radius: Tokens.rounding.full
+                        color: Qt.alpha(Colours.palette.m3error, 0.2)
+                        implicitWidth: truncText.implicitWidth + 8
+                        implicitHeight: 22
+
+                        StyledText {
+                            id: truncText
+                            anchors.centerIn: parent
+                            text: qsTr("Truncated (4k)")
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3error
+                        }
+                    }
+
+                    // Toggle clipboard listening
+                    IconButton {
+                        type: Assistant.listenClipboard ? IconButton.Filled : IconButton.Tonal
+                        icon: Assistant.listenClipboard ? "content_paste" : "content_paste_off"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 26
+                        implicitHeight: 26
+                        onClicked: Assistant.listenClipboard = !Assistant.listenClipboard
+                    }
+
+                    // Free / Clear copied text
+                    IconButton {
+                        type: IconButton.Tonal
+                        icon: "clear"
+                        visible: Assistant.selectedText.length > 0
+                        font: Tokens.font.icon.small
+                        implicitWidth: 26
+                        implicitHeight: 26
+                        onClicked: Assistant.clearSelection()
                     }
                 }
 
@@ -216,6 +253,7 @@ FocusScope {
                     id: snippetFlick
                     anchors.fill: parent
                     anchors.margins: Tokens.padding.small
+                    anchors.rightMargin: snippetActions.width + Tokens.padding.small
                     contentHeight: textSnippet.implicitHeight
                     clip: true
 
@@ -225,10 +263,12 @@ FocusScope {
 
                     StyledText {
                         id: textSnippet
-                        width: snippetFlick.width - (snippetFlick.contentHeight > snippetFlick.height ? Tokens.padding.small : 0)
+                        width: snippetFlick.width - Tokens.padding.small
                         text: Assistant.selectedText.length > 0
                             ? Assistant.selectedText
-                            : qsTr("No text captured. Highlight text anywhere and press Super+H.")
+                            : (Assistant.listenClipboard
+                                ? qsTr("No text captured. Highlight text anywhere and press Super+H.")
+                                : qsTr("Clipboard listening paused. Click clipboard icon to resume."))
                         font: {
                             const words = Assistant.selectedText.trim().split(/\s+/).length
                             return (words === 1 && Assistant.selectedText.trim().length > 0)
@@ -310,8 +350,10 @@ FocusScope {
                 implicitHeight: {
                     if (Assistant.isLoading) return 220
                     if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 220
-                    if (Assistant.resultText.length === 0) return 170
-                    return 340
+                    if (Assistant.resultText.length === 0) return 160
+                    // Dynamically fit content size, capped between 200px and 420px for a taller, comfortable reading area
+                    const contentH = Math.max(contentText.contentHeight, contentText.implicitHeight) + Tokens.padding.medium * 2
+                    return Math.max(200, Math.min(420, contentH))
                 }
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLowest
@@ -513,34 +555,40 @@ FocusScope {
                     }
                 }
 
-                // 4D. Result Markdown Output
+                // 4D. Result Markdown Output (Selectable & Copyable)
                 Flickable {
                     id: flick
                     anchors.fill: parent
                     anchors.margins: Tokens.padding.medium
                     visible: !Assistant.isLoading && Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.resultText.length > 0
-                    contentHeight: contentText.implicitHeight
+                    contentHeight: contentText.contentHeight
                     clip: true
 
                     StyledScrollBar.vertical: StyledScrollBar {
                         flickable: flick
                     }
 
-                    StyledText {
+                    TextEdit {
                         id: contentText
                         width: flick.width - Tokens.padding.small
                         text: Assistant.resultText
-                        lineHeight: 1.35
-                        lineHeightMode: Text.ProportionalHeight
-                        font: Tokens.font.body.medium
+                        readOnly: true
+                        selectByMouse: true
+                        selectByKeyboard: true
+                        mouseSelectionMode: TextEdit.SelectCharacters
+                        cursorVisible: false
+                        textFormat: TextEdit.MarkdownText
+                        wrapMode: TextEdit.Wrap
+                        font: Tokens.font.body.small
                         color: Colours.palette.m3onSurface
-                        wrapMode: Text.Wrap
-                        textFormat: Text.MarkdownText
+                        selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                        selectedTextColor: Colours.palette.m3onSurface
+                        renderType: TextEdit.NativeRendering
 
                         // Detect Arabic script and automatically align right
                         horizontalAlignment: {
                             const isArabic = /[\u0600-\u06FF]/.test(text)
-                            return isArabic ? Text.AlignRight : Text.AlignLeft
+                            return isArabic ? TextEdit.AlignRight : TextEdit.AlignLeft
                         }
                     }
                 }
@@ -586,9 +634,14 @@ FocusScope {
                     font: Tokens.font.icon.small
                     implicitWidth: 36
                     implicitHeight: 36
-                    visible: Assistant.resultText.length > 0
+                    enabled: Assistant.resultText.length > 0 || (contentText.selectedText && contentText.selectedText.length > 0)
+                    opacity: enabled ? 1.0 : 0.4
                     onClicked: {
-                        Quickshell.clipboardText = Assistant.resultText
+                        if (contentText.selectedText && contentText.selectedText.length > 0) {
+                            Quickshell.clipboardText = contentText.selectedText
+                        } else if (Assistant.resultText.length > 0) {
+                            Quickshell.clipboardText = Assistant.resultText
+                        }
                         copied = true
                         resetCopyTimer.restart()
                     }

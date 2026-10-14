@@ -209,10 +209,27 @@ def main():
         })
         sys.exit(0)
 
-    system_instruction = PROMPTS.get(action, PROMPTS["explain"])
     user_payload = text
-    if action == "ask" and custom_prompt:
-        user_payload = f"Context text:\n{text}\n\nUser Question: {custom_prompt}"
+    if action == "ask":
+        if custom_prompt and text.strip():
+            system_instruction = (
+                "You are an expert reading assistant. Answer the user's question clearly and concisely "
+                "using the provided context text as reference when relevant."
+            )
+            user_payload = f"Context text:\n{text}\n\nUser Question: {custom_prompt}"
+        elif custom_prompt:
+            system_instruction = (
+                "You are a helpful, knowledgeable, and concise AI assistant. "
+                "Directly and accurately answer the user's question."
+            )
+            user_payload = custom_prompt
+        elif text.strip():
+            system_instruction = (
+                "You are an expert assistant. Explain or answer regarding the provided text clearly and concisely."
+            )
+            user_payload = text
+    else:
+        system_instruction = PROMPTS.get(action, PROMPTS["explain"])
 
     providers = []
     if primary == "groq":
