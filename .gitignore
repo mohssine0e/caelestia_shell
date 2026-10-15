@@ -4,6 +4,8 @@
 build/
 .cache/
 logs
+__pycache__/
+*.pyc
 
 docs/*
 # all the hidden files except .gitignore

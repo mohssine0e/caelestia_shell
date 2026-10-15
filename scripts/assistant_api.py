@@ -894,6 +894,7 @@ def main():
     action = cmd
     mode = "auto"
     thread_raw = "[]"
+    topic_anchor = ""
     positional = []
     i = 2
     while i < len(sys.argv):
@@ -903,6 +904,9 @@ def main():
             i += 2
         elif arg == "--thread" and i + 1 < len(sys.argv):
             thread_raw = sys.argv[i + 1]
+            i += 2
+        elif arg == "--anchor" and i + 1 < len(sys.argv):
+            topic_anchor = sys.argv[i + 1]
             i += 2
         else:
             positional.append(arg)
@@ -956,11 +960,15 @@ def main():
 
     if action == "ask":
         if is_followup:
+            anchor_text = topic_anchor.strip() if topic_anchor else (text_to_process[:350].strip() if text_to_process else "")
+            anchor_context = f"[Originating Topic & Reference Material: {anchor_text}]\n" if anchor_text else ""
             system_instruction = (
-                "You are an expert reading assistant continuing a multi-turn conversation. "
-                "Directly answer the user's follow-up question clearly and concisely in context."
+                f"You are an expert technical reading assistant continuing an active inquiry with the user.\n"
+                f"{anchor_context}"
+                f"Directly and concisely answer the user's follow-up question based on the whole discussion and reference material. "
+                f"Synthesize the prior discussion without re-explaining settled definitions unless requested. "
+                f"Focus specifically on the new aspect requested (e.g., concrete examples, edge cases, deeper breakdown)."
             )
-            # Don't re-send the same snippet on every turn
             user_payload = custom_prompt if custom_prompt else text_to_process
         elif custom_prompt and text_to_process.strip():
             system_instruction = (
@@ -987,7 +995,7 @@ def main():
     if profile_prefix:
         system_instruction = f"{profile_prefix}\n{system_instruction}"
 
-    recalled_item = find_relevant_history(text_to_process, custom_prompt)
+    recalled_item = find_relevant_history(text_to_process, custom_prompt) if not is_followup else None
     recalled_meta = None
     if recalled_item:
         prior_title = (recalled_item.get("prompt") or recalled_item.get("text") or "")[:80].replace("\n", " ").strip()

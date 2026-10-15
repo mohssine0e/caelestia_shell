@@ -248,16 +248,50 @@ Singleton {
         root.isTruncated = false
         root.recalledContext = null
         root.currentThreadId = ""
+        root.clearThread()
     }
 
-    // ── Multi-turn Thread Management ──────────────────────────────
+    // ── Multi-turn Thread Management & Essential Working Memory ──
     property string currentThreadId: ""
+    property string topicAnchor: ""
+
+    function distillEssentials(text) {
+        if (!text) return ""
+        const cleaned = text.trim()
+        if (cleaned.length <= 600) return cleaned
+
+        const lines = cleaned.split("\n")
+        const keyLines = []
+        let totalLen = 0
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim()
+            if (!line) continue
+            if (line.startsWith("```") || line.startsWith("|---") || line.startsWith("---")) continue
+
+            // Keep bullet points, headings, or numbered items
+            if (line.startsWith("*") || line.startsWith("-") || line.startsWith("#") || /^\d+\./.test(line)) {
+                keyLines.push(line)
+                totalLen += line.length
+            } else if (keyLines.length < 3) {
+                keyLines.push(line)
+                totalLen += line.length
+            }
+            if (totalLen >= 650) break
+        }
+
+        if (keyLines.length > 0) {
+            return keyLines.join("\n").slice(0, 750)
+        }
+        return cleaned.slice(0, 650) + "..."
+    }
 
     function pushTurn(userText, assistantText) {
         if (!userText && !assistantText) return
         const updated = (root.thread || []).slice()
-        updated.push({ role: "user", content: userText || "" })
-        updated.push({ role: "assistant", content: assistantText || "" })
+        const distilled = root.distillEssentials(assistantText)
+        updated.push({ role: "user", content: (userText || "").trim() })
+        updated.push({ role: "assistant", content: distilled })
         while (updated.length > 6) {
             updated.shift()
             updated.shift()
@@ -269,6 +303,7 @@ Singleton {
         root.thread = []
         root.inputMode = "auto"
         root.currentThreadId = ""
+        root.topicAnchor = ""
     }
 
     function resolveMode(question) {
@@ -278,12 +313,7 @@ Singleton {
         if (!root.thread || root.thread.length === 0) {
             return "standalone"
         }
-        const q = (question || "").trim().toLowerCase()
-        const pattern = /\b(example|more|further|elaborate|why|how about|what about|explain|continue|that|it)\b/i
-        if (pattern.test(q)) {
-            return "followup"
-        }
-        return "standalone"
+        return "followup"
     }
 
     Process {
@@ -401,9 +431,18 @@ Singleton {
                         // Save to persistent history
                         root.addToHistory(root.activeAction, root.selectedText, root.resultText, root.activePrompt)
 
-                        // Multi-turn thread: append turn on successful ask response
-                        if (root.activeAction === "ask" && root.resultText.length > 0) {
-                            root.pushTurn(root.activePrompt, root.resultText)
+                        // Record turn into active thread for follow-up continuity
+                        if (root.resultText.length > 0) {
+                            let turnUser = root.activePrompt
+                            if (!turnUser || turnUser.trim().length === 0) {
+                                if (root.activeAction === "explain") turnUser = "Explain the concepts in the reference text."
+                                else if (root.activeAction === "translate") turnUser = "Translate the reference text."
+                                else if (root.activeAction === "tldr") turnUser = "Summarize the key points."
+                                else if (root.activeAction === "rephrase") turnUser = "Rephrase this text."
+                                else if (root.activeAction === "examples") turnUser = "Provide practical context examples."
+                                else turnUser = root.activeAction ? root.activeAction.toUpperCase() : "Inquiry"
+                            }
+                            root.pushTurn(turnUser, root.resultText)
                         }
                     } else if (msg.type === "error") {
                         root.isLoading = false
@@ -882,7 +921,20 @@ Singleton {
         if (action === "ask") {
             mode = root.resolveMode(customPrompt)
             if (mode === "standalone") {
-                root.thread = []
+                root.clearThread()
+            }
+        } else {
+            // New top-level preset action initiates a fresh working thread
+            root.clearThread()
+        }
+
+        // Establish topic anchor for the working session
+        if (!root.topicAnchor || root.thread.length === 0) {
+            if (root.selectedText && root.selectedText.trim().length > 0) {
+                const raw = root.selectedText.trim().replace(/\s+/g, " ")
+                root.topicAnchor = raw.slice(0, 350)
+            } else if (customPrompt && customPrompt.trim().length > 0) {
+                root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
             }
         }
 
@@ -920,6 +972,9 @@ Singleton {
         if (action === "ask") {
             args.push("--mode", mode)
             args.push("--thread", JSON.stringify(root.thread || []))
+            if (root.topicAnchor && root.topicAnchor.length > 0) {
+                args.push("--anchor", root.topicAnchor)
+            }
         }
         apiProc.command = args
         apiProc.running = true
