@@ -17,6 +17,7 @@ FocusScope {
     signal backRequested()
     signal closeRequested()
 
+    property var windowRef: null
     property string searchQuery: ""
     property string editingCardId: ""
     property string editingTopic: ""
@@ -87,84 +88,105 @@ FocusScope {
         spacing: Tokens.spacing.small
 
         // ── Top Bar ───────────────────────────────────────────────
-        RowLayout {
+        Item {
+            id: headerContainer
             Layout.fillWidth: true
-            spacing: Tokens.spacing.small
+            implicitHeight: headerRow.implicitHeight
 
-            IconButton {
-                type: IconButton.Text
-                icon: "arrow_back"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                onClicked: root.backRequested()
-            }
-
-            MaterialIcon {
-                text: "psychology"
-                fontStyle: Tokens.font.icon.medium
-                color: Colours.palette.m3primary
-            }
-
-            StyledText {
-                text: qsTr("Curated Memory")
-                font: Tokens.font.title.small
-                color: Colours.palette.m3onSurface
-            }
-
-            // Card Count Badge
-            StyledRect {
-                implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
-                implicitHeight: 22
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3surfaceContainerHigh
-
-                StyledText {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: {
-                        const count = (Assistant.memory || []).length
-                        return count === 1 ? qsTr("1 card") : qsTr("%1 cards").arg(count)
+            MouseArea {
+                id: headerDragArea
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.ArrowCursor
+                onPressed: mouse => {
+                    if (root.windowRef) {
+                        root.windowRef.startSystemMove()
                     }
-                    font: Tokens.font.label.small
-                    color: Colours.palette.m3outline
                 }
             }
 
-            Item { Layout.fillWidth: true }
-
-            // Distilling state spinner or Distill button
             RowLayout {
-                spacing: 6
-                visible: Assistant.isDistilling
+                id: headerRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Tokens.spacing.small
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "arrow_back"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    onClicked: root.backRequested()
+                }
 
                 MaterialIcon {
-                    text: "progress_activity"
-                    fontStyle: Tokens.font.icon.small
+                    text: "psychology"
+                    fontStyle: Tokens.font.icon.medium
                     color: Colours.palette.m3primary
-
-                    RotationAnimation on rotation {
-                        from: 0
-                        to: 360
-                        duration: 1100
-                        loops: Animation.Infinite
-                        running: Assistant.isDistilling
-                    }
                 }
 
                 StyledText {
-                    text: qsTr("Organizing memory…")
-                    font: Tokens.font.label.small
-                    color: Colours.palette.m3primary
+                    text: qsTr("Curated Memory")
+                    font: Tokens.font.title.small
+                    color: Colours.palette.m3onSurface
                 }
-            }
 
-            IconTextButton {
-                visible: !Assistant.isDistilling
-                text: qsTr("Distill")
-                icon: "auto_awesome"
-                type: IconTextButton.Filled
-                onClicked: Assistant.distill()
+                // Card Count Badge
+                StyledRect {
+                    implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
+                    implicitHeight: 22
+                    radius: Tokens.rounding.full
+                    color: Colours.palette.m3surfaceContainerHigh
+
+                    StyledText {
+                        id: countText
+                        anchors.centerIn: parent
+                        text: {
+                            const count = (Assistant.memory || []).length
+                            return count === 1 ? qsTr("1 card") : qsTr("%1 cards").arg(count)
+                        }
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3outline
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Distilling state spinner or Distill button
+                RowLayout {
+                    spacing: 6
+                    visible: Assistant.isDistilling
+
+                    MaterialIcon {
+                        text: "progress_activity"
+                        fontStyle: Tokens.font.icon.small
+                        color: Colours.palette.m3primary
+
+                        RotationAnimation on rotation {
+                            from: 0
+                            to: 360
+                            duration: 1100
+                            loops: Animation.Infinite
+                            running: Assistant.isDistilling
+                        }
+                    }
+
+                    StyledText {
+                        text: qsTr("Organizing memory…")
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3primary
+                    }
+                }
+
+                IconTextButton {
+                    visible: !Assistant.isDistilling
+                    text: qsTr("Distill")
+                    icon: "auto_awesome"
+                    type: IconTextButton.Filled
+                    onClicked: Assistant.distill()
+                }
             }
         }
 

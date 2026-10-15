@@ -17,6 +17,7 @@ FocusScope {
     signal backRequested()
     signal closeRequested()
 
+    property var windowRef: null
     property string selectedTag: "all"
     property bool reviewMode: false
     property int reviewIndex: 0
@@ -146,122 +147,143 @@ FocusScope {
         spacing: Tokens.spacing.small
 
         // ── 1. History Header ─────────────────────────────────────────
-        RowLayout {
+        Item {
+            id: headerContainer
             Layout.fillWidth: true
-            spacing: Tokens.spacing.small
+            implicitHeight: headerRow.implicitHeight
 
-            IconButton {
-                type: IconButton.Text
-                icon: "arrow_back"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                onClicked: root.backRequested()
+            MouseArea {
+                id: headerDragArea
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.ArrowCursor
+                onPressed: mouse => {
+                    if (root.windowRef) {
+                        root.windowRef.startSystemMove()
+                    }
+                }
             }
 
-            MaterialIcon {
-                text: "history"
-                fontStyle: Tokens.font.icon.medium
-                color: Colours.palette.m3primary
-            }
+            RowLayout {
+                id: headerRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Tokens.spacing.small
 
-            StyledText {
-                text: qsTr("Memory")
-                font: Tokens.font.title.small
-                color: Colours.palette.m3onSurface
-            }
+                IconButton {
+                    type: IconButton.Text
+                    icon: "arrow_back"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    onClicked: root.backRequested()
+                }
 
-            // Total count pill
-            StyledRect {
-                implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
-                implicitHeight: 22
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3surfaceContainerHigh
+                MaterialIcon {
+                    text: "history"
+                    fontStyle: Tokens.font.icon.medium
+                    color: Colours.palette.m3primary
+                }
 
                 StyledText {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: {
-                        const count = (Assistant.history || []).length
-                        return count === 1 ? qsTr("1 item") : qsTr("%1 items").arg(count)
-                    }
-                    font: Tokens.font.label.small
-                    color: Colours.palette.m3outline
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            // Review Starred Mode Button (School icon)
-            IconButton {
-                id: reviewBtn
-                type: root.reviewMode ? IconButton.Filled : IconButton.Tonal
-                icon: "school"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                enabled: root.starredItems.length > 0
-                opacity: enabled ? 1.0 : 0.4
-                onClicked: {
-                    if (root.starredItems.length > 0) {
-                        root.reviewIndex = 0
-                        root.reviewRevealed = false
-                        root.reviewShowHint = false
-                        root.reviewShowSolution = false
-                        root.shuffledOrder = []
-                        root.reviewMode = !root.reviewMode
-                    }
+                    text: qsTr("Memory")
+                    font: Tokens.font.title.small
+                    color: Colours.palette.m3onSurface
                 }
 
-                // Star count badge if starred items exist
+                // Total count pill
                 StyledRect {
-                    visible: root.starredItems.length > 0 && !root.reviewMode
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    anchors.topMargin: -2
-                    anchors.rightMargin: -2
-                    implicitWidth: 14
-                    implicitHeight: 14
+                    implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
+                    implicitHeight: 22
                     radius: Tokens.rounding.full
-                    color: Colours.palette.m3tertiary
+                    color: Colours.palette.m3surfaceContainerHigh
 
                     StyledText {
+                        id: countText
                         anchors.centerIn: parent
-                        text: String(root.starredItems.length)
+                        text: {
+                            const count = (Assistant.history || []).length
+                            return count === 1 ? qsTr("1 item") : qsTr("%1 items").arg(count)
+                        }
                         font: Tokens.font.label.small
-                        color: Colours.palette.m3onTertiary
+                        color: Colours.palette.m3outline
                     }
                 }
-            }
 
-            // AI Organize Button
-            IconButton {
-                id: organizeBtn
-                type: IconButton.Tonal
-                icon: "auto_awesome"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                enabled: !Assistant.isOrganizing && (Assistant.history || []).length > 0
-                opacity: enabled ? 1.0 : 0.4
-                onClicked: Assistant.organizeHistory()
+                Item { Layout.fillWidth: true }
 
-                RotationAnimation on rotation {
-                    from: 0
-                    to: 360
-                    duration: 1000
-                    loops: Animation.Infinite
-                    running: Assistant.isOrganizing
+                // Review Starred Mode Button (School icon)
+                IconButton {
+                    id: reviewBtn
+                    type: root.reviewMode ? IconButton.Filled : IconButton.Tonal
+                    icon: "school"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    enabled: root.starredItems.length > 0
+                    opacity: enabled ? 1.0 : 0.4
+                    onClicked: {
+                        if (root.starredItems.length > 0) {
+                            root.reviewIndex = 0
+                            root.reviewRevealed = false
+                            root.reviewShowHint = false
+                            root.reviewShowSolution = false
+                            root.shuffledOrder = []
+                            root.reviewMode = !root.reviewMode
+                        }
+                    }
+
+                    // Star count badge if starred items exist
+                    StyledRect {
+                        visible: root.starredItems.length > 0 && !root.reviewMode
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: -2
+                        anchors.rightMargin: -2
+                        implicitWidth: 14
+                        implicitHeight: 14
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3tertiary
+
+                        StyledText {
+                            anchors.centerIn: parent
+                            text: String(root.starredItems.length)
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onTertiary
+                        }
+                    }
                 }
-            }
 
-            IconButton {
-                type: IconButton.Text
-                icon: "close"
-                font: Tokens.font.icon.small
-                implicitWidth: 28
-                implicitHeight: 28
-                onClicked: root.closeRequested()
+                // AI Organize Button
+                IconButton {
+                    id: organizeBtn
+                    type: IconButton.Tonal
+                    icon: "auto_awesome"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    enabled: !Assistant.isOrganizing && (Assistant.history || []).length > 0
+                    opacity: enabled ? 1.0 : 0.4
+                    onClicked: Assistant.organizeHistory()
+
+                    RotationAnimation on rotation {
+                        from: 0
+                        to: 360
+                        duration: 1000
+                        loops: Animation.Infinite
+                        running: Assistant.isOrganizing
+                    }
+                }
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "close"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    onClicked: root.closeRequested()
+                }
             }
         }
 

@@ -125,87 +125,98 @@ FocusScope {
             spacing: Tokens.spacing.extraSmall
 
             // ── Pill Row ──────────────────────────────────────────────
-            RowLayout {
-                id: pillRow
+            Item {
+                id: pillContainer
                 Layout.fillWidth: true
+                implicitHeight: root.pillHeight
                 Layout.preferredHeight: root.pillHeight
-                spacing: Tokens.spacing.small
 
-                Item {
-                    id: ringContainer
-                    implicitWidth: root.ringSize
-                    implicitHeight: root.ringSize
-                    Layout.alignment: Qt.AlignVCenter
-
-                    readonly property real ringRadius: (Math.min(width, height) - root.ringStroke) / 2
-                    readonly property real progress: Math.max(0, Math.min(1, FocusTimer.progress))
-                    readonly property color activeColour: FocusTimer.mode === "work" || FocusTimer.mode === "custom"
-                        ? Colours.palette.m3primary
-                        : Colours.palette.m3tertiary
-                    readonly property color trackColour: Colours.palette.m3surfaceContainerHighest
-
-                    Shape {
-                        anchors.fill: parent
-                        preferredRendererType: Shape.CurveRenderer
-                        asynchronous: true
-
-                        ShapePath {
-                            fillColor: "transparent"
-                            strokeColor: ringContainer.trackColour
-                            strokeWidth: root.ringStroke
-                            capStyle: ShapePath.RoundCap
-
-                            PathAngleArc {
-                                radiusX: ringContainer.ringRadius
-                                radiusY: ringContainer.ringRadius
-                                centerX: ringContainer.width / 2
-                                centerY: ringContainer.height / 2
-                                startAngle: -90
-                                sweepAngle: 360
-                            }
+                MouseArea {
+                    id: timerDragArea
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.ArrowCursor
+                    onPressed: mouse => {
+                        if (root.windowRef) {
+                            root.windowRef.startSystemMove()
                         }
-
-                        ShapePath {
-                            fillColor: "transparent"
-                            strokeColor: ringContainer.activeColour
-                            strokeWidth: root.ringStroke
-                            capStyle: ShapePath.RoundCap
-
-                            PathAngleArc {
-                                radiusX: ringContainer.ringRadius
-                                radiusY: ringContainer.ringRadius
-                                centerX: ringContainer.width / 2
-                                centerY: ringContainer.height / 2
-                                startAngle: -90
-                                sweepAngle: 360 * ringContainer.progress
-                            }
-
-                            Behavior on strokeColor { CAnim {} }
-                        }
-                    }
-
-                    MaterialIcon {
-                        anchors.centerIn: parent
-                        text: FocusTimer.isRunning
-                            ? (FocusTimer.mode === "work" ? "bolt" : "coffee")
-                            : "timer"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3onSurfaceVariant
                     }
                 }
 
-                StyledText {
-                    Layout.alignment: Qt.AlignVCenter
-                    text: FocusTimer.formattedTime
-                    font: Tokens.font.title.small
-                    color: Colours.palette.m3onSurface
+                RowLayout {
+                    id: pillRow
+                    anchors.fill: parent
+                    spacing: Tokens.spacing.small
 
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.mini.expanded = !root.mini.expanded
+                    Item {
+                        id: ringContainer
+                        implicitWidth: root.ringSize
+                        implicitHeight: root.ringSize
+                        Layout.alignment: Qt.AlignVCenter
+
+                        readonly property real ringRadius: (Math.min(width, height) - root.ringStroke) / 2
+                        readonly property real progress: Math.max(0, Math.min(1, FocusTimer.progress))
+                        readonly property color activeColour: FocusTimer.mode === "work" || FocusTimer.mode === "custom"
+                            ? Colours.palette.m3primary
+                            : Colours.palette.m3tertiary
+                        readonly property color trackColour: Colours.palette.m3surfaceContainerHighest
+
+                        Shape {
+                            anchors.fill: parent
+                            preferredRendererType: Shape.CurveRenderer
+                            asynchronous: true
+
+                            ShapePath {
+                                fillColor: "transparent"
+                                strokeColor: ringContainer.trackColour
+                                strokeWidth: root.ringStroke
+                                capStyle: ShapePath.RoundCap
+
+                                PathAngleArc {
+                                    radiusX: ringContainer.ringRadius
+                                    radiusY: ringContainer.ringRadius
+                                    centerX: ringContainer.width / 2
+                                    centerY: ringContainer.height / 2
+                                    startAngle: -90
+                                    sweepAngle: 360
+                                }
+                            }
+
+                            ShapePath {
+                                fillColor: "transparent"
+                                strokeColor: ringContainer.activeColour
+                                strokeWidth: root.ringStroke
+                                capStyle: ShapePath.RoundCap
+
+                                PathAngleArc {
+                                    radiusX: ringContainer.ringRadius
+                                    radiusY: ringContainer.ringRadius
+                                    centerX: ringContainer.width / 2
+                                    centerY: ringContainer.height / 2
+                                    startAngle: -90
+                                    sweepAngle: 360 * ringContainer.progress
+                                }
+
+                                Behavior on strokeColor { CAnim {} }
+                            }
+                        }
+
+                        MaterialIcon {
+                            anchors.centerIn: parent
+                            text: FocusTimer.isRunning
+                                ? (FocusTimer.mode === "work" ? "bolt" : "coffee")
+                                : "timer"
+                            fontStyle: Tokens.font.icon.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
                     }
-                }
+
+                    StyledText {
+                        Layout.alignment: Qt.AlignVCenter
+                        text: FocusTimer.formattedTime
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                    }
 
                 Item { Layout.fillWidth: true }
 
@@ -227,6 +238,7 @@ FocusScope {
                     onClicked: root.mini.dismissRequested()
                 }
             }
+        }
 
             // ── Expanded Panel ────────────────────────────────────────
             ColumnLayout {
