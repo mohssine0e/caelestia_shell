@@ -27,12 +27,113 @@ Singleton {
     property string inputMode: "auto"    // "auto" | "followup" | "standalone"
     readonly property bool hasThread: thread.length > 0
 
-    // History & Memory
+    // History & Raw Log (File 1)
     property var history: []
     property bool isOrganizing: false
     property string activePrompt: ""
     property var recalledContext: null
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
+
+    // Curated Memory (File 2)
+    property var memory: []
+    property bool isDistilling: false
+    property string distillError: ""
+    readonly property string memoryPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory.json"
+
+    FileView {
+        id: memoryStorage
+        printErrors: false
+        path: root.memoryPath
+        onLoaded: {
+            try {
+                const parsed = JSON.parse(text())
+                if (Array.isArray(parsed)) {
+                    root.memory = parsed
+                }
+            } catch (e) {
+                root.memory = []
+            }
+        }
+        onLoadFailed: err => {
+            root.memory = []
+            if (err === FileViewError.FileNotFound) {
+                Qt.callLater(() => memoryStorage.setText("[]"))
+            }
+        }
+    }
+
+    function loadMemory() {
+        if (memoryStorage) {
+            memoryStorage.reload()
+        }
+    }
+
+    function saveMemory() {
+        if (memoryStorage) {
+            memoryStorage.setText(JSON.stringify(root.memory, null, 2))
+        }
+    }
+
+    function updateMemoryCard(id, updatedLines, updatedTopic) {
+        if (!root.memory) return
+        const list = root.memory.slice()
+        for (let i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id)) {
+                list[i].lines = updatedLines
+                if (updatedTopic !== undefined && updatedTopic.trim().length > 0) {
+                    list[i].topic = updatedTopic.trim()
+                }
+                list[i].updated = new Date().toISOString()
+                break
+            }
+        }
+        root.memory = list
+        root.saveMemory()
+    }
+
+    function deleteMemoryCard(id) {
+        if (!root.memory) return
+        root.memory = root.memory.filter(card => String(card.id) !== String(id))
+        root.saveMemory()
+    }
+
+    Process {
+        id: distillProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py", "distill"]
+        stdout: SplitParser {
+            onRead: data => {
+                const line = data.trim()
+                if (!line) return
+                try {
+                    const msg = JSON.parse(line)
+                    if (msg.success) {
+                        root.isDistilling = false
+                        root.distillError = ""
+                        root.loadMemory()
+                    } else if (msg.error) {
+                        root.isDistilling = false
+                        root.distillError = msg.message || msg.error || (msg.raw ? "Parse failed: " + msg.raw : "Distill failed.")
+                    }
+                } catch (e) {
+                    root.isDistilling = false
+                    root.distillError = "Invalid response from distill process."
+                }
+            }
+        }
+        onExited: (code) => {
+            root.isDistilling = false
+            if (code !== 0 && !root.distillError) {
+                root.distillError = "Distill process exited with code " + code
+            }
+        }
+    }
+
+    function distill() {
+        if (root.isDistilling) return
+        root.isDistilling = true
+        root.distillError = ""
+        distillProc.running = true
+    }
 
     // Developer Dossier / Profile
     readonly property var defaultProfile: ({
@@ -135,9 +236,12 @@ Singleton {
         root.selectedText = ""
         root.isTruncated = false
         root.recalledContext = null
+        root.currentThreadId = ""
     }
 
     // ── Multi-turn Thread Management ──────────────────────────────
+    property string currentThreadId: ""
+
     function pushTurn(userText, assistantText) {
         if (!userText && !assistantText) return
         const updated = (root.thread || []).slice()
@@ -153,6 +257,7 @@ Singleton {
     function clearThread() {
         root.thread = []
         root.inputMode = "auto"
+        root.currentThreadId = ""
     }
 
     function resolveMode(question) {
@@ -448,30 +553,62 @@ Singleton {
 
         if (list.length > 0) {
             const first = list[0]
-            if (first.action === action && first.text === cleanText && (first.prompt || "") === cleanPrompt) {
+            if (first.action === action && (first.text === cleanText || first.original === cleanText) && (first.prompt || "") === cleanPrompt) {
                 first.answer = cleanAnswer
-                first.timestamp = Date.now()
+                first.timestamp = new Date().toISOString()
                 root.history = list
                 root.saveHistory()
                 return
             }
         }
 
+        let threadId = null
+        if (action === "ask") {
+            if (root.thread && root.thread.length > 0) {
+                if (!root.currentThreadId) {
+                    root.currentThreadId = "t_" + Date.now().toString(36)
+                }
+                threadId = root.currentThreadId
+            } else {
+                root.currentThreadId = "t_" + Date.now().toString(36)
+                threadId = root.currentThreadId
+            }
+        }
+
+        const now = new Date()
+        const isoStr = now.toISOString()
+        const isoSanitized = isoStr.replace(/[:.]/g, "-")
+        const shortId = Math.random().toString(36).slice(2, 6)
+        const entryId = "h_" + isoSanitized + "_" + shortId
+
         const newItem = {
-            id: String(Date.now()),
-            timestamp: Date.now(),
+            id: entryId,
             action: action,
-            prompt: cleanPrompt,
+            original: cleanText || cleanPrompt,
             text: cleanText,
+            prompt: cleanPrompt,
             answer: cleanAnswer,
+            timestamp: isoStr,
             starred: false,
             context_excluded: false,
-            tags: []
+            tags: [],
+            thread_id: threadId
         }
 
         list.unshift(newItem)
         if (list.length > 300) {
-            list.length = 300
+            let dropIndex = -1
+            for (let i = list.length - 1; i >= 0; i--) {
+                if (!list[i].starred) {
+                    dropIndex = i
+                    break
+                }
+            }
+            if (dropIndex !== -1) {
+                list.splice(dropIndex, 1)
+            } else {
+                list.pop()
+            }
         }
         root.history = list
         root.saveHistory()

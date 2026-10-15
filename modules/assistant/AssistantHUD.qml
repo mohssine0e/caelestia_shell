@@ -15,10 +15,10 @@ FocusScope {
     id: root
 
     property var windowRef: null
-    property string currentView: "assistant" // "assistant" or "history"
+    property string currentView: "assistant" // "assistant", "history", "profile", "memory"
 
     focus: true
-    width: (root.currentView === "profile" || root.currentView === "history") ? 600 : 540
+    width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 600 : 540
     implicitWidth: width
     implicitHeight: mainCard.implicitHeight
 
@@ -33,7 +33,7 @@ FocusScope {
             event.accepted = true
             return
         }
-        if (root.currentView === "history" || root.currentView === "profile") {
+        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") {
             root.currentView = "assistant"
             event.accepted = true
             return
@@ -123,7 +123,7 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "history" || root.currentView === "profile") return 620
+            if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") return 620
             return cardLayout.implicitHeight + Tokens.padding.medium * 2
         }
 
@@ -248,6 +248,15 @@ FocusScope {
                     implicitWidth: 28
                     implicitHeight: 28
                     onClicked: root.currentView = "history"
+                }
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "psychology"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    onClicked: root.currentView = "memory"
                 }
 
                 IconButton {
@@ -984,6 +993,15 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "profile"
+            onBackRequested: root.currentView = "assistant"
+            onCloseRequested: root.closeRequested()
+        }
+
+        MemoryView {
+            id: memoryView
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.medium
+            visible: root.currentView === "memory"
             onBackRequested: root.currentView = "assistant"
             onCloseRequested: root.closeRequested()
         }

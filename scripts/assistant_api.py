@@ -227,6 +227,7 @@ def classify_error(err_str, http_code=None):
 
 PROFILE_PATH = os.path.expanduser("~/.config/caelestia/assistant_profile.json")
 HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
+MEMORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_memory.json")
 
 DEFAULT_PROFILE = {
     "os": "Linux (Hyprland)",
@@ -652,6 +653,207 @@ def generate_challenge(item_json_str):
     except Exception as e:
         emit({"type": "error", "message": f"Failed to parse challenge question: {e}"})
 
+DISTILL_SYSTEM_PROMPT = (
+    "You are an expert AI memory curator. You maintain a curated, structured long-term memory file (assistant_memory.json) "
+    "projected from raw interaction logs (assistant_history.json).\n\n"
+    "You will receive a JSON payload with:\n"
+    "- new_raw: Newly recorded raw interaction logs since last distill.\n"
+    "- current_memory: The current curated cards in memory.\n"
+    "- user_interests: (Optional) user developer profile and preferences.\n\n"
+    "Your task is to integrate new_raw into current_memory and output the COMPLETE updated array of cards following these strict rules:\n\n"
+    "### WHAT TO KEEP (Add or merge into cards):\n"
+    "- Definitions (word -> meaning, terminology, concepts)\n"
+    "- Concepts (what is X, how does Y work, architecture, mechanisms)\n"
+    "- Code patterns, syntax, APIs, commands, configuration rules\n"
+    "- Errors -> fixes and debugging solutions\n"
+    "- Grammar / linguistic rules, translations of complex vocabulary\n"
+    "- Anything the user starred (starred: true) -> ALWAYS keep, verbatim as source-of-truth\n"
+    "- Anything tagged with a real topic\n\n"
+    "### WHAT TO SKIP (Do NOT add to memory):\n"
+    "- Greetings, thanks, conversational filler, pleasantries\n"
+    "- One-off transient facts ('what time is it', 'capital of Iceland', weather)\n"
+    "- Basic math calculations, simple unit conversions\n"
+    "- Test queries ('hi', 'test', 'abc', keyboard mash)\n"
+    "- Very short answers (<5 words) unless specifically starred\n\n"
+    "### MERGE AND STRUCTURING RULES:\n"
+    "- Two lines with the same meaning -> merge into a single concise line.\n"
+    "- One line is a more detailed version of another -> keep the detailed one.\n"
+    "- Two lines are related but distinct -> keep both.\n"
+    "- Follow-up questions attach to their parent card as new bullet lines (never as a new card).\n"
+    "- If a follow-up introduces a distinct new topic -> create a new card and add cross-links in the related array.\n"
+    "- Cards can have any number of lines. If a card exceeds ~15 lines, split by sub-topic.\n"
+    "- Every line must trace to a source item id in sources. No hallucinations. Do not add facts absent from raw inputs.\n"
+    "- File 2 is a projection of File 1, never a superset. File 1 can always regenerate File 2.\n"
+    "- Total cards cap: 200 cards max.\n\n"
+    "### CARD SCHEMA (JSON Array of Objects):\n"
+    "[\n"
+    "  {\n"
+    "    \"id\": \"m_<topic_slug>_<short>\",\n"
+    "    \"topic\": \"Topic Title\",\n"
+    "    \"lines\": [\"bullet point 1\", \"bullet point 2\"],\n"
+    "    \"tags\": [\"topic\", \"subtopic\"],\n"
+    "    \"sources\": [\"h_...\"],\n"
+    "    \"related\": [\"m_...\"],\n"
+    "    \"created\": \"<ISO8601>\",\n"
+    "    \"updated\": \"<ISO8601>\",\n"
+    "    \"reviewed\": 0\n"
+    "  }\n"
+    "]\n\n"
+    "Return ONLY valid JSON (a JSON array of card objects). Return ONLY valid JSON, no markdown fences, no explanation."
+)
+
+def distill_memory():
+    raw_entries = []
+    if os.path.exists(HISTORY_PATH):
+        try:
+            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    raw_entries = data
+        except Exception:
+            raw_entries = []
+
+    current_memory = []
+    memory_exists = os.path.exists(MEMORY_PATH)
+    if memory_exists:
+        try:
+            with open(MEMORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    current_memory = data
+        except Exception:
+            current_memory = []
+
+    existing_sources = set()
+    for card in current_memory:
+        if isinstance(card, dict) and "sources" in card:
+            for s in card.get("sources", []):
+                if s:
+                    existing_sources.add(str(s))
+
+    new_raw = []
+    for entry in raw_entries:
+        if isinstance(entry, dict):
+            eid = str(entry.get("id", ""))
+            if eid and eid not in existing_sources:
+                new_raw.append(entry)
+
+    if not new_raw and memory_exists:
+        emit({"success": True, "content": "Nothing new to distill."})
+        return
+
+    config = load_config()
+    gemini_key = config.get("gemini_key", "").strip()
+    groq_key = config.get("groq_key", "").strip()
+    primary = config.get("primary", "gemini").lower()
+
+    providers = []
+    if primary == "groq":
+        if groq_key: providers.append(("groq", groq_key))
+        if gemini_key: providers.append(("gemini", gemini_key))
+    else:
+        if gemini_key: providers.append(("gemini", gemini_key))
+        if groq_key: providers.append(("groq", groq_key))
+
+    if not providers:
+        emit({"error": "AUTH_ERROR", "message": "No API key configured for distillation."})
+        return
+
+    profile = load_profile()
+    payload_dict = {
+        "new_raw": new_raw,
+        "current_memory": current_memory
+    }
+    if profile:
+        payload_dict["user_interests"] = profile
+
+    user_payload = json.dumps(payload_dict, ensure_ascii=False)
+
+    response_text = ""
+    for prov_name, key in providers:
+        try:
+            if prov_name == "gemini":
+                for model_name in GEMINI_CANDIDATE_MODELS:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+                    req_data = json.dumps({
+                        "contents": [{"parts": [{"text": f"{DISTILL_SYSTEM_PROMPT}\n\nData:\n{user_payload}"}]}],
+                        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+                    }).encode("utf-8")
+                    req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
+                    try:
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            resp_json = json.loads(resp.read().decode("utf-8"))
+                            candidates = resp_json.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    response_text = parts[0].get("text", "")
+                                    break
+                    except Exception:
+                        continue
+            elif prov_name == "groq":
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                req_data = json.dumps({
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": DISTILL_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_payload}
+                    ],
+                    "temperature": 0.2
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=req_data, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"
+                }, method="POST")
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        resp_json = json.loads(resp.read().decode("utf-8"))
+                        response_text = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+                except Exception:
+                    continue
+
+            if response_text:
+                break
+        except Exception:
+            continue
+
+    if not response_text:
+        emit({"error": "DISTILL_FAILED", "message": "Failed to generate memory distillation from providers."})
+        return
+
+    clean_text = response_text.strip()
+    if clean_text.startswith("```"):
+        if "\n" in clean_text:
+            clean_text = clean_text.split("\n", 1)[1]
+        if clean_text.endswith("```"):
+            clean_text = clean_text.rsplit("```", 1)[0]
+        clean_text = clean_text.strip()
+
+    try:
+        cards = json.loads(clean_text)
+        if isinstance(cards, dict) and "cards" in cards and isinstance(cards["cards"], list):
+            cards = cards["cards"]
+        if not isinstance(cards, list):
+            raise ValueError("Parsed JSON is not an array")
+    except Exception:
+        emit({"error": "DISTILL_PARSE_FAILED", "raw": response_text})
+        return
+
+    if len(cards) > 200:
+        cards = cards[:200]
+
+    os.makedirs(os.path.dirname(MEMORY_PATH), exist_ok=True)
+    try:
+        with open(MEMORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(cards, f, indent=2, ensure_ascii=False)
+        try:
+            os.chmod(MEMORY_PATH, 0o600)
+        except Exception:
+            pass
+        emit({"success": True, "count": len(cards), "content": f"Successfully distilled {len(cards)} memory cards."})
+    except Exception as e:
+        emit({"error": "DISTILL_WRITE_FAILED", "message": f"Failed to write memory file: {e}"})
+
 def main():
     if len(sys.argv) < 2:
         emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
@@ -683,6 +885,10 @@ def main():
     if cmd == "challenge":
         item_json = sys.argv[2] if len(sys.argv) > 2 else "{}"
         generate_challenge(item_json)
+        sys.exit(0)
+
+    if cmd == "distill" or (cmd == "--action" and len(sys.argv) > 2 and sys.argv[2] == "distill"):
+        distill_memory()
         sys.exit(0)
 
     action = cmd
