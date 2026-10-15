@@ -22,6 +22,11 @@ Singleton {
     property bool isTruncated: false
     property int truncatedAt: 12000
 
+    // Multi-turn Thread & Mode
+    property var thread: []              // {role, content} pairs
+    property string inputMode: "auto"    // "auto" | "followup" | "standalone"
+    readonly property bool hasThread: thread.length > 0
+
     // History & Memory
     property var history: []
     property bool isOrganizing: false
@@ -130,6 +135,39 @@ Singleton {
         root.selectedText = ""
         root.isTruncated = false
         root.recalledContext = null
+    }
+
+    // ── Multi-turn Thread Management ──────────────────────────────
+    function pushTurn(userText, assistantText) {
+        if (!userText && !assistantText) return
+        const updated = (root.thread || []).slice()
+        updated.push({ role: "user", content: userText || "" })
+        updated.push({ role: "assistant", content: assistantText || "" })
+        while (updated.length > 6) {
+            updated.shift()
+            updated.shift()
+        }
+        root.thread = updated
+    }
+
+    function clearThread() {
+        root.thread = []
+        root.inputMode = "auto"
+    }
+
+    function resolveMode(question) {
+        if (root.inputMode === "followup" || root.inputMode === "standalone") {
+            return root.inputMode
+        }
+        if (!root.thread || root.thread.length === 0) {
+            return "standalone"
+        }
+        const q = (question || "").trim().toLowerCase()
+        const pattern = /\b(example|more|further|elaborate|why|how about|what about|explain|continue|that|it)\b/i
+        if (pattern.test(q)) {
+            return "followup"
+        }
+        return "standalone"
     }
 
     Process {
@@ -246,6 +284,11 @@ Singleton {
 
                         // Save to persistent history
                         root.addToHistory(root.activeAction, root.selectedText, root.resultText, root.activePrompt)
+
+                        // Multi-turn thread: append turn on successful ask response
+                        if (root.activeAction === "ask" && root.resultText.length > 0) {
+                            root.pushTurn(root.activePrompt, root.resultText)
+                        }
                     } else if (msg.type === "error") {
                         root.isLoading = false
                         root.errorMessage = msg.message || "An error occurred."
@@ -685,6 +728,14 @@ Singleton {
             return
         }
 
+        let mode = "standalone"
+        if (action === "ask") {
+            mode = root.resolveMode(customPrompt)
+            if (mode === "standalone") {
+                root.thread = []
+            }
+        }
+
         // Check in-memory cache for instant replay
         const cacheKey = root.getCacheKey(action, root.selectedText, customPrompt)
         const cached = root.responseCache[cacheKey]
@@ -715,6 +766,10 @@ Singleton {
         const args = ["python3", "-u", scriptPath, action, root.selectedText]
         if (customPrompt.length > 0) {
             args.push(customPrompt)
+        }
+        if (action === "ask") {
+            args.push("--mode", mode)
+            args.push("--thread", JSON.stringify(root.thread || []))
         }
         apiProc.command = args
         apiProc.running = true

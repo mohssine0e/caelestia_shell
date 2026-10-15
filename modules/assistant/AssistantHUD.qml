@@ -813,14 +813,97 @@ FocusScope {
             }
 
             // ── 5. Footer / Custom Question Bar ───────────────────────
-            RowLayout {
+            ColumnLayout {
                 Layout.fillWidth: true
-                spacing: Tokens.spacing.small
+                spacing: 6
+
+                // Context Chip Row (above input row)
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    StyledRect {
+                        id: contextChip
+                        implicitHeight: 22
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+                        implicitWidth: chipRow.implicitWidth + (Assistant.hasThread ? 22 : 16)
+
+                        RowLayout {
+                            id: chipRow
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            MouseArea {
+                                implicitWidth: chipText.implicitWidth
+                                implicitHeight: 22
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (Assistant.inputMode === "auto") {
+                                        Assistant.inputMode = "followup"
+                                    } else if (Assistant.inputMode === "followup") {
+                                        Assistant.inputMode = "standalone"
+                                    } else {
+                                        Assistant.inputMode = "auto"
+                                    }
+                                }
+
+                                StyledText {
+                                    id: chipText
+                                    anchors.centerIn: parent
+                                    text: {
+                                        if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
+                                            return "🌐 Standalone"
+                                        }
+                                        if (Assistant.inputMode === "followup") {
+                                            return "↩ Follow-up"
+                                        }
+                                        return "↩ Auto (Follow-up)"
+                                    }
+                                    font: Tokens.font.label.small
+                                    color: {
+                                        if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
+                                            return Colours.palette.m3outline
+                                        }
+                                        if (Assistant.inputMode === "followup") {
+                                            return Colours.palette.m3primary
+                                        }
+                                        return Colours.palette.m3secondary
+                                    }
+                                }
+                            }
+
+                            // Small × on chip
+                            MouseArea {
+                                visible: Assistant.hasThread
+                                implicitWidth: 14
+                                implicitHeight: 14
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Assistant.clearThread()
+
+                                MaterialIcon {
+                                    anchors.centerIn: parent
+                                    text: "close"
+                                    fontStyle: Tokens.font.label.small
+                                    color: Colours.palette.m3outline
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Input Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
 
                 StyledTextField {
                     id: customQuestionInput
                     Layout.fillWidth: true
                     placeholderText: qsTr("Ask a custom question...")
+                    placeholderFloats: false
 
                     Keys.onReturnPressed: {
                         if (text.trim().length > 0) {
@@ -883,6 +966,7 @@ FocusScope {
                         onTriggered: copyBtn.copied = false
                     }
                 }
+            }
             }
         }
 

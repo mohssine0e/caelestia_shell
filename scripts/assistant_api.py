@@ -102,17 +102,19 @@ def save_config(gemini_key, groq_key, provider=None, max_chars=None):
         json.dump(cfg, f, indent=2)
     return {"success": True}
 
-def stream_gemini(api_key, system_instruction, user_text):
-    candidate_models = [
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-flash-latest"
-    ]
+GEMINI_CANDIDATE_MODELS = [
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+]
+
+def stream_gemini(api_key, system_instruction, user_text, contents=None):
     last_err = None
-    for model_name in candidate_models:
+    for model_name in GEMINI_CANDIDATE_MODELS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
         payload = {
-            "contents": [
+            "contents": contents if contents else [
                 {
                     "parts": [{"text": f"Instructions: {system_instruction}\n\nText:\n{user_text}"}]
                 }
@@ -128,9 +130,9 @@ def stream_gemini(api_key, system_instruction, user_text):
             headers={"Content-Type": "application/json"},
             method="POST"
         )
+        emitted_any = False
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                emitted_any = False
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 for line in resp:
                     line_str = line.decode("utf-8", errors="replace").strip()
                     if line_str.startswith("data:"):
@@ -152,22 +154,24 @@ def stream_gemini(api_key, system_instruction, user_text):
                 return True
         except urllib.error.HTTPError as e:
             last_err = e
-            if e.code in (404, 503):
+            if e.code in (404, 429, 500, 502, 503, 504) and not emitted_any:
                 continue
             raise e
         except Exception as e:
             last_err = e
+            if not emitted_any:
+                continue
             break
 
     if last_err:
         raise last_err
     return False
 
-def stream_groq(api_key, system_instruction, user_text):
+def stream_groq(api_key, system_instruction, user_text, messages=None):
     url = "https://api.groq.com/openai/v1/chat/completions"
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
+        "messages": messages if messages else [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_text}
         ],
@@ -460,8 +464,7 @@ def organize_history():
     for prov_name, key in providers:
         try:
             if prov_name == "gemini":
-                candidate_models = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
-                for model_name in candidate_models:
+                for model_name in GEMINI_CANDIDATE_MODELS:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                     req_data = json.dumps({
                         "contents": [{"parts": [{"text": f"{system_instruction}\n\nItems and Current Profile:\n{user_payload}"}]}],
@@ -586,8 +589,7 @@ def generate_challenge(item_json_str):
     for prov_name, key in providers:
         try:
             if prov_name == "gemini":
-                candidate_models = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
-                for model_name in candidate_models:
+                for model_name in GEMINI_CANDIDATE_MODELS:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                     req_data = json.dumps({
                         "contents": [{"parts": [{"text": f"{system_instruction}\n\nTarget Material:\n{user_payload}"}]}],
@@ -684,8 +686,32 @@ def main():
         sys.exit(0)
 
     action = cmd
-    text = sys.argv[2] if len(sys.argv) > 2 else ""
-    custom_prompt = sys.argv[3] if len(sys.argv) > 3 else ""
+    mode = "auto"
+    thread_raw = "[]"
+    positional = []
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == "--mode" and i + 1 < len(sys.argv):
+            mode = sys.argv[i + 1]
+            i += 2
+        elif arg == "--thread" and i + 1 < len(sys.argv):
+            thread_raw = sys.argv[i + 1]
+            i += 2
+        else:
+            positional.append(arg)
+            i += 1
+
+    text = positional[0] if len(positional) > 0 else ""
+    custom_prompt = positional[1] if len(positional) > 1 else ""
+
+    thread = []
+    try:
+        parsed_thread = json.loads(thread_raw)
+        if isinstance(parsed_thread, list):
+            thread = parsed_thread
+    except Exception:
+        thread = []
 
     config = load_config()
     gemini_key = config.get("gemini_key", "").strip()
@@ -719,9 +745,18 @@ def main():
     else:
         text_to_process = text
 
+    is_followup = (action == "ask" and mode == "followup" and len(thread) > 0)
     user_payload = text_to_process
+
     if action == "ask":
-        if custom_prompt and text_to_process.strip():
+        if is_followup:
+            system_instruction = (
+                "You are an expert reading assistant continuing a multi-turn conversation. "
+                "Directly answer the user's follow-up question clearly and concisely in context."
+            )
+            # Don't re-send the same snippet on every turn
+            user_payload = custom_prompt if custom_prompt else text_to_process
+        elif custom_prompt and text_to_process.strip():
             system_instruction = (
                 "You are an expert reading assistant. Answer the user's question clearly and concisely "
                 "using the provided context text as reference when relevant."
@@ -759,6 +794,33 @@ def main():
             "timestamp": recalled_item.get("timestamp", 0)
         }
 
+    gemini_contents = None
+    groq_messages = None
+
+    if is_followup:
+        # Groq: OpenAI-style messages array as-is
+        groq_messages = [{"role": "system", "content": system_instruction}]
+        for turn in thread:
+            t_role = "assistant" if turn.get("role") == "assistant" else "user"
+            groq_messages.append({"role": t_role, "content": turn.get("content", "")})
+        groq_messages.append({"role": "user", "content": user_payload})
+
+        # Gemini: convert to contents format (user/model, parts[{text}])
+        gemini_contents = []
+        first_user = True
+        for turn in thread:
+            g_role = "model" if turn.get("role") == "assistant" else "user"
+            t_content = turn.get("content", "")
+            if first_user and g_role == "user":
+                t_content = f"Instructions: {system_instruction}\n\n{t_content}"
+                first_user = False
+            gemini_contents.append({"role": g_role, "parts": [{"text": t_content}]})
+
+        final_user_text = user_payload
+        if first_user:
+            final_user_text = f"Instructions: {system_instruction}\n\n{final_user_text}"
+        gemini_contents.append({"role": "user", "parts": [{"text": final_user_text}]})
+
     providers = []
     if primary == "groq":
         if groq_key: providers.append(("groq", groq_key, "Groq Llama 3.3"))
@@ -786,9 +848,9 @@ def main():
             chosen_provider = prov_label
 
             if prov_name == "gemini":
-                stream_gemini(key, system_instruction, user_payload)
+                stream_gemini(key, system_instruction, user_payload, gemini_contents)
             elif prov_name == "groq":
-                stream_groq(key, system_instruction, user_payload)
+                stream_groq(key, system_instruction, user_payload, groq_messages)
 
             success = True
             break
