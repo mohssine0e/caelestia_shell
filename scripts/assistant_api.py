@@ -121,7 +121,7 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
             ],
             "generationConfig": {
                 "temperature": 0.4,
-                "maxOutputTokens": 1024
+                "maxOutputTokens": 8192
             }
         }
         req = urllib.request.Request(
@@ -132,7 +132,7 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
         )
         emitted_any = False
         try:
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 for line in resp:
                     line_str = line.decode("utf-8", errors="replace").strip()
                     if line_str.startswith("data:"):
@@ -176,7 +176,7 @@ def stream_groq(api_key, system_instruction, user_text, messages=None):
             {"role": "user", "content": user_text}
         ],
         "temperature": 0.4,
-        "max_tokens": 1024,
+        "max_tokens": 8192,
         "stream": True
     }
     req = urllib.request.Request(
@@ -188,7 +188,7 @@ def stream_groq(api_key, system_instruction, user_text, messages=None):
         },
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         for line in resp:
             line_str = line.decode("utf-8", errors="replace").strip()
             if line_str.startswith("data:"):

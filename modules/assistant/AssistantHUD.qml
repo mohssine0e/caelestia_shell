@@ -320,93 +320,186 @@ FocusScope {
             StyledRect {
                 id: snippetCard
                 Layout.fillWidth: true
-                implicitHeight: Math.min(85, textSnippet.implicitHeight + Tokens.padding.small * 2)
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerHigh
+                border.width: 1
+                border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
 
-                // Snippet Actions: Truncated badge, Pause/Listen toggle, and Clear text button
-                RowLayout {
-                    id: snippetActions
-                    z: 3
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    anchors.margins: 4
-                    spacing: 4
-
-                    // Truncated indicator badge
-                    StyledRect {
-                        visible: Assistant.isTruncated
-                        radius: Tokens.rounding.full
-                        color: Qt.alpha(Colours.palette.m3error, 0.2)
-                        implicitWidth: truncText.implicitWidth + 8
-                        implicitHeight: 22
-
-                        StyledText {
-                            id: truncText
-                            anchors.centerIn: parent
-                            text: {
-                                const limit = Assistant.truncatedAt > 0 ? Assistant.truncatedAt : 12000
-                                const k = Math.round(limit / 1000)
-                                return qsTr("Truncated (%1k)").arg(k)
-                            }
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3error
-                        }
-                    }
-
-                    // Toggle clipboard listening
-                    IconButton {
-                        type: Assistant.listenClipboard ? IconButton.Filled : IconButton.Tonal
-                        icon: Assistant.listenClipboard ? "content_paste" : "content_paste_off"
-                        font: Tokens.font.icon.small
-                        implicitWidth: 26
-                        implicitHeight: 26
-                        onClicked: Assistant.listenClipboard = !Assistant.listenClipboard
-                    }
-
-                    // Free / Clear copied text
-                    IconButton {
-                        type: IconButton.Tonal
-                        icon: "clear"
-                        visible: Assistant.selectedText.length > 0
-                        font: Tokens.font.icon.small
-                        implicitWidth: 26
-                        implicitHeight: 26
-                        onClicked: Assistant.clearSelection()
-                    }
+                property bool isExpanded: false
+                readonly property bool hasSelection: Assistant.selectedText.length > 0
+                readonly property bool isCodeSnippet: {
+                    const text = Assistant.selectedText;
+                    if (!text || text.length < 5) return false;
+                    return /[{};=()=>]|import\s+|class\s+|function\s+|def\s+|const\s+|let\s+|var\s+|package\s+|public\s+|private\s+/.test(text);
                 }
 
-                Flickable {
-                    id: snippetFlick
-                    anchors.fill: parent
-                    anchors.margins: Tokens.padding.small
-                    anchors.rightMargin: snippetActions.width + Tokens.padding.small
-                    contentHeight: textSnippet.implicitHeight
-                    clip: true
+                implicitHeight: snippetLayout.implicitHeight
 
-                    StyledScrollBar.vertical: StyledScrollBar {
-                        flickable: snippetFlick
+                ColumnLayout {
+                    id: snippetLayout
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    spacing: 0
+
+                    // ── Dedicated Sub-Header Bar ──────────────────────────────
+                    Item {
+                        id: snippetSubHeader
+                        Layout.fillWidth: true
+                        implicitHeight: 30
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.45)
+                            bottomLeftRadius: 0
+                            bottomRightRadius: 0
+                            topLeftRadius: snippetCard.radius
+                            topRightRadius: snippetCard.radius
+                        }
+
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 1
+                            color: Qt.alpha(Colours.palette.m3outlineVariant, 0.25)
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: Tokens.padding.small
+                            anchors.rightMargin: 6
+                            spacing: 6
+
+                            MaterialIcon {
+                                text: snippetCard.isCodeSnippet ? "data_object" : "subject"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3primary
+                            }
+
+                            StyledText {
+                                text: qsTr("Context")
+                                font: Tokens.font.label.builders.small.weight(Font.DemiBold).build()
+                                color: Colours.palette.m3onSurface
+                            }
+
+                            // Truncated indicator badge
+                            StyledRect {
+                                visible: Assistant.isTruncated
+                                radius: Tokens.rounding.full
+                                color: Qt.alpha(Colours.palette.m3error, 0.2)
+                                implicitWidth: truncText.implicitWidth + 8
+                                implicitHeight: 18
+
+                                StyledText {
+                                    id: truncText
+                                    anchors.centerIn: parent
+                                    text: {
+                                        const limit = Assistant.truncatedAt > 0 ? Assistant.truncatedAt : 12000
+                                        const k = Math.round(limit / 1000)
+                                        return qsTr("Truncated (%1k)").arg(k)
+                                    }
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3error
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            // Organized Toolbar: Copy, Toggle Listen, Expand/Collapse, Clear
+                            IconButton {
+                                type: IconButton.Text
+                                icon: "content_copy"
+                                font: Tokens.font.icon.small
+                                visible: snippetCard.hasSelection
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                onClicked: Quickshell.clipboardText = Assistant.selectedText
+                            }
+
+                            IconButton {
+                                type: Assistant.listenClipboard ? IconButton.Text : IconButton.Tonal
+                                icon: Assistant.listenClipboard ? "content_paste" : "content_paste_off"
+                                font: Tokens.font.icon.small
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                onClicked: Assistant.listenClipboard = !Assistant.listenClipboard
+                            }
+
+                            IconButton {
+                                type: IconButton.Text
+                                icon: snippetCard.isExpanded ? "unfold_less" : "unfold_more"
+                                font: Tokens.font.icon.small
+                                visible: snippetCard.hasSelection && textSnippet.lineCount > 3
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                onClicked: snippetCard.isExpanded = !snippetCard.isExpanded
+                            }
+
+                            IconButton {
+                                type: IconButton.Text
+                                icon: "close"
+                                visible: snippetCard.hasSelection
+                                font: Tokens.font.icon.small
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                onClicked: Assistant.clearSelection()
+                            }
+                        }
                     }
 
-                    StyledText {
-                        id: textSnippet
-                        width: snippetFlick.width - Tokens.padding.small
-                        text: Assistant.selectedText.length > 0
-                            ? Assistant.selectedText
-                            : (Assistant.listenClipboard
-                                ? qsTr("No text captured. Highlight text anywhere and press Super+H.")
-                                : qsTr("Clipboard listening paused. Click clipboard icon to resume."))
-                        font: {
-                            const words = Assistant.selectedText.trim().split(/\s+/).length
-                            return (words === 1 && Assistant.selectedText.trim().length > 0)
-                                ? Tokens.font.title.small
-                                : Tokens.font.body.small
+                    // ── Content Area with No Text Clipping ────────────────────
+                    Item {
+                        Layout.fillWidth: true
+                        implicitHeight: {
+                            if (!snippetCard.hasSelection) {
+                                return 36;
+                            }
+                            const contentH = textSnippet.implicitHeight + Tokens.padding.small * 2;
+                            if (snippetCard.isExpanded) {
+                                return Math.min(240, Math.max(60, contentH));
+                            }
+                            return Math.min(96, Math.max(48, contentH));
                         }
-                        color: Assistant.selectedText.length > 0
-                            ? Colours.palette.m3onSurface
-                            : Colours.palette.m3outline
-                        wrapMode: Text.Wrap
-                        elide: Text.ElideNone
+
+                        Behavior on implicitHeight {
+                            Anim { duration: Tokens.anim.durations.expressiveFastEffects }
+                        }
+
+                        Flickable {
+                            id: snippetFlick
+                            anchors.fill: parent
+                            anchors.margins: Tokens.padding.small
+                            contentHeight: textSnippet.implicitHeight
+                            clip: true
+
+                            StyledScrollBar.vertical: StyledScrollBar {
+                                flickable: snippetFlick
+                            }
+
+                            StyledText {
+                                id: textSnippet
+                                width: snippetFlick.width - (snippetFlick.contentHeight > snippetFlick.height ? Tokens.padding.small : 0)
+                                text: Assistant.selectedText.length > 0
+                                    ? Assistant.selectedText
+                                    : (Assistant.listenClipboard
+                                        ? qsTr("No text captured. Highlight text anywhere and press Super+H.")
+                                        : qsTr("Clipboard listening paused. Click clipboard icon to resume."))
+                                font: {
+                                    const words = Assistant.selectedText.trim().split(/\s+/).length;
+                                    if (words === 1 && Assistant.selectedText.trim().length > 0)
+                                        return Tokens.font.title.small;
+                                    if (snippetCard.isCodeSnippet)
+                                        return Tokens.font.mono.builders.small.size(11).build();
+                                    return Tokens.font.body.builders.small.size(11.5).build();
+                                }
+                                color: Assistant.selectedText.length > 0
+                                    ? Colours.palette.m3onSurface
+                                    : Colours.palette.m3outline
+                                wrapMode: Text.Wrap
+                                elide: Text.ElideNone
+                            }
+                        }
                     }
                 }
             }
@@ -962,7 +1055,7 @@ FocusScope {
                     placeholderFloats: false
 
                     Keys.onReturnPressed: {
-                        if (text.trim().length > 0) {
+                        if (!Assistant.isGenerating && text.trim().length > 0) {
                             if (root.askBoundToSelection) {
                                 Assistant.clearThread()
                             }
@@ -979,8 +1072,10 @@ FocusScope {
                     font: Tokens.font.icon.small
                     implicitWidth: 36
                     implicitHeight: 36
+                    enabled: !Assistant.isGenerating && customQuestionInput.text.trim().length > 0
+                    opacity: enabled ? 1.0 : 0.4
                     onClicked: {
-                        if (customQuestionInput.text.trim().length > 0) {
+                        if (!Assistant.isGenerating && customQuestionInput.text.trim().length > 0) {
                             if (root.askBoundToSelection) {
                                 Assistant.clearThread()
                             }

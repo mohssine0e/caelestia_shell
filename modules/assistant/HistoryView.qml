@@ -25,6 +25,7 @@ FocusScope {
     property bool reviewShowHint: false
     property bool reviewShowSolution: false
     property var shuffledOrder: []
+    property string expandedId: ""
 
     readonly property var starredItems: {
         if (root.shuffledOrder.length > 0) return root.shuffledOrder
@@ -536,7 +537,7 @@ FocusScope {
                         delegate: StyledRect {
                             id: itemCard
                             required property var modelData
-                            property bool expanded: false
+                            readonly property bool expanded: root.expandedId === String(itemCard.modelData.id)
 
                             Layout.fillWidth: true
                             implicitHeight: cardContent.implicitHeight + Tokens.padding.small * 2
@@ -560,7 +561,10 @@ FocusScope {
                                 height: 42
                                 radius: itemCard.radius
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: itemCard.expanded = !itemCard.expanded
+                                onClicked: {
+                                    const sid = String(itemCard.modelData.id)
+                                    root.expandedId = (root.expandedId === sid) ? "" : sid
+                                }
                             }
 
                             ColumnLayout {
@@ -642,218 +646,225 @@ FocusScope {
                                     }
                                 }
 
-                                // Expanded Content (Collapsible Details)
-                                ColumnLayout {
+                                // Expanded Content (Collapsible Details - Loaded on demand for instant performance)
+                                Loader {
                                     Layout.fillWidth: true
+                                    active: itemCard.expanded
                                     visible: itemCard.expanded
-                                    spacing: Tokens.spacing.small
 
-                                    // Divider Line
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        height: 1
-                                        color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-                                    }
+                                    sourceComponent: Component {
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: Tokens.spacing.small
 
-                                    // Original Text / Question Box
-                                    StyledRect {
-                                        Layout.fillWidth: true
-                                        implicitHeight: promptText.implicitHeight + Tokens.padding.small * 2
-                                        radius: Tokens.rounding.extraSmall
-                                        color: Colours.palette.m3surfaceContainerLowest
-
-                                        StyledText {
-                                            id: promptText
-                                            anchors.fill: parent
-                                            anchors.margins: Tokens.padding.small
-                                            text: {
-                                                let str = ""
-                                                if (itemCard.modelData.prompt && itemCard.modelData.prompt.length > 0) {
-                                                    str += "Q: " + itemCard.modelData.prompt + "\n\n"
-                                                }
-                                                if (itemCard.modelData.text && itemCard.modelData.text.length > 0) {
-                                                    str += itemCard.modelData.text
-                                                }
-                                                return str.trim()
+                                            // Divider Line
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                height: 1
+                                                color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
                                             }
-                                            wrapMode: Text.Wrap
-                                            font: Tokens.font.body.small
-                                            color: Colours.palette.m3onSurfaceVariant
-                                        }
-                                    }
 
-                                    // Full AI Answer (Selectable Markdown)
-                                    StyledRect {
-                                        Layout.fillWidth: true
-                                        implicitHeight: answerText.contentHeight + Tokens.padding.small * 2
-                                        radius: Tokens.rounding.extraSmall
-                                        color: Colours.palette.m3surfaceContainerLowest
-
-                                        TextEdit {
-                                            id: answerText
-                                            anchors.fill: parent
-                                            anchors.margins: Tokens.padding.small
-                                            text: itemCard.modelData.answer || ""
-                                            readOnly: true
-                                            selectByMouse: true
-                                            selectByKeyboard: true
-                                            cursorVisible: false
-                                            textFormat: TextEdit.MarkdownText
-                                            wrapMode: TextEdit.Wrap
-                                            font: Tokens.font.body.small
-                                            color: Colours.palette.m3onSurface
-                                            selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
-                                            selectedTextColor: Colours.palette.m3onSurface
-                                            renderType: TextEdit.NativeRendering
-                                            readonly property bool isArabicResult: {
-                                                const act = itemCard.modelData ? itemCard.modelData.action : ""
-                                                if (act !== "translate" || !text) return false
-                                                const arabicMatches = text.match(/[\u0600-\u06FF]/g)
-                                                const latinMatches = text.match(/[A-Za-z]/g)
-                                                const arabicCount = arabicMatches ? arabicMatches.length : 0
-                                                const latinCount = latinMatches ? latinMatches.length : 0
-                                                return arabicCount > latinCount
-                                            }
-                                            horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
-                                        }
-                                    }
-
-                                    // Tags Pills (if present)
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        visible: itemCard.modelData.tags && itemCard.modelData.tags.length > 0
-                                        spacing: 4
-
-                                        Repeater {
-                                            model: itemCard.modelData.tags || []
-
-                                            delegate: StyledRect {
-                                                id: tagBadge
-                                                required property string modelData
-                                                implicitWidth: tagBadgeRow.implicitWidth + 8
-                                                implicitHeight: 22
-                                                radius: Tokens.rounding.full
-                                                color: Qt.alpha(Colours.palette.m3primary, 0.15)
-
-                                                RowLayout {
-                                                    id: tagBadgeRow
-                                                    anchors.centerIn: parent
-                                                    spacing: 2
-
-                                                    StyledText {
-                                                        id: tagBadgeText
-                                                        text: `#${tagBadge.modelData}`
-                                                        font: Tokens.font.label.small
-                                                        color: Colours.palette.m3primary
-                                                    }
-
-                                                    IconButton {
-                                                        type: IconButton.Text
-                                                        icon: "close"
-                                                        font: Tokens.font.icon.small
-                                                        implicitWidth: 16
-                                                        implicitHeight: 16
-                                                        padding: 0
-                                                        activeColour: "transparent"
-                                                        inactiveColour: "transparent"
-                                                        activeOnColour: Colours.palette.m3error
-                                                        inactiveOnColour: Qt.alpha(Colours.palette.m3primary, 0.7)
-                                                        onClicked: Assistant.removeTagFromItem(itemCard.modelData.id, tagBadge.modelData)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Per-Item Actions Footer
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: Tokens.spacing.small
-
-                                        // Context Exclusion Toggle Pill ("Forget this")
-                                        StyledRect {
-                                            implicitWidth: excludePillRow.implicitWidth + Tokens.padding.small * 2
-                                            implicitHeight: 28
-                                            radius: Tokens.rounding.full
-                                            color: itemCard.modelData.context_excluded
-                                                ? Qt.alpha(Colours.palette.m3error, 0.15)
-                                                : Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.6)
-                                            border.width: 1
-                                            border.color: itemCard.modelData.context_excluded
-                                                ? Qt.alpha(Colours.palette.m3error, 0.4)
-                                                : Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
-
-                                            RowLayout {
-                                                id: excludePillRow
-                                                anchors.centerIn: parent
-                                                spacing: 4
-
-                                                MaterialIcon {
-                                                    text: itemCard.modelData.context_excluded ? "visibility_off" : "visibility"
-                                                    fontStyle: Tokens.font.icon.small
-                                                    color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
-                                                }
+                                            // Original Text / Question Box
+                                            StyledRect {
+                                                Layout.fillWidth: true
+                                                implicitHeight: promptText.implicitHeight + Tokens.padding.small * 2
+                                                radius: Tokens.rounding.extraSmall
+                                                color: Colours.palette.m3surfaceContainerLowest
 
                                                 StyledText {
-                                                    text: itemCard.modelData.context_excluded ? qsTr("Excluded from AI context") : qsTr("Active in AI context")
-                                                    font: Tokens.font.label.small
-                                                    color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
+                                                    id: promptText
+                                                    anchors.fill: parent
+                                                    anchors.margins: Tokens.padding.small
+                                                    text: {
+                                                        let str = ""
+                                                        if (itemCard.modelData.prompt && itemCard.modelData.prompt.length > 0) {
+                                                            str += "Q: " + itemCard.modelData.prompt + "\n\n"
+                                                        }
+                                                        if (itemCard.modelData.text && itemCard.modelData.text.length > 0) {
+                                                            str += itemCard.modelData.text
+                                                        }
+                                                        return str.trim()
+                                                    }
+                                                    wrapMode: Text.Wrap
+                                                    font: Tokens.font.body.small
+                                                    color: Colours.palette.m3onSurfaceVariant
                                                 }
                                             }
 
-                                            StateLayer {
-                                                anchors.fill: parent
-                                                radius: parent.radius
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: Assistant.toggleContextExcluded(itemCard.modelData.id)
+                                            // Full AI Answer (Selectable Markdown)
+                                            StyledRect {
+                                                Layout.fillWidth: true
+                                                implicitHeight: answerText.contentHeight + Tokens.padding.small * 2
+                                                radius: Tokens.rounding.extraSmall
+                                                color: Colours.palette.m3surfaceContainerLowest
+
+                                                TextEdit {
+                                                    id: answerText
+                                                    anchors.fill: parent
+                                                    anchors.margins: Tokens.padding.small
+                                                    text: itemCard.modelData.answer || ""
+                                                    readOnly: true
+                                                    selectByMouse: true
+                                                    selectByKeyboard: true
+                                                    cursorVisible: false
+                                                    textFormat: TextEdit.MarkdownText
+                                                    wrapMode: TextEdit.Wrap
+                                                    font: Tokens.font.body.small
+                                                    color: Colours.palette.m3onSurface
+                                                    selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                                                    selectedTextColor: Colours.palette.m3onSurface
+                                                    renderType: TextEdit.NativeRendering
+                                                    readonly property bool isArabicResult: {
+                                                        const act = itemCard.modelData ? itemCard.modelData.action : ""
+                                                        if (act !== "translate" || !text) return false
+                                                        const arabicMatches = text.match(/[\u0600-\u06FF]/g)
+                                                        const latinMatches = text.match(/[A-Za-z]/g)
+                                                        const arabicCount = arabicMatches ? arabicMatches.length : 0
+                                                        const latinCount = latinMatches ? latinMatches.length : 0
+                                                        return arabicCount > latinCount
+                                                    }
+                                                    horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
+                                                }
                                             }
-                                        }
 
-                                        Item { Layout.fillWidth: true }
+                                            // Tags Pills (if present)
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                visible: itemCard.modelData.tags && itemCard.modelData.tags.length > 0
+                                                spacing: 4
 
-                                        // Copy Answer
-                                        IconButton {
-                                            id: itemCopyBtn
-                                            property bool copied: false
-                                            type: IconButton.Tonal
-                                            icon: copied ? "check" : "content_copy"
-                                            font: Tokens.font.icon.small
-                                            implicitWidth: 30
-                                            implicitHeight: 30
-                                            onClicked: {
-                                                Quickshell.clipboardText = itemCard.modelData.answer || ""
-                                                copied = true
-                                                resetItemCopy.restart()
+                                                Repeater {
+                                                    model: itemCard.modelData.tags || []
+
+                                                    delegate: StyledRect {
+                                                        id: tagBadge
+                                                        required property string modelData
+                                                        implicitWidth: tagBadgeRow.implicitWidth + 8
+                                                        implicitHeight: 22
+                                                        radius: Tokens.rounding.full
+                                                        color: Qt.alpha(Colours.palette.m3primary, 0.15)
+
+                                                        RowLayout {
+                                                            id: tagBadgeRow
+                                                            anchors.centerIn: parent
+                                                            spacing: 2
+
+                                                            StyledText {
+                                                                id: tagBadgeText
+                                                                text: `#${tagBadge.modelData}`
+                                                                font: Tokens.font.label.small
+                                                                color: Colours.palette.m3primary
+                                                            }
+
+                                                            IconButton {
+                                                                type: IconButton.Text
+                                                                icon: "close"
+                                                                font: Tokens.font.icon.small
+                                                                implicitWidth: 16
+                                                                implicitHeight: 16
+                                                                padding: 0
+                                                                activeColour: "transparent"
+                                                                inactiveColour: "transparent"
+                                                                activeOnColour: Colours.palette.m3error
+                                                                inactiveOnColour: Qt.alpha(Colours.palette.m3primary, 0.7)
+                                                                onClicked: Assistant.removeTagFromItem(itemCard.modelData.id, tagBadge.modelData)
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
 
-                                            Timer {
-                                                id: resetItemCopy
-                                                interval: 1800
-                                                onTriggered: itemCopyBtn.copied = false
-                                            }
-                                        }
+                                            // Per-Item Actions Footer
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: Tokens.spacing.small
 
-                                        // Re-open in Assistant View
-                                        IconButton {
-                                            type: IconButton.Tonal
-                                            icon: "open_in_new"
-                                            font: Tokens.font.icon.small
-                                            implicitWidth: 30
-                                            implicitHeight: 30
-                                            onClicked: {
-                                                Assistant.reopenItem(itemCard.modelData)
-                                                root.backRequested()
-                                            }
-                                        }
+                                                // Context Exclusion Toggle Pill ("Forget this")
+                                                StyledRect {
+                                                    implicitWidth: excludePillRow.implicitWidth + Tokens.padding.small * 2
+                                                    implicitHeight: 28
+                                                    radius: Tokens.rounding.full
+                                                    color: itemCard.modelData.context_excluded
+                                                        ? Qt.alpha(Colours.palette.m3error, 0.15)
+                                                        : Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.6)
+                                                    border.width: 1
+                                                    border.color: itemCard.modelData.context_excluded
+                                                        ? Qt.alpha(Colours.palette.m3error, 0.4)
+                                                        : Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
 
-                                        // Delete Item
-                                        IconButton {
-                                            type: IconButton.Tonal
-                                            icon: "delete"
-                                            font: Tokens.font.icon.small
-                                            implicitWidth: 30
-                                            implicitHeight: 30
-                                            onClicked: Assistant.deleteHistoryItem(itemCard.modelData.id)
+                                                    RowLayout {
+                                                        id: excludePillRow
+                                                        anchors.centerIn: parent
+                                                        spacing: 4
+
+                                                        MaterialIcon {
+                                                            text: itemCard.modelData.context_excluded ? "visibility_off" : "visibility"
+                                                            fontStyle: Tokens.font.icon.small
+                                                            color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
+                                                        }
+
+                                                        StyledText {
+                                                            text: itemCard.modelData.context_excluded ? qsTr("Excluded from AI context") : qsTr("Active in AI context")
+                                                            font: Tokens.font.label.small
+                                                            color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
+                                                        }
+                                                    }
+
+                                                    StateLayer {
+                                                        anchors.fill: parent
+                                                        radius: parent.radius
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: Assistant.toggleContextExcluded(itemCard.modelData.id)
+                                                    }
+                                                }
+
+                                                Item { Layout.fillWidth: true }
+
+                                                // Copy Answer
+                                                IconButton {
+                                                    id: itemCopyBtn
+                                                    property bool copied: false
+                                                    type: IconButton.Tonal
+                                                    icon: copied ? "check" : "content_copy"
+                                                    font: Tokens.font.icon.small
+                                                    implicitWidth: 30
+                                                    implicitHeight: 30
+                                                    onClicked: {
+                                                        Quickshell.clipboardText = itemCard.modelData.answer || ""
+                                                        copied = true
+                                                        resetItemCopy.restart()
+                                                    }
+
+                                                    Timer {
+                                                        id: resetItemCopy
+                                                        interval: 1800
+                                                        onTriggered: itemCopyBtn.copied = false
+                                                    }
+                                                }
+
+                                                // Re-open in Assistant View
+                                                IconButton {
+                                                    type: IconButton.Tonal
+                                                    icon: "open_in_new"
+                                                    font: Tokens.font.icon.small
+                                                    implicitWidth: 30
+                                                    implicitHeight: 30
+                                                    onClicked: {
+                                                        Assistant.reopenItem(itemCard.modelData)
+                                                        root.backRequested()
+                                                    }
+                                                }
+
+                                                // Delete Item
+                                                IconButton {
+                                                    type: IconButton.Tonal
+                                                    icon: "delete"
+                                                    font: Tokens.font.icon.small
+                                                    implicitWidth: 30
+                                                    implicitHeight: 30
+                                                    onClicked: Assistant.deleteHistoryItem(itemCard.modelData.id)
+                                                }
+                                            }
                                         }
                                     }
                                 }

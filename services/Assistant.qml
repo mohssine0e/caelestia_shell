@@ -16,6 +16,7 @@ Singleton {
     property string providerUsed: ""
     property int latencyMs: 0
     property bool isLoading: false
+    readonly property bool isGenerating: isLoading || apiProc.running
     property string errorMessage: ""
     property string errorType: "" // "network", "auth", "rate_limit", "no_selection", "generic"
     property bool hasApiKey: true
@@ -40,11 +41,14 @@ Singleton {
     property string distillError: ""
     readonly property string memoryPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory.json"
 
+    property bool _isSavingMemory: false
+
     FileView {
         id: memoryStorage
         printErrors: false
         path: root.memoryPath
         onLoaded: {
+            if (root._isSavingMemory) return
             try {
                 const parsed = JSON.parse(text())
                 if (Array.isArray(parsed)) {
@@ -55,6 +59,7 @@ Singleton {
             }
         }
         onLoadFailed: err => {
+            if (root._isSavingMemory) return
             root.memory = []
             if (err === FileViewError.FileNotFound) {
                 Qt.callLater(() => memoryStorage.setText("[]"))
@@ -70,7 +75,9 @@ Singleton {
 
     function saveMemory() {
         if (memoryStorage) {
+            root._isSavingMemory = true
             memoryStorage.setText(JSON.stringify(root.memory, null, 2))
+            Qt.callLater(() => { root._isSavingMemory = false })
         }
     }
 
@@ -169,11 +176,14 @@ Singleton {
         }
     }
 
+    property bool _isSavingHistory: false
+
     FileView {
         id: historyStorage
         printErrors: false
         path: root.historyPath
         onLoaded: {
+            if (root._isSavingHistory) return
             try {
                 const parsed = JSON.parse(text())
                 if (Array.isArray(parsed)) {
@@ -184,6 +194,7 @@ Singleton {
             }
         }
         onLoadFailed: err => {
+            if (root._isSavingHistory) return
             root.history = []
             if (err === FileViewError.FileNotFound) {
                 Qt.callLater(() => historyStorage.setText("[]"))
@@ -538,7 +549,9 @@ Singleton {
     // ── History Persistence & Management ────────────────────────
     function saveHistory() {
         if (historyStorage) {
+            root._isSavingHistory = true
             historyStorage.setText(JSON.stringify(root.history, null, 2))
+            Qt.callLater(() => { root._isSavingHistory = false })
         }
     }
 
@@ -625,7 +638,7 @@ Singleton {
         const list = root.history.slice()
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(id)) {
-                list[i].starred = !list[i].starred
+                list[i] = Object.assign({}, list[i], { starred: !list[i].starred })
                 break
             }
         }
@@ -638,7 +651,7 @@ Singleton {
         const list = root.history.slice()
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(id)) {
-                list[i].context_excluded = !list[i].context_excluded
+                list[i] = Object.assign({}, list[i], { context_excluded: !list[i].context_excluded })
                 break
             }
         }
