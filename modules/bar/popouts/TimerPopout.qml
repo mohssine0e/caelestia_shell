@@ -6,7 +6,6 @@ import Caelestia.Config
 import qs.components
 import qs.components.controls
 import qs.services
-import qs.modules.tasks
 
 Item {
     id: root

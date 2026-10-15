@@ -11,7 +11,6 @@ import qs.components.controls
 import qs.components.containers
 import qs.components.effects
 import qs.services
-import "../tasks/"
 
 FocusScope {
     id: root

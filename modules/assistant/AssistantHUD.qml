@@ -16,6 +16,16 @@ FocusScope {
 
     property var windowRef: null
     property string currentView: "assistant" // "assistant", "history", "profile", "memory"
+    property bool askBoundToSelection: false
+
+    Connections {
+        target: Assistant
+        function onSelectedTextChanged() {
+            if (!Assistant.selectedText || Assistant.selectedText.trim().length === 0) {
+                root.askBoundToSelection = false
+            }
+        }
+    }
 
     focus: true
     width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 600 : 540
@@ -41,6 +51,12 @@ FocusScope {
         if (customQuestionInput.activeFocus) {
             if (customQuestionInput.text.length > 0) {
                 customQuestionInput.text = ""
+                event.accepted = true
+                return
+            }
+            if (root.askBoundToSelection) {
+                root.askBoundToSelection = false
+                root.forceActiveFocus()
                 event.accepted = true
                 return
             }
@@ -78,7 +94,17 @@ FocusScope {
         }
 
         if (actionMap[event.key]) {
+            root.askBoundToSelection = false
             Assistant.runAction(actionMap[event.key])
+            event.accepted = true
+            return
+        }
+
+        const hasSelection = Assistant.selectedText && Assistant.selectedText.trim().length > 0
+        if (event.key === Qt.Key_6 && hasSelection) {
+            root.askBoundToSelection = true
+            Assistant.activeAction = "ask"
+            customQuestionInput.forceActiveFocus()
             event.accepted = true
             return
         }
@@ -364,61 +390,45 @@ FocusScope {
                 }
             }
 
-            // ── 3. Action Chips Row with StateLayer Hover Glow ────────
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Tokens.spacing.extraSmall
+            // ── 3. Action Switcher (BtnSwitcher) ──────────────────────
+            BtnSwitcher {
+                id: actionSwitcher
+                Layout.alignment: Qt.AlignHCenter
+                givenHeight: 32
+                radius: Tokens.rounding.full
+                borderColor: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                backgroundColor: Colours.palette.m3surfaceContainerHigh
+                font: Tokens.font.label.small
+                // showOnlyActiveText: true
+                allowReclick: true
 
-                Repeater {
-                    model: [
-                        { id: "translate", key: "1", icon: "translate", label: qsTr("Translate") },
-                        { id: "explain",   key: "2", icon: "lightbulb", label: qsTr("Explain") },
-                        { id: "tldr",      key: "3", icon: "notes",     label: qsTr("TL;DR") },
-                        { id: "rephrase",  key: "4", icon: "sync",      label: qsTr("Rephrase") },
-                        { id: "examples",  key: "5", icon: "format_list_bulleted", label: qsTr("Examples") }
+                currentValue: {
+                    if (root.askBoundToSelection) return "ask"
+                    return Assistant.activeAction || ""
+                }
+
+                model: {
+                    const items = [
+                        { icon: "translate", text: qsTr("Translate"), value: "translate" },
+                        { icon: "lightbulb",  text: qsTr("Explain"),   value: "explain" },
+                        { icon: "notes",      text: qsTr("TL;DR"),     value: "tldr" },
+                        { icon: "sync",       text: qsTr("Rephrase"),  value: "rephrase" },
+                        { icon: "format_list_bulleted", text: qsTr("Examples"), value: "examples" }
                     ]
+                    if (Assistant.selectedText && Assistant.selectedText.trim().length > 0) {
+                        items.push({ icon: "chat", text: qsTr("Ask"), value: "ask" })
+                    }
+                    return items
+                }
 
-                    delegate: StyledRect {
-                        id: chip
-                        required property var modelData
-
-                        readonly property bool isSelected: Assistant.activeAction === modelData.id
-                        Layout.fillWidth: true
-                        implicitHeight: 30
-                        radius: Tokens.rounding.full
-                        color: isSelected
-                            ? Colours.palette.m3primary
-                            : Colours.palette.m3surfaceContainerHighest
-
-                        RowLayout {
-                            id: chipRow
-                            anchors.centerIn: parent
-                            spacing: 4
-
-                            MaterialIcon {
-                                text: chip.modelData.icon
-                                fontStyle: Tokens.font.icon.small
-                                color: chip.isSelected
-                                    ? Colours.palette.m3onPrimary
-                                    : Colours.palette.m3onSurfaceVariant
-                            }
-
-                            StyledText {
-                                text: chip.modelData.label
-                                font: Tokens.font.label.small
-                                color: chip.isSelected
-                                    ? Colours.palette.m3onPrimary
-                                    : Colours.palette.m3onSurfaceVariant
-                            }
-                        }
-
-                        StateLayer {
-                            id: stateLayer
-                            anchors.fill: parent
-                            radius: chip.radius
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Assistant.runAction(chip.modelData.id)
-                        }
+                onActivated: value => {
+                    if (value === "ask") {
+                        root.askBoundToSelection = true
+                        Assistant.activeAction = "ask"
+                        customQuestionInput.forceActiveFocus()
+                    } else {
+                        root.askBoundToSelection = false
+                        Assistant.runAction(value)
                     }
                 }
             }
@@ -738,7 +748,7 @@ FocusScope {
 
                         Repeater {
                             model: [
-                                { key: "1-5", label: qsTr("Actions") },
+                                { key: (Assistant.selectedText && Assistant.selectedText.trim().length > 0) ? "1-6" : "1-5", label: qsTr("Actions") },
                                 { key: "/",   label: qsTr("Question") },
                                 { key: "Ctrl+C", label: qsTr("Copy") },
                                 { key: "Esc", label: qsTr("Dismiss") }
@@ -836,7 +846,7 @@ FocusScope {
                         implicitHeight: 22
                         radius: Tokens.rounding.full
                         color: Colours.palette.m3surfaceContainerHigh
-                        implicitWidth: chipRow.implicitWidth + (Assistant.hasThread ? 22 : 16)
+                        implicitWidth: chipRow.implicitWidth + ((root.askBoundToSelection || Assistant.hasThread) ? 22 : 16)
 
                         RowLayout {
                             id: chipRow
@@ -848,6 +858,10 @@ FocusScope {
                                 implicitHeight: 22
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
+                                    if (root.askBoundToSelection) {
+                                        root.askBoundToSelection = false
+                                        return
+                                    }
                                     if (Assistant.inputMode === "auto") {
                                         Assistant.inputMode = "followup"
                                     } else if (Assistant.inputMode === "followup") {
@@ -861,6 +875,9 @@ FocusScope {
                                     id: chipText
                                     anchors.centerIn: parent
                                     text: {
+                                        if (root.askBoundToSelection) {
+                                            return "📌 Selection"
+                                        }
                                         if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
                                             return "🌐 Standalone"
                                         }
@@ -871,6 +888,9 @@ FocusScope {
                                     }
                                     font: Tokens.font.label.small
                                     color: {
+                                        if (root.askBoundToSelection) {
+                                            return Colours.palette.m3primary
+                                        }
                                         if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
                                             return Colours.palette.m3outline
                                         }
@@ -884,11 +904,17 @@ FocusScope {
 
                             // Small × on chip
                             MouseArea {
-                                visible: Assistant.hasThread
+                                visible: root.askBoundToSelection || Assistant.hasThread
                                 implicitWidth: 14
                                 implicitHeight: 14
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: Assistant.clearThread()
+                                onClicked: {
+                                    if (root.askBoundToSelection) {
+                                        root.askBoundToSelection = false
+                                    } else {
+                                        Assistant.clearThread()
+                                    }
+                                }
 
                                 MaterialIcon {
                                     anchors.centerIn: parent
@@ -911,13 +937,17 @@ FocusScope {
                 StyledTextField {
                     id: customQuestionInput
                     Layout.fillWidth: true
-                    placeholderText: qsTr("Ask a custom question...")
+                    placeholderText: root.askBoundToSelection ? qsTr("Ask about this selection...") : qsTr("Ask a custom question...")
                     placeholderFloats: false
 
                     Keys.onReturnPressed: {
                         if (text.trim().length > 0) {
+                            if (root.askBoundToSelection) {
+                                Assistant.clearThread()
+                            }
                             Assistant.runAction("ask", text.trim())
                             text = ""
+                            root.askBoundToSelection = false
                         }
                     }
                 }
@@ -930,8 +960,12 @@ FocusScope {
                     implicitHeight: 36
                     onClicked: {
                         if (customQuestionInput.text.trim().length > 0) {
+                            if (root.askBoundToSelection) {
+                                Assistant.clearThread()
+                            }
                             Assistant.runAction("ask", customQuestionInput.text.trim())
                             customQuestionInput.text = ""
+                            root.askBoundToSelection = false
                         }
                     }
                 }

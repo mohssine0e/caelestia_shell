@@ -14,20 +14,24 @@ Item {
 
     property bool showOnlyActiveText: false
     property int givenHeight: 45
+    property bool allowReclick: false
+    property color borderColor: Colours.palette.m3secondary
+    property color backgroundColor: "transparent"
+    property real radius: Tokens.rounding.small
+    property font font: Tokens.font.label.medium
 
     signal activated(string value)
 
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
 
-
     // Background and border for the switcher
     Rectangle {
         anchors.fill: row
-        color: "transparent"
-        radius: Tokens.rounding.small
+        color: root.backgroundColor
+        radius: root.radius
         border.width: 1
-        border.color: Colours.palette.m3secondary
+        border.color: root.borderColor
     }
 
     RowLayout {
@@ -47,29 +51,32 @@ Item {
                 type: ButtonBase.Tonal
 
                 activeColour: Colours.palette.m3primary
-
                 inactiveColour: "transparent"
                 inactiveOnColour: Colours.palette.m3onSurfaceVariant
 
-                font: Tokens.font.label.medium
+                font: root.font
                 icon: {
                     if (root.showOnlyActiveText) {
-                        return modelData.icon
+                        return modelData.icon || ""
                     } else {
-                        return root.currentValue === modelData.value ? modelData.icon : ""
+                        return root.currentValue === modelData.value ? (modelData.icon || "") : ""
                     }
                 }
                 text: {
                     if (!root.showOnlyActiveText) {
-                        return modelData.text
+                        return modelData.text || ""
                     } else {
-                        return root.currentValue === modelData.value ? modelData.text : ""
+                        return root.currentValue === modelData.value ? (modelData.text || "") : ""
                     }
                 }
-                radius: Tokens.rounding.small
+                radius: root.radius
                 padding: Tokens.padding.small
+                horizontalPadding: root.showOnlyActiveText && root.currentValue !== modelData.value
+                    ? Tokens.padding.small
+                    : Tokens.padding.medium
+
                 onClicked: {
-                    if (root.currentValue !== modelData.value) {
+                    if (root.allowReclick || root.currentValue !== modelData.value) {
                         root.activated(modelData.value)
                         if (modelData.action) modelData.action()
                     }
@@ -78,3 +85,4 @@ Item {
         }
     }
 }
+
