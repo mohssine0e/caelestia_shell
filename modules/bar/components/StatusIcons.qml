@@ -37,6 +37,8 @@ StyledRect {
     function collapsed(entry: var): bool {
         if (entry.id === "lockStatus")
             return !Hypr.capsLock && !Hypr.numLock;
+        if (entry.id === "disks")
+            return !Disks.hasRemovable;
         return false;
     }
 
@@ -61,7 +63,15 @@ StyledRect {
             model: ScriptModel {
                 id: model
 
-                values: root.Config.bar.statusIcons.values.filter(e => e.enabled)
+                values: {
+                    const vals = root.Config.bar.statusIcons.values.filter(e => e.enabled).slice();
+                    const netIdx = vals.findIndex(e => e.id === "network");
+                    if (netIdx !== -1)
+                        vals.splice(netIdx, 0, { id: "disks", enabled: true });
+                    else
+                        vals.push({ id: "disks", enabled: true });
+                    return vals;
+                }
             }
 
             DelegateChooser {
@@ -113,6 +123,49 @@ StyledRect {
                             text: Hypr.kbLayout
                             color: root.colour
                             font: Tokens.font.mono.medium
+                        }
+                    }
+                }
+                DelegateChoice {
+                    roleValue: "disks"
+                    delegate: EntryWrapper {
+                        Item {
+                            implicitWidth: diskIcon.implicitWidth
+                            implicitHeight: Disks.hasRemovable ? diskIcon.implicitHeight : 0
+                            visible: implicitHeight > 0
+
+                            Behavior on implicitHeight {
+                                Anim { type: Anim.SlowEffects }
+                            }
+
+                            MaterialIcon {
+                                id: diskIcon
+                                anchors.centerIn: parent
+                                scale: Disks.hasRemovable ? 1 : 0.5
+                                opacity: Disks.hasRemovable ? 1 : 0
+                                animate: true
+                                text: Disks.isEjecting ? "sync" : Disks.primaryIcon
+                                color: Disks.isEjecting ? Colours.palette.m3primary : root.colour
+                                fontStyle: Tokens.font.icon.medium
+
+                                Behavior on opacity {
+                                    Anim { type: Anim.DefaultEffects }
+                                }
+                                Behavior on scale {
+                                    Anim {}
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton
+                                onClicked: {
+                                    if (Disks.count === 1) {
+                                        Disks.eject(Disks.drives[0]);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
