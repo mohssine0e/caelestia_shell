@@ -33,19 +33,12 @@ Singleton {
     // ── Pomodoro Cycle Tracking ─────────────────────────────────
     property int pomodorosInCycle: 0
 
-    // ── Sound chime process ─────────────────────────────────────
-    Process {
-        id: soundProc
-    }
-
     function playChime(): void {
-        const sounds = [
-            "/usr/share/sounds/freedesktop/stereo/complete.oga",
-            "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga",
-            "/usr/share/sounds/freedesktop/stereo/bell.oga"
-        ];
-        // Use pw-play or canberra-gtk-play
-        soundProc.exec(["pw-play", sounds[0]]);
+        // Wake display if blanked/DPMS off
+        Hypr.dispatch(Hypr.usingLua ? "hl.dsp.dpms({ action = 'enable' })" : "dpms on");
+
+        const sound = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga";
+        Quickshell.execDetached(["pw-play", sound]);
     }
 
     // ── Computed Progress ────────────────────────────────────────
@@ -135,7 +128,7 @@ Singleton {
     function onTimerFinished(): void {
         checkDayRollover();
 
-        // Play audio chime
+        // Play audio chime and wake display
         playChime();
 
         if (root.mode === "work" || root.mode === "custom") {
@@ -148,12 +141,14 @@ Singleton {
                 : Tr.tr("Great job! Take a 5m break.");
 
             Toaster.toast(title, msg, "check_circle");
+            Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
             setPreset("break", 5);
         } else {
             // Break finished
             const title = Tr.tr("Break Finished!");
             const msg = Tr.tr("Ready to start your next focus session?");
             Toaster.toast(title, msg, "coffee");
+            Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
             setPreset("work", 25);
         }
     }

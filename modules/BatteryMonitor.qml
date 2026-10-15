@@ -12,8 +12,12 @@ Scope {
     readonly property list<var> warnLevels: [...GlobalConfig.general.battery.warnLevels.values].sort((a, b) => a.level - b.level)
     property real lastPercentage: 100
 
+    function playAlertSound(): void {
+        Quickshell.execDetached(["pw-play", "/usr/share/sounds/freedesktop/stereo/suspend-error.oga"]);
+    }
+
     function handleBatteryWarnings(): void {
-        const p = UPower.displayDevice.percentage * 100;
+        const p = Math.round(UPower.displayDevice.percentage * 100);
 
         if (!UPower.onBattery) {
             root.lastPercentage = p;
@@ -21,11 +25,19 @@ Scope {
         }
 
         if (root.lastPercentage >= 0) {
+            let warnedLevel = -1;
             for (const level of root.warnLevels) {
                 if (p <= level.level && root.lastPercentage > level.level) {
                     Toaster.toast(Tr.trMarked(level.title ?? Tr.tr("Battery warning")), Tr.trMarked(level.message ?? Tr.tr("Battery level is low")), level.icon ?? "battery_android_alert", level.critical ? Toast.Error : Toast.Warning);
+                    warnedLevel = level.level;
                     break;
                 }
+            }
+
+            const crossed10 = p <= 10 && root.lastPercentage > 10;
+            const crossed5  = p <= 5  && root.lastPercentage > 5;
+            if (crossed10 || crossed5 || (warnedLevel > 0 && warnedLevel <= 10)) {
+                root.playAlertSound();
             }
         }
 

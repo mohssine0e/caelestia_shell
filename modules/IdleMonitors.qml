@@ -27,6 +27,12 @@ Scope {
         if (!action)
             return;
 
+        if (FocusTimer.isRunning && FocusTimer.mode !== "stopwatch") {
+            const actStr = Array.isArray(action) ? action.join(" ") : String(action);
+            if (actStr.toLowerCase().includes("suspend") || actStr.toLowerCase().includes("hibernate"))
+                return;
+        }
+
         if (action === "lock")
             lock.lock.locked = true;
         else if (action === "unlock")
@@ -67,6 +73,12 @@ Scope {
                     return false;
                 if (modelData.inhibitWhenCharging && root.isCharging)
                     return false;
+                if (FocusTimer.isRunning && FocusTimer.mode !== "stopwatch") {
+                    const act = modelData.idleAction;
+                    const actStr = Array.isArray(act) ? act.join(" ") : String(act);
+                    if (actStr.toLowerCase().includes("suspend") || actStr.toLowerCase().includes("hibernate"))
+                        return false;
+                }
                 return true;
             }
             timeout: modelData.timeout
