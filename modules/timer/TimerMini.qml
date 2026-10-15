@@ -20,7 +20,7 @@ FocusScope {
 
     readonly property alias card: card
 
-    implicitWidth: 260
+    implicitWidth: 270
     implicitHeight: card.implicitHeight
 
     readonly property int pillHeight: 32
@@ -37,13 +37,13 @@ FocusScope {
     readonly property var presetOrder: [
         { value: "work",       minutes: 25 },
         { value: "shortBreak", minutes: 5  },
-        { value: "longBreak",  minutes: 15 }
+        { value: "stopwatch",  minutes: 0  }
     ]
 
     function cyclePreset(step) {
         step = step || 1
         const n = root.presetOrder.length
-        let i = root.presetOrder.findIndex(p => p.value === FocusTimer.mode)
+        let i = root.presetOrder.findIndex(p => p.value === FocusTimer.mode || (p.value === "shortBreak" && FocusTimer.mode === "break"))
         if (i < 0) i = 0
         const next = (i + step + n) % n
         const p = root.presetOrder[next]
@@ -158,7 +158,7 @@ FocusScope {
                         readonly property real progress: Math.max(0, Math.min(1, FocusTimer.progress))
                         readonly property color activeColour: FocusTimer.mode === "work" || FocusTimer.mode === "custom"
                             ? Colours.palette.m3primary
-                            : Colours.palette.m3tertiary
+                            : (FocusTimer.mode === "stopwatch" ? Colours.palette.m3secondary : Colours.palette.m3tertiary)
                         readonly property color trackColour: Colours.palette.m3surfaceContainerHighest
 
                         Shape {
@@ -204,7 +204,7 @@ FocusScope {
                         MaterialIcon {
                             anchors.centerIn: parent
                             text: FocusTimer.isRunning
-                                ? (FocusTimer.mode === "work" ? "bolt" : "coffee")
+                                ? (FocusTimer.mode === "work" ? "bolt" : (FocusTimer.mode === "stopwatch" ? "timer" : "coffee"))
                                 : "timer"
                             fontStyle: Tokens.font.icon.small
                             color: Colours.palette.m3onSurfaceVariant
@@ -254,11 +254,11 @@ FocusScope {
                     givenHeight: 36
 
                     model: [
-                        { icon: "work",   text: qsTr("Work"),  value: "work",       minutes: 25 },
-                        { icon: "coffee", text: qsTr("Short"), value: "shortBreak", minutes: 5  },
-                        { icon: "hotel",  text: qsTr("Long"),  value: "longBreak",  minutes: 15 }
+                        { icon: "work",   text: qsTr("Work"),      value: "work",       minutes: 25 },
+                        { icon: "coffee", text: qsTr("Short"),     value: "shortBreak", minutes: 5  },
+                        { icon: "timer",  text: qsTr("Stopwatch"), value: "stopwatch",  minutes: 0  }
                     ]
-                    currentValue: FocusTimer.mode
+                    currentValue: (FocusTimer.mode === "break" || FocusTimer.mode === "shortBreak") ? "shortBreak" : FocusTimer.mode
                     showOnlyActiveText: true
 
                     onActivated: value => {

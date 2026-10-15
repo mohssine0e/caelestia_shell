@@ -18,6 +18,9 @@ Singleton {
 
     // ── Stopwatch elapsed counter ────────────────────────────────
     property int elapsedSeconds: 0
+    property int elapsedMillis: 0
+    property double _stopwatchStart: 0
+    property double _stopwatchAccumulated: 0
 
     // ── Linked Task Context ──────────────────────────────────────
     property string linkedTaskId: ""
@@ -48,15 +51,15 @@ Singleton {
     // ── Computed Progress ────────────────────────────────────────
     readonly property real progress: {
         if (mode === "stopwatch") {
-            // Smooth pulsating or continuous 60s cycle for stopwatch ring
-            return (elapsedSeconds % 60) / 60.0;
+            // Smooth continuous 60s sweep for stopwatch ring
+            return ((elapsedMillis % 60000) / 60000.0);
         }
         return totalDurationSeconds > 0
             ? Math.max(0, Math.min(1, 1 - (remainingSeconds / totalDurationSeconds)))
             : 0;
     }
 
-    readonly property string formattedTime: {
+    readonly property string formattedSeconds: {
         const total = mode === "stopwatch" ? Math.max(0, elapsedSeconds) : Math.max(0, remainingSeconds);
         const hours = Math.floor(total / 3600);
         const mins  = Math.floor((total % 3600) / 60);
@@ -69,22 +72,51 @@ Singleton {
         return `${mm < 10 ? "0" + mm : mm}:${ss}`;
     }
 
-    // ── Internal 1s Ticker ───────────────────────────────────────
+    readonly property string formattedTime: {
+        if (mode === "stopwatch") {
+            const ms = Math.max(0, elapsedMillis);
+            const hours = Math.floor(ms / 3600000);
+            const mins  = Math.floor((ms % 3600000) / 60000);
+            const secs  = Math.floor((ms % 60000) / 1000);
+            const cs    = Math.floor((ms % 1000) / 10);
+
+            const mm = (hours > 0 && mins < 10) ? "0" + mins : String(mins);
+            const ss = secs < 10 ? "0" + secs : String(secs);
+            const csStr = cs < 10 ? "0" + cs : String(cs);
+
+            if (hours > 0) return `${hours}:${mm}:${ss}.${csStr}`;
+            return `${mm < 10 ? "0" + mm : mm}:${ss}.${csStr}`;
+        }
+        return formattedSeconds;
+    }
+
+    // ── Internal 1s Ticker (Work/Break) ──────────────────────────
     Timer {
         id: ticker
         interval: 1000
         repeat: true
-        running: root.isRunning
+        running: root.isRunning && root.mode !== "stopwatch"
         onTriggered: {
-            if (root.mode === "stopwatch") {
-                root.elapsedSeconds += 1;
-            } else if (root.remainingSeconds > 1) {
+            if (root.remainingSeconds > 1) {
                 root.remainingSeconds -= 1;
             } else {
                 root.remainingSeconds = 0;
                 root.isRunning = false;
                 root.onTimerFinished();
             }
+        }
+    }
+
+    // ── High-frequency Ticker (Stopwatch, ~30 FPS) ───────────────
+    Timer {
+        id: stopwatchTicker
+        interval: 33
+        repeat: true
+        running: root.isRunning && root.mode === "stopwatch"
+        onTriggered: {
+            const now = Date.now();
+            root.elapsedMillis = Math.floor(root._stopwatchAccumulated + (now - root._stopwatchStart));
+            root.elapsedSeconds = Math.floor(root.elapsedMillis / 1000);
         }
     }
 
@@ -128,12 +160,20 @@ Singleton {
 
     // ── Public Controls ──────────────────────────────────────────
     function start(): void {
-        if (mode !== "stopwatch" && remainingSeconds <= 0)
+        if (mode === "stopwatch") {
+            _stopwatchStart = Date.now();
+        } else if (remainingSeconds <= 0) {
             reset();
+        }
         isRunning = true;
     }
 
     function pause(): void {
+        if (mode === "stopwatch" && isRunning) {
+            _stopwatchAccumulated += (Date.now() - _stopwatchStart);
+            elapsedMillis = Math.floor(_stopwatchAccumulated);
+            elapsedSeconds = Math.floor(elapsedMillis / 1000);
+        }
         isRunning = false;
     }
 
@@ -145,6 +185,9 @@ Singleton {
     function reset(): void {
         isRunning = false;
         if (mode === "stopwatch") {
+            _stopwatchStart = 0;
+            _stopwatchAccumulated = 0;
+            elapsedMillis = 0;
             elapsedSeconds = 0;
         } else if (mode === "work") {
             setPreset("work", 25);
@@ -156,8 +199,12 @@ Singleton {
     }
 
     function setPreset(newMode: string, minutes: int): void {
+        isRunning = false;
         mode = newMode;
         if (newMode === "stopwatch") {
+            _stopwatchStart = 0;
+            _stopwatchAccumulated = 0;
+            elapsedMillis = 0;
             elapsedSeconds = 0;
             totalDurationSeconds = 0;
             remainingSeconds = 0;

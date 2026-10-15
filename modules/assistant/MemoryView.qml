@@ -70,17 +70,56 @@ FocusScope {
         root.expandedSources = updated
     }
 
-    readonly property var filteredCards: {
-        const list = Assistant.memory || []
-        const q = (root.searchQuery || "").trim().toLowerCase()
-        if (!q) return list
+    function getCardTimestamp(card) {
+        if (!card) return 0
+        let maxTime = 0
+        if (card.updated) {
+            const t = Date.parse(card.updated)
+            if (!isNaN(t)) maxTime = Math.max(maxTime, t)
+        }
+        if (card.created) {
+            const t = Date.parse(card.created)
+            if (!isNaN(t)) maxTime = Math.max(maxTime, t)
+        }
+        if (Array.isArray(card.sources)) {
+            for (let i = 0; i < card.sources.length; i++) {
+                const s = String(card.sources[i] || "")
+                const num = Number(s)
+                if (!isNaN(num) && num > 1000000000000) {
+                    maxTime = Math.max(maxTime, num)
+                } else if (s.startsWith("h_")) {
+                    const cleaned = s.slice(2).replace(/_[^_]+$/, "").replace(/-([0-9]{2})-([0-9]{2})-([0-9]{3})Z$/, ":$1:$2.$3Z")
+                    const pt = Date.parse(cleaned)
+                    if (!isNaN(pt)) maxTime = Math.max(maxTime, pt)
+                }
+            }
+        }
+        return maxTime
+    }
 
-        return list.filter(card => {
-            const topicMatch = (card.topic || "").toLowerCase().includes(q)
-            const tagsMatch = (card.tags || []).some(t => String(t).toLowerCase().includes(q))
-            const linesMatch = (card.lines || []).some(l => String(l).toLowerCase().includes(q))
-            return topicMatch || tagsMatch || linesMatch
-        })
+    function formatCardTime(card) {
+        const ts = root.getCardTimestamp(card)
+        if (!ts) return ""
+        const diff = Math.floor((Date.now() - ts) / 1000)
+        if (diff < 60) return qsTr("just now")
+        if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
+        if (diff < 86400) return qsTr("%1h ago").arg(Math.floor(diff / 3600))
+        if (diff < 604800) return qsTr("%1d ago").arg(Math.floor(diff / 86400))
+        return new Date(ts).toLocaleDateString(Qt.locale(), "MMM d")
+    }
+
+    readonly property var filteredCards: {
+        let list = (Assistant.memory || []).slice()
+        const q = (root.searchQuery || "").trim().toLowerCase()
+        if (q.length > 0) {
+            list = list.filter(card => {
+                const topicMatch = (card.topic || "").toLowerCase().includes(q)
+                const tagsMatch = (card.tags || []).some(t => String(t).toLowerCase().includes(q))
+                const linesMatch = (card.lines || []).some(l => String(l).toLowerCase().includes(q))
+                return topicMatch || tagsMatch || linesMatch
+            })
+        }
+        return list.sort((a, b) => root.getCardTimestamp(b) - root.getCardTimestamp(a))
     }
 
     ColumnLayout {
@@ -473,6 +512,12 @@ FocusScope {
                                     }
 
                                     Item { Layout.fillWidth: true }
+
+                                    StyledText {
+                                        text: root.formatCardTime(cardItem.modelData)
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3outline
+                                    }
                                 }
 
                                 // Expanded Sources Box
