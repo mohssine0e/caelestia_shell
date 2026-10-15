@@ -19,6 +19,7 @@ FocusScope {
     signal backRequested()
     signal closeRequested()
 
+    property var windowRef: null
     property int activeTab: 0 // 0: AI Engine & Keys, 1: Developer Dossier
 
     // Draft properties synced with Assistant service
@@ -83,69 +84,90 @@ FocusScope {
         spacing: Tokens.spacing.medium
 
         // ── 1. Top Header ─────────────────────────────────────────────
-        RowLayout {
+        Item {
+            id: headerContainer
             Layout.fillWidth: true
-            spacing: Tokens.spacing.small
+            implicitHeight: headerRow.implicitHeight
 
-            IconButton {
-                type: IconButton.Text
-                icon: "arrow_back"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                onClicked: root.backRequested()
-            }
-
-            MaterialIcon {
-                text: "settings"
-                fontStyle: Tokens.font.icon.medium
-                color: Colours.palette.m3primary
-            }
-
-            StyledText {
-                text: qsTr("Settings & Profile")
-                font: Tokens.font.title.small
-                color: Colours.palette.m3onSurface
-            }
-
-            Item { Layout.fillWidth: true }
-
-            // Live Saved Confirmation Pill
-            StyledRect {
-                visible: root.savedFeedback
-                implicitWidth: savedRow.implicitWidth + 16
-                implicitHeight: 26
-                radius: Tokens.rounding.full
-                color: Qt.alpha(Colours.palette.m3primary, 0.15)
-                border.width: 1
-                border.color: Colours.palette.m3primary
-
-                RowLayout {
-                    id: savedRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: "check"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3primary
-                    }
-
-                    StyledText {
-                        text: qsTr("Saved")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3primary
+            MouseArea {
+                id: headerDragArea
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.ArrowCursor
+                onPressed: mouse => {
+                    if (root.windowRef) {
+                        root.windowRef.startSystemMove()
                     }
                 }
             }
 
-            IconButton {
-                type: IconButton.Text
-                icon: "close"
-                font: Tokens.font.icon.small
-                implicitWidth: 32
-                implicitHeight: 32
-                onClicked: root.closeRequested()
+            RowLayout {
+                id: headerRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Tokens.spacing.small
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "arrow_back"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    onClicked: root.backRequested()
+                }
+
+                MaterialIcon {
+                    text: "settings"
+                    fontStyle: Tokens.font.icon.medium
+                    color: Colours.palette.m3primary
+                }
+
+                StyledText {
+                    text: qsTr("Settings & Profile")
+                    font: Tokens.font.title.small
+                    color: Colours.palette.m3onSurface
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Live Saved Confirmation Pill
+                StyledRect {
+                    visible: root.savedFeedback
+                    implicitWidth: savedRow.implicitWidth + 16
+                    implicitHeight: 26
+                    radius: Tokens.rounding.full
+                    color: Qt.alpha(Colours.palette.m3primary, 0.15)
+                    border.width: 1
+                    border.color: Colours.palette.m3primary
+
+                    RowLayout {
+                        id: savedRow
+                        anchors.centerIn: parent
+                        spacing: 4
+
+                        MaterialIcon {
+                            text: "check"
+                            fontStyle: Tokens.font.icon.small
+                            color: Colours.palette.m3primary
+                        }
+
+                        StyledText {
+                            text: qsTr("Saved")
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3primary
+                        }
+                    }
+                }
+
+                IconButton {
+                    type: IconButton.Text
+                    icon: "close"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 32
+                    implicitHeight: 32
+                    onClicked: root.closeRequested()
+                }
             }
         }
 

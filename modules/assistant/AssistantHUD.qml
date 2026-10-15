@@ -28,7 +28,7 @@ FocusScope {
     }
 
     focus: true
-    width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 600 : 540
+    width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 680 : 640
     implicitWidth: width
     implicitHeight: mainCard.implicitHeight
 
@@ -149,7 +149,7 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") return 620
+            if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") return 680
             return cardLayout.implicitHeight + Tokens.padding.medium * 2
         }
 
@@ -166,132 +166,153 @@ FocusScope {
             visible: root.currentView === "assistant"
 
             // ── 1. Header Row & Provider Badge ────────────────────────
-            RowLayout {
+            Item {
+                id: headerContainer
                 Layout.fillWidth: true
-                spacing: Tokens.spacing.small
+                implicitHeight: headerRow.implicitHeight
 
-                MaterialIcon {
-                    text: "auto_awesome"
-                    fontStyle: Tokens.font.icon.medium
-                    color: Colours.palette.m3primary
-                }
-
-                StyledText {
-                    text: qsTr("Assistant")
-                    font: Tokens.font.title.small
-                    color: Colours.palette.m3onSurface
-                }
-
-                Item { Layout.fillWidth: true }
-
-                // Word Count Badge in Header
-                StyledRect {
-                    visible: Assistant.selectedText.trim().length > 0
-                    implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
-                    implicitHeight: 24
-                    radius: Tokens.rounding.full
-                    color: Colours.palette.m3surfaceContainerHigh
-
-                    StyledText {
-                        id: countText
-                        anchors.centerIn: parent
-                        text: {
-                            const trimmed = Assistant.selectedText.trim()
-                            if (!trimmed) return ""
-                            const words = trimmed.split(/\s+/).length
-                            return words === 1 ? qsTr("1 word") : qsTr("%1 words").arg(words)
-                        }
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3outline
-                    }
-                }
-
-                // Provider Badge with Live Dot & Latency (Click to open settings/dossier)
-                StyledRect {
-                    visible: Assistant.providerUsed.length > 0
-                    implicitWidth: badgeRow.implicitWidth + Tokens.padding.small * 2
-                    implicitHeight: 24
-                    radius: Tokens.rounding.full
-                    color: Colours.palette.m3surfaceContainerHigh
-
-                    RowLayout {
-                        id: badgeRow
-                        anchors.centerIn: parent
-                        spacing: 6
-
-                        // Status dot
-                        Rectangle {
-                            width: 6
-                            height: 6
-                            radius: 3
-                            color: Colours.palette.m3primary
-                        }
-
-                        StyledText {
-                            text: Assistant.latencyMs > 0
-                                ? `${Assistant.providerUsed} • ${(Assistant.latencyMs / 1000).toFixed(1)}s`
-                                : Assistant.providerUsed
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
+                MouseArea {
+                    id: headerDragArea
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.ArrowCursor
+                    onPressed: mouse => {
+                        if (root.windowRef) {
+                            root.windowRef.startSystemMove()
                         }
                     }
-
-                    StateLayer {
-                        anchors.fill: parent
-                        radius: parent.radius
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.currentView = "profile"
-                    }
                 }
 
-                // Developer Dossier / Profile Button
-                IconButton {
-                    type: IconButton.Text
-                    icon: "badge"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    onClicked: root.currentView = "profile"
+                RowLayout {
+                    id: headerRow
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Tokens.spacing.small
 
-                    // Pending proposed updates dot indicator
-                    StyledRect {
-                        visible: Assistant.proposedProfile !== null
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.topMargin: 2
-                        anchors.rightMargin: 2
-                        implicitWidth: 7
-                        implicitHeight: 7
-                        radius: Tokens.rounding.full
+                    MaterialIcon {
+                        text: "auto_awesome"
+                        fontStyle: Tokens.font.icon.medium
                         color: Colours.palette.m3primary
                     }
-                }
 
-                IconButton {
-                    type: IconButton.Text
-                    icon: "history"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    onClicked: root.currentView = "history"
-                }
+                    StyledText {
+                        text: qsTr("Assistant")
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                    }
 
-                IconButton {
-                    type: IconButton.Text
-                    icon: "psychology"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    onClicked: root.currentView = "memory"
-                }
+                    Item { Layout.fillWidth: true }
 
-                IconButton {
-                    type: IconButton.Text
-                    icon: "close"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    onClicked: root.closeRequested()
+                    // Word Count Badge in Header
+                    StyledRect {
+                        visible: Assistant.selectedText.trim().length > 0
+                        implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
+                        implicitHeight: 24
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+
+                        StyledText {
+                            id: countText
+                            anchors.centerIn: parent
+                            text: {
+                                const trimmed = Assistant.selectedText.trim()
+                                if (!trimmed) return ""
+                                const words = trimmed.split(/\s+/).length
+                                return words === 1 ? qsTr("1 word") : qsTr("%1 words").arg(words)
+                            }
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3outline
+                        }
+                    }
+
+                    // Provider Badge with Live Dot & Latency (Click to open settings/dossier)
+                    StyledRect {
+                        visible: Assistant.providerUsed.length > 0
+                        implicitWidth: badgeRow.implicitWidth + Tokens.padding.small * 2
+                        implicitHeight: 24
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+
+                        RowLayout {
+                            id: badgeRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            // Status dot
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: Colours.palette.m3primary
+                            }
+
+                            StyledText {
+                                text: Assistant.latencyMs > 0
+                                    ? `${Assistant.providerUsed} • ${(Assistant.latencyMs / 1000).toFixed(1)}s`
+                                    : Assistant.providerUsed
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3onSurfaceVariant
+                            }
+                        }
+
+                        StateLayer {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.currentView = "profile"
+                        }
+                    }
+
+                    // Developer Dossier / Profile Button
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "badge"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: root.currentView = "profile"
+
+                        // Pending proposed updates dot indicator
+                        StyledRect {
+                            visible: Assistant.proposedProfile !== null
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.topMargin: 2
+                            anchors.rightMargin: 2
+                            implicitWidth: 7
+                            implicitHeight: 7
+                            radius: Tokens.rounding.full
+                            color: Colours.palette.m3primary
+                        }
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "history"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: root.currentView = "history"
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "psychology"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: root.currentView = "memory"
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "close"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: root.closeRequested()
+                    }
                 }
             }
 
@@ -440,12 +461,12 @@ FocusScope {
                 id: resultContainer
                 Layout.fillWidth: true
                 implicitHeight: {
-                    if (Assistant.isLoading) return 220
-                    if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 220
-                    if (Assistant.resultText.length === 0) return 160
-                    // Dynamically fit content size, capped between 200px and 420px for a taller, comfortable reading area
+                    if (Assistant.isLoading) return 240
+                    if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 240
+                    if (Assistant.resultText.length === 0) return 180
+                    // Dynamically fit content size, capped between 200px and 540px for a taller, comfortable reading area
                     const contentH = Math.max(contentText.contentHeight, contentText.implicitHeight) + Tokens.padding.medium * 2
-                    return Math.max(200, Math.min(420, contentH))
+                    return Math.max(200, Math.min(540, contentH))
                 }
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLowest
@@ -810,7 +831,7 @@ FocusScope {
                         cursorVisible: false
                         textFormat: TextEdit.MarkdownText
                         wrapMode: TextEdit.Wrap
-                        font: Tokens.font.body.small
+                        font: Tokens.font.body.builders.small.size(11).build()
                         color: Colours.palette.m3onSurface
                         selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
                         selectedTextColor: Colours.palette.m3onSurface
@@ -1015,6 +1036,7 @@ FocusScope {
 
         HistoryView {
             id: historyView
+            windowRef: root.windowRef
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "history"
@@ -1024,6 +1046,7 @@ FocusScope {
 
         ProfileView {
             id: profileView
+            windowRef: root.windowRef
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "profile"
@@ -1033,6 +1056,7 @@ FocusScope {
 
         MemoryView {
             id: memoryView
+            windowRef: root.windowRef
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "memory"
