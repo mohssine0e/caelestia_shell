@@ -84,6 +84,12 @@ Item {
     // Turned off while ListView recycles this card so Behaviors don't
     // replay colour/width animations when it is reused for another task.
     property bool animate: true
+    property bool wasEverExpanded: false
+
+    onExpandedChanged: {
+        if (root.expanded)
+            root.wasEverExpanded = true
+    }
 
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
@@ -110,6 +116,7 @@ Item {
     // TaskNavigationController and intentionally survives recycling.
     ListView.onPooled: {
         root.animate = false
+        root.wasEverExpanded = false
         addSubtaskField.clear()
     }
     ListView.onReused: Qt.callLater(function() { root.animate = true })
@@ -218,8 +225,6 @@ Item {
                     fontStyle: Tokens.font.icon.medium
                     color: root.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                     opacity: root.expanded ? 1 : 0.5
-                    Behavior on opacity { enabled: root.animate; CAnim {} }
-                    Behavior on color { enabled: root.animate; CAnim {} }
 
                     MouseArea {
                         anchors.fill: parent
@@ -654,12 +659,10 @@ Item {
 
                 Repeater {
                     id: subRepeater
-                    // Integer model + lazy: subtask rows only exist while the
-                    // card is expanded (collapsed cards used to build every
-                    // SubtaskCard + its nested rows anyway), and adding /
-                    // toggling / renaming a subtask no longer rebuilds them —
-                    // delegates just re-read root.subtasks[index].
-                    model: root.expanded ? root.subtasks.length : 0
+                    // Integer model + lazy: subtasks are created on first expand and
+                    // kept alive while visible (collapsing is instant 0ms via ColumnLayout visibility).
+                    // When pooled/recycled by ListView, wasEverExpanded resets to release memory.
+                    model: (root.expanded || root.wasEverExpanded) ? root.subtasks.length : 0
                     delegate: SubtaskCard {
                         required property int index
 

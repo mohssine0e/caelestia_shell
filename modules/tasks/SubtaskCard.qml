@@ -41,6 +41,12 @@ Item {
     property int depth: 1
 
     property bool expanded: false
+    property bool wasEverExpanded: false
+
+    onEffectiveExpandedChanged: {
+        if (root.effectiveExpanded)
+            root.wasEverExpanded = true
+    }
 
     property var nav: null
     readonly property bool effectiveExpanded:
@@ -496,7 +502,7 @@ Item {
 
             Repeater {
                 id: nestedRepeater
-                model: root.nestedChildren
+                model: (root.effectiveHasChildren && (root.effectiveExpanded || root.wasEverExpanded)) ? root.nestedChildren : 0
 
                 delegate: NestedSubtaskCard {
                     required property var modelData
