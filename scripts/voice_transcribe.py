@@ -32,11 +32,18 @@ def transcribe_groq(audio_path, api_key):
         
     parts = []
     
-    # Model part: whisper-large-v3-turbo (fastest & highest quality)
-    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3-turbo\r\n".encode("utf-8"))
+    # Model: full whisper-large-v3 (32 layers, significantly stronger multilingual discrimination)
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3\r\n".encode("utf-8"))
     
     # Response format
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n".encode("utf-8"))
+    
+    # Strict greedy decoding (temperature 0.0 prevents speculative translation and hallucination)
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"temperature\"\r\n\r\n0.0\r\n".encode("utf-8"))
+    
+    # Multilingual vocabulary seed: primes Whisper to accept English, French, and Arabic/Darija verbatim
+    prompt_seed = "English, Français, العربية, Darija."
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n{prompt_seed}\r\n".encode("utf-8"))
     
     # File part
     filename = os.path.basename(audio_path)
@@ -55,9 +62,15 @@ def transcribe_groq(audio_path, api_key):
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
     req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
     
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=12) as resp:
         res = json.loads(resp.read().decode("utf-8"))
-        return res.get("text", "").strip()
+        raw_text = res.get("text", "").strip()
+        
+        # Filter out common Whisper silence hallucinations
+        cleaned = raw_text.lower().rstrip(".?! ")
+        if cleaned in {"thank you", "thanks for watching", "subtitles by", "you", "merci"}:
+            return ""
+        return raw_text
 
 def transcribe_gemini(audio_path, api_key):
     # Fallback online multimodal transcription via Gemini
@@ -70,7 +83,7 @@ def transcribe_gemini(audio_path, api_key):
         "contents": [{
             "parts": [
                 {"inlineData": {"mimeType": "audio/wav", "data": audio_b64}},
-                {"text": "Transcribe the spoken words verbatim. Output ONLY the plain transcription text. Do not include markdown quotes, timestamps, or conversational introduction."}
+                {"text": "Transcribe the spoken audio verbatim in the exact language spoken (English, Français, or العربية/Darija). Never translate between languages. Output ONLY the plain transcription text with no commentary or markdown quotes."}
             ]
         }],
         "generationConfig": {
@@ -86,7 +99,7 @@ def transcribe_gemini(audio_path, api_key):
         method="POST"
     )
     
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=12) as resp:
         res = json.loads(resp.read().decode("utf-8"))
         candidates = res.get("candidates", [])
         if candidates:
