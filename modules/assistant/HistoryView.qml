@@ -702,7 +702,7 @@ FocusScope {
                                                     id: answerText
                                                     anchors.fill: parent
                                                     anchors.margins: Tokens.padding.small
-                                                    text: itemCard.modelData.answer || ""
+                                                    text: Assistant.cleanMarkdown(itemCard.modelData.answer || "")
                                                     readOnly: true
                                                     selectByMouse: true
                                                     selectByKeyboard: true
@@ -830,7 +830,9 @@ FocusScope {
                                                     implicitWidth: 30
                                                     implicitHeight: 30
                                                     onClicked: {
-                                                        Quickshell.clipboardText = itemCard.modelData.answer || ""
+                                                        const ans = itemCard.modelData.answer || ""
+                                                        Quickshell.clipboardText = ans
+                                                        Assistant.lastSeenClipboard = ans.trim()
                                                         copied = true
                                                         resetItemCopy.restart()
                                                     }
@@ -1121,7 +1123,7 @@ FocusScope {
 
                                 TextEdit {
                                     Layout.fillWidth: true
-                                    text: reviewContainer.currentItem ? (reviewContainer.currentItem.answer || "") : ""
+                                    text: reviewContainer.currentItem ? Assistant.cleanMarkdown(reviewContainer.currentItem.answer || "") : ""
                                     readOnly: true
                                     selectByMouse: true
                                     textFormat: TextEdit.MarkdownText
@@ -1235,7 +1237,7 @@ FocusScope {
 
                                     TextEdit {
                                         Layout.fillWidth: true
-                                        text: reviewContainer.challengeData ? reviewContainer.challengeData.solution : ""
+                                        text: reviewContainer.challengeData ? Assistant.cleanMarkdown(reviewContainer.challengeData.solution || "") : ""
                                         readOnly: true
                                         selectByMouse: true
                                         textFormat: TextEdit.MarkdownText

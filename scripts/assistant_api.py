@@ -995,6 +995,13 @@ def main():
     if profile_prefix:
         system_instruction = f"{profile_prefix}\n{system_instruction}"
 
+    latex_symbol_rule = (
+        "Formatting rules: Always output standard Unicode characters directly for symbols and arrows "
+        "(e.g., →, ←, ↔, ⇒, ⇐, ⇔, ≈, ≠, ≤, ≥, ×, ·) instead of LaTeX math syntax like $\\rightarrow$ or \\rightarrow. "
+        "Never use raw LaTeX delimiters ($...$) or macros for arrows or basic symbols in plain text."
+    )
+    system_instruction = f"{system_instruction}\n{latex_symbol_rule}"
+
     recalled_item = find_relevant_history(text_to_process, custom_prompt) if not is_followup else None
     recalled_meta = None
     if recalled_item:

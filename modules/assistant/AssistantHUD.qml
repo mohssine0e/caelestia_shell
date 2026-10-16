@@ -27,6 +27,16 @@ FocusScope {
         }
     }
 
+    readonly property bool isHudActive: {
+        const winActive = Window.active ?? false
+        const hyprActive = Hypr.activeToplevel?.title === "Assistant HUD"
+        return (winActive || hyprActive || root.activeFocus)
+    }
+
+    onIsHudActiveChanged: {
+        Assistant.isWindowActive = isHudActive
+    }
+
     focus: true
     width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 680 : 640
     implicitWidth: width
@@ -34,7 +44,14 @@ FocusScope {
 
     signal closeRequested()
 
-    Component.onCompleted: Qt.callLater(() => root.forceActiveFocus())
+    Component.onCompleted: {
+        Assistant.isWindowActive = root.isHudActive
+        Qt.callLater(() => root.forceActiveFocus())
+    }
+
+    Component.onDestruction: {
+        Assistant.isWindowActive = false
+    }
 
     Keys.onEscapePressed: event => {
         if (root.currentView === "profile" && profileView.isEditing) {
@@ -112,11 +129,13 @@ FocusScope {
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
             if (contentText.selectedText && contentText.selectedText.length > 0) {
                 Quickshell.clipboardText = contentText.selectedText
+                Assistant.lastSeenClipboard = contentText.selectedText.trim()
                 event.accepted = true
                 return
             }
             if (Assistant.resultText.length > 0) {
                 Quickshell.clipboardText = Assistant.resultText
+                Assistant.lastSeenClipboard = Assistant.resultText.trim()
                 event.accepted = true
                 return
             }
@@ -414,7 +433,10 @@ FocusScope {
                                 visible: snippetCard.hasSelection
                                 implicitWidth: 24
                                 implicitHeight: 24
-                                onClicked: Quickshell.clipboardText = Assistant.selectedText
+                                onClicked: {
+                                    Quickshell.clipboardText = Assistant.selectedText
+                                    Assistant.lastSeenClipboard = Assistant.selectedText.trim()
+                                }
                             }
 
                             IconButton {
@@ -941,6 +963,12 @@ FocusScope {
                         }
 
                         horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
+
+                        onSelectedTextChanged: {
+                            if (selectedText && selectedText.trim().length > 0) {
+                                Assistant.lastSeenClipboard = selectedText.trim()
+                            }
+                        }
                     }
                 }
             }
@@ -1112,8 +1140,10 @@ FocusScope {
                     onClicked: {
                         if (contentText.selectedText && contentText.selectedText.length > 0) {
                             Quickshell.clipboardText = contentText.selectedText
+                            Assistant.lastSeenClipboard = contentText.selectedText.trim()
                         } else if (Assistant.resultText.length > 0) {
                             Quickshell.clipboardText = Assistant.resultText
+                            Assistant.lastSeenClipboard = Assistant.resultText.trim()
                         }
                         copied = true
                         resetCopyTimer.restart()

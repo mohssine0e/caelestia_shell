@@ -12,6 +12,7 @@ Singleton {
     // ── State ────────────────────────────────────────────────────
     property string selectedText: ""
     property string activeAction: "" // translate, explain, tldr, rephrase, examples, ask
+    property string rawResultText: ""
     property string resultText: ""
     property string providerUsed: ""
     property int latencyMs: 0
@@ -22,6 +23,8 @@ Singleton {
     property bool hasApiKey: true
     property bool isTruncated: false
     property int truncatedAt: 12000
+    property bool isWindowActive: false
+    property bool _forceNextSelection: false
 
     // Multi-turn Thread & Mode
     property var thread: []              // {role, content} pairs
@@ -255,6 +258,85 @@ Singleton {
     property string currentThreadId: ""
     property string topicAnchor: ""
 
+    // ── Markdown LaTeX & Symbol Sanitizer ────────────────────────
+    readonly property var _symbolMap: ({
+        "longleftrightarrow": "⟷", "longleftarrow": "⟵", "longrightarrow": "⟶",
+        "leftrightarrow": "↔", "Leftrightarrow": "⇔",
+        "rightarrow": "→", "leftarrow": "←",
+        "Rightarrow": "⇒", "Leftarrow": "⇐",
+        "uparrow": "↑", "downarrow": "↓",
+        "updownarrow": "↕", "mapsto": "↦",
+        "implies": "⇒", "iff": "⇔",
+        "to": "→", "gets": "←",
+        "approx": "≈", "neq": "≠", "ne": "≠",
+        "leq": "≤", "le": "≤", "geq": "≥", "ge": "≥",
+        "pm": "±", "mp": "∓", "times": "×", "div": "÷",
+        "cdot": "·", "bullet": "•", "circ": "○",
+        "dots": "…", "cdots": "…", "ldots": "…",
+        "infty": "∞", "equiv": "≡", "degree": "°",
+        "forall": "∀", "exists": "∃", "notin": "∉", "in": "∈",
+        "subseteq": "⊆", "subset": "⊂", "supseteq": "⊃", "supset": "⊃",
+        "cup": "∪", "cap": "∩", "land": "∧", "lor": "∨", "neg": "¬", "emptyset": "∅",
+        "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "Delta": "Δ",
+        "lambda": "λ", "mu": "μ", "pi": "π", "sigma": "σ", "tau": "τ",
+        "theta": "θ", "omega": "ω", "Omega": "Ω"
+    })
+
+    function cleanMarkdown(text) {
+        if (!text) return ""
+        // Split text by fenced code blocks and inline code so code content is strictly preserved
+        const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/)
+        const result = []
+
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i]
+            if (!part) continue
+            // If it starts with backtick, it is inline code or code block: keep verbatim
+            if (part.startsWith("`")) {
+                result.push(part)
+            } else {
+                let p = part
+
+                // 1. Unescape common escaped markdown/LaTeX characters: \$, \_, \#, \&, \%
+                p = p.replace(/\\([$_#&%])/g, "$1")
+
+                // 2. Text & Font macros: \text{...}, \textbf{...}, \textit{...}
+                p = p.replace(/\\textbf\{([^{}]+)\}/g, "**$1**")
+                p = p.replace(/\\textit\{([^{}]+)\}/g, "*$1*")
+                p = p.replace(/\\text\{([^{}]+)\}/g, "$1")
+                p = p.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)")
+
+                // 3. Replace LaTeX symbols (both dollar-wrapped and naked macros)
+                for (let key in root._symbolMap) {
+                    const sym = root._symbolMap[key]
+                    p = p.replace(new RegExp("\\$\\s*\\\\" + key + "\\s*\\$", "g"), sym)
+                    p = p.replace(new RegExp("\\\\" + key + "(?![a-zA-Z])", "g"), sym)
+                }
+
+                // 4. Clean up dollar signs around math expressions containing symbols
+                p = p.replace(/\$([^$\n]+)\$/g, (match, inner) => {
+                    if (/[\u2190-\u21FF\u2200-\u22FF\u0370-\u03FF=<>+\-±×÷·]/.test(inner)) {
+                        return inner.trim()
+                    }
+                    return match
+                })
+
+                // 5. Common ASCII arrows in plain text with surrounding spaces
+                p = p.replace(/\s+-->\s+/g, " → ")
+                p = p.replace(/\s+<--\s+/g, " ← ")
+                p = p.replace(/\s+<->\s+/g, " ↔ ")
+                p = p.replace(/\s+->\s+/g, " → ")
+                p = p.replace(/\s+<-\s+/g, " ← ")
+                p = p.replace(/\s+=>\s+/g, " ⇒ ")
+                p = p.replace(/\s+<=\s+/g, " ⇐ ")
+                p = p.replace(/\s+<=>\s+/g, " ⇔ ")
+
+                result.push(p)
+            }
+        }
+        return result.join("")
+    }
+
     function distillEssentials(text) {
         if (!text) return ""
         const cleaned = text.trim()
@@ -350,7 +432,11 @@ Singleton {
     }
 
     function handleNewSelection(txt) {
+        const force = root._forceNextSelection
+        root._forceNextSelection = false
+
         if (!root.listenClipboard) return
+        if (!force && root.isWindowActive) return
         if (!txt || txt === root.lastSeenClipboard) return
         
         root.lastSeenClipboard = txt
@@ -361,10 +447,15 @@ Singleton {
         root.cancelCurrentRequest()
         root.errorMessage = ""
         root.errorType = ""
+        root.clearThread()
     }
 
-    function checkClipboard() {
+    function checkClipboard(force = false) {
         if (!root.listenClipboard) return
+        if (!force && root.isWindowActive) return
+        if (force) {
+            root._forceNextSelection = true
+        }
         if (!clipProc.running && !clipFallbackProc.running) {
             clipProc.running = true
         }
@@ -374,8 +465,8 @@ Singleton {
         id: clipWatchTimer
         interval: 800
         repeat: true
-        running: root.isWatching && root.listenClipboard
-        onTriggered: root.checkClipboard()
+        running: root.isWatching && root.listenClipboard && !root.isWindowActive
+        onTriggered: root.checkClipboard(false)
     }
 
     // ── Streaming AI Worker Process via SplitParser ──────────────
@@ -400,7 +491,8 @@ Singleton {
                         }
                     } else if (msg.type === "chunk") {
                         root.isLoading = false
-                        root.resultText += msg.text
+                        root.rawResultText += msg.text
+                        root.resultText = root.cleanMarkdown(root.rawResultText)
                     } else if (msg.type === "done") {
                         root.isLoading = false
                         root.providerUsed = msg.provider || root.providerUsed
@@ -431,18 +523,9 @@ Singleton {
                         // Save to persistent history
                         root.addToHistory(root.activeAction, root.selectedText, root.resultText, root.activePrompt)
 
-                        // Record turn into active thread for follow-up continuity
-                        if (root.resultText.length > 0) {
-                            let turnUser = root.activePrompt
-                            if (!turnUser || turnUser.trim().length === 0) {
-                                if (root.activeAction === "explain") turnUser = "Explain the concepts in the reference text."
-                                else if (root.activeAction === "translate") turnUser = "Translate the reference text."
-                                else if (root.activeAction === "tldr") turnUser = "Summarize the key points."
-                                else if (root.activeAction === "rephrase") turnUser = "Rephrase this text."
-                                else if (root.activeAction === "examples") turnUser = "Provide practical context examples."
-                                else turnUser = root.activeAction ? root.activeAction.toUpperCase() : "Inquiry"
-                            }
-                            root.pushTurn(turnUser, root.resultText)
+                        // Active multi-turn thread is only for custom conversational questions ("ask")
+                        if (root.activeAction === "ask" && root.resultText.length > 0) {
+                            root.pushTurn(root.activePrompt, root.resultText)
                         }
                     } else if (msg.type === "error") {
                         root.isLoading = false
@@ -568,7 +651,7 @@ Singleton {
         root.errorMessage = ""
         root.errorType = ""
         if (root.listenClipboard) {
-            root.checkClipboard()
+            root.checkClipboard(true)
         }
     }
 
@@ -744,7 +827,8 @@ Singleton {
     function reopenItem(item) {
         if (!item) return
         root.selectedText = item.text || ""
-        root.resultText = item.answer || ""
+        root.rawResultText = item.answer || ""
+        root.resultText = root.cleanMarkdown(item.answer || "")
         root.activeAction = item.action || ""
         root.errorMessage = ""
         root.errorType = ""
@@ -923,18 +1007,15 @@ Singleton {
             if (mode === "standalone") {
                 root.clearThread()
             }
-        } else {
-            // New top-level preset action initiates a fresh working thread
-            root.clearThread()
-        }
 
-        // Establish topic anchor for the working session
-        if (!root.topicAnchor || root.thread.length === 0) {
-            if (root.selectedText && root.selectedText.trim().length > 0) {
-                const raw = root.selectedText.trim().replace(/\s+/g, " ")
-                root.topicAnchor = raw.slice(0, 350)
-            } else if (customPrompt && customPrompt.trim().length > 0) {
-                root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
+            // Establish topic anchor for conversational ask inquiries
+            if (!root.topicAnchor || root.thread.length === 0) {
+                if (root.selectedText && root.selectedText.trim().length > 0) {
+                    const raw = root.selectedText.trim().replace(/\s+/g, " ")
+                    root.topicAnchor = raw.slice(0, 350)
+                } else if (customPrompt && customPrompt.trim().length > 0) {
+                    root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
+                }
             }
         }
 
@@ -960,6 +1041,7 @@ Singleton {
         root.isLoading = true
         root.errorMessage = ""
         root.errorType = ""
+        root.rawResultText = ""
         root.resultText = ""
         root.isTruncated = false
         root.recalledContext = null
