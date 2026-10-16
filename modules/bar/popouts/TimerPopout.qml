@@ -62,6 +62,23 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    // Task phase chip (if linked to a task)
+                    StyledRect {
+                        visible: FocusTimer.taskPhaseString.length > 0
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHighest
+                        implicitHeight: 18
+                        implicitWidth: taskPhaseText.implicitWidth + 10
+
+                        StyledText {
+                            id: taskPhaseText
+                            anchors.centerIn: parent
+                            text: FocusTimer.taskPhaseString
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3primary
+                        }
+                    }
+
                     // Daily completed pomodoros chip
                     StyledRect {
                         visible: FocusTimer.sessionsToday > 0

@@ -36,7 +36,7 @@ Scope {
                 }
 
                 title: FocusTimer.linkedTaskTitle.length > 0
-                    ? `Timer — ${FocusTimer.linkedTaskTitle} (${FocusTimer.formattedSeconds})`
+                    ? `Timer — ${FocusTimer.linkedTaskTitle} [${FocusTimer.taskPhaseString}] (${FocusTimer.formattedSeconds})`
                     : `Timer (${FocusTimer.formattedSeconds})`
 
                 color: "transparent"

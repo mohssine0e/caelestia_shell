@@ -20,7 +20,7 @@ FocusScope {
 
     readonly property alias card: card
 
-    implicitWidth: 270
+    implicitWidth: FocusTimer.taskPhaseString.length > 0 ? 296 : 270
     implicitHeight: card.implicitHeight
 
     readonly property int pillHeight: 32
@@ -216,6 +216,23 @@ FocusScope {
                         text: FocusTimer.formattedTime
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
+                    }
+
+                    StyledRect {
+                        visible: FocusTimer.taskPhaseString.length > 0
+                        Layout.alignment: Qt.AlignVCenter
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHighest
+                        implicitHeight: 20
+                        implicitWidth: phaseText.implicitWidth + Tokens.padding.small * 2
+
+                        StyledText {
+                            id: phaseText
+                            anchors.centerIn: parent
+                            text: FocusTimer.taskPhaseString
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3primary
+                        }
                     }
 
                 Item { Layout.fillWidth: true }

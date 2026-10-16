@@ -25,6 +25,25 @@ Singleton {
     // ── Linked Task Context ──────────────────────────────────────
     property string linkedTaskId: ""
     property string linkedTaskTitle: ""
+    property int taskTotalMinutes: 0
+    property int taskRemainingSeconds: 0
+    property int phaseMinutes: 25
+
+    function formatDuration(totalMins: int): string {
+        if (totalMins <= 0) return "0m";
+        const h = Math.floor(totalMins / 60);
+        const m = totalMins % 60;
+        if (h > 0 && m > 0) return `${h}h${m}mn`;
+        if (h > 0) return `${h}h`;
+        return `${m}mn`;
+    }
+
+    readonly property string taskPhaseString: {
+        if (!linkedTaskId || taskTotalMinutes <= 0) return "";
+        const currentPhaseMins = Math.min(phaseMinutes, Math.ceil(totalDurationSeconds / 60));
+        const totalStr = formatDuration(taskTotalMinutes);
+        return `${currentPhaseMins}m/${totalStr}`;
+    }
 
     // ── Session counter (resets at midnight) ────────────────────
     property int sessionsToday: 0
@@ -92,8 +111,14 @@ Singleton {
         onTriggered: {
             if (root.remainingSeconds > 1) {
                 root.remainingSeconds -= 1;
+                if (root.taskRemainingSeconds > 1) {
+                    root.taskRemainingSeconds -= 1;
+                }
             } else {
                 root.remainingSeconds = 0;
+                if (root.taskRemainingSeconds > 0) {
+                    root.taskRemainingSeconds = Math.max(0, root.taskRemainingSeconds - 1);
+                }
                 root.isRunning = false;
                 root.onTimerFinished();
             }
@@ -135,21 +160,47 @@ Singleton {
             root.sessionsToday += 1;
             root.pomodorosInCycle += 1;
 
-            const title = Tr.tr("Focus Session Complete!");
-            const msg = root.linkedTaskTitle.length > 0
-                ? Tr.tr("Time is up for task: %1. Take a break!").arg(root.linkedTaskTitle)
-                : Tr.tr("Great job! Take a 5m break.");
-
-            Toaster.toast(title, msg, "check_circle");
-            Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
-            setPreset("break", 5);
+            if (root.linkedTaskId.length > 0 && root.taskRemainingSeconds > 0) {
+                const remMins = Math.ceil(root.taskRemainingSeconds / 60);
+                const title = Tr.tr("Phase Complete!");
+                const msg = Tr.tr("25m phase done for %1 (%2 left). Take a 5m break!").arg(root.linkedTaskTitle).arg(root.formatDuration(remMins));
+                Toaster.toast(title, msg, "check_circle");
+                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
+                setPreset("break", 5);
+            } else if (root.linkedTaskId.length > 0) {
+                const title = Tr.tr("Task Completed!");
+                const msg = Tr.tr("All phases finished for: %1!").arg(root.linkedTaskTitle);
+                Toaster.toast(title, msg, "check_circle");
+                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
+                root.clearLinkedTask();
+                setPreset("work", 25);
+            } else {
+                const title = Tr.tr("Focus Session Complete!");
+                const msg = Tr.tr("Great job! Take a 5m break.");
+                Toaster.toast(title, msg, "check_circle");
+                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
+                setPreset("break", 5);
+            }
         } else {
             // Break finished
-            const title = Tr.tr("Break Finished!");
-            const msg = Tr.tr("Ready to start your next focus session?");
-            Toaster.toast(title, msg, "coffee");
-            Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
-            setPreset("work", 25);
+            if (root.linkedTaskId.length > 0 && root.taskRemainingSeconds > 0) {
+                const nextPhaseMins = Math.min(root.phaseMinutes, Math.ceil(root.taskRemainingSeconds / 60));
+                root.mode = "work";
+                root.totalDurationSeconds = nextPhaseMins * 60;
+                root.remainingSeconds = root.totalDurationSeconds;
+                root.isRunning = false;
+
+                const title = Tr.tr("Break Finished!");
+                const msg = Tr.tr("Ready for the next %1m phase on %2?").arg(nextPhaseMins).arg(root.linkedTaskTitle);
+                Toaster.toast(title, msg, "coffee");
+                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
+            } else {
+                const title = Tr.tr("Break Finished!");
+                const msg = Tr.tr("Ready to start your next focus session?");
+                Toaster.toast(title, msg, "coffee");
+                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
+                setPreset("work", 25);
+            }
         }
     }
 
@@ -184,8 +235,14 @@ Singleton {
             _stopwatchAccumulated = 0;
             elapsedMillis = 0;
             elapsedSeconds = 0;
-        } else if (mode === "work") {
-            setPreset("work", 25);
+        } else if (mode === "work" || mode === "custom") {
+            if (linkedTaskId.length > 0 && taskRemainingSeconds > 0) {
+                const phaseMins = Math.min(phaseMinutes, Math.ceil(taskRemainingSeconds / 60));
+                totalDurationSeconds = phaseMins * 60;
+                remainingSeconds = totalDurationSeconds;
+            } else {
+                setPreset("work", 25);
+            }
         } else if (mode === "break" || mode === "shortBreak" || mode === "longBreak") {
             setPreset("break", 5);
         } else {
@@ -230,8 +287,13 @@ Singleton {
         linkedTaskId = taskId ?? "";
         linkedTaskTitle = title ?? "";
         const dur = (minutes && minutes > 0) ? minutes : 25;
-        mode = "custom";
-        totalDurationSeconds = dur * 60;
+        taskTotalMinutes = dur;
+        taskRemainingSeconds = dur * 60;
+
+        // Split into 25m work phases
+        const phaseMins = Math.min(phaseMinutes, dur);
+        mode = "work";
+        totalDurationSeconds = phaseMins * 60;
         remainingSeconds = totalDurationSeconds;
         isRunning = true;
     }
@@ -239,5 +301,7 @@ Singleton {
     function clearLinkedTask(): void {
         linkedTaskId = "";
         linkedTaskTitle = "";
+        taskTotalMinutes = 0;
+        taskRemainingSeconds = 0;
     }
 }
