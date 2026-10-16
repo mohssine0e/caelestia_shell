@@ -568,7 +568,7 @@ Singleton {
         }
     }
 
-    // ── Speech / TTS (Arabic & English Pronunciation) ─────────────
+    // ── Speech / TTS (Natural Neural Voice via assistant_tts.py) ──
     property bool isSpeaking: false
 
     Process {
@@ -586,17 +586,10 @@ Singleton {
         }
         if (!txt || txt.trim().length === 0) return
 
-        let clean = txt.replace(/```[\s\S]*?```/g, " ")
-                       .replace(/[`#*_~\[\]\(\)]/g, " ")
-                       .replace(/\s+/g, " ")
-                       .trim()
-        if (!clean) return
+        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_tts.py"
+        const pythonBin = Quickshell.env("HOME") + "/piper-venv/bin/python3"
 
-        const hasArabic = /[\u0600-\u06FF]/.test(clean)
-        const voice = hasArabic ? "ar" : "en-us"
-        clean = clean.slice(0, 450)
-
-        ttsProc.command = ["espeak-ng", "-v", voice, clean]
+        ttsProc.command = [pythonBin, scriptPath, txt]
         root.isSpeaking = true
         ttsProc.running = true
     }
