@@ -17,7 +17,8 @@ Singleton {
     property string providerUsed: ""
     property int latencyMs: 0
     property bool isLoading: false
-    readonly property bool isGenerating: isLoading || apiProc.running
+    property bool isStreaming: false
+    readonly property bool isGenerating: isLoading || isStreaming || apiProc.running
     property string errorMessage: ""
     property string errorType: "" // "network", "auth", "rate_limit", "no_selection", "generic"
     property bool hasApiKey: true
@@ -179,6 +180,7 @@ Singleton {
         }
     }
 
+    property string _lastSavedHistoryJson: ""
     property bool _isSavingHistory: false
 
     FileView {
@@ -186,9 +188,10 @@ Singleton {
         printErrors: false
         path: root.historyPath
         onLoaded: {
-            if (root._isSavingHistory) return
+            const raw = text()
+            if (root._isSavingHistory || raw === root._lastSavedHistoryJson) return
             try {
-                const parsed = JSON.parse(text())
+                const parsed = JSON.parse(raw)
                 if (Array.isArray(parsed)) {
                     root.history = parsed
                 }
@@ -491,10 +494,12 @@ Singleton {
                         }
                     } else if (msg.type === "chunk") {
                         root.isLoading = false
+                        root.isStreaming = true
                         root.rawResultText += msg.text
-                        root.resultText = root.cleanMarkdown(root.rawResultText)
+                        root.resultText = root.rawResultText
                     } else if (msg.type === "done") {
                         root.isLoading = false
+                        root.isStreaming = false
                         root.providerUsed = msg.provider || root.providerUsed
                         root.latencyMs = msg.latency_ms || 0
                         if (msg.truncated !== undefined) {
@@ -509,6 +514,9 @@ Singleton {
                         root.errorMessage = ""
                         root.errorType = ""
                         root.hasApiKey = true
+
+                        // Final markdown cleaning done once when finished
+                        root.resultText = root.cleanMarkdown(root.rawResultText)
 
                         // Cache completed response
                         const cacheKey = root.getCacheKey(root.activeAction, root.selectedText, "")
@@ -529,6 +537,7 @@ Singleton {
                         }
                     } else if (msg.type === "error") {
                         root.isLoading = false
+                        root.isStreaming = false
                         root.errorMessage = msg.message || "An error occurred."
                         root.errorType = msg.error_type || "generic"
                         if (msg.error_type === "auth") {
@@ -542,6 +551,7 @@ Singleton {
         }
         onExited: {
             root.isLoading = false
+            root.isStreaming = false
         }
     }
 
@@ -558,6 +568,7 @@ Singleton {
         }
         root.isSpeaking = false
         root.isLoading = false
+        root.isStreaming = false
     }
 
     function retryAction() {
@@ -665,7 +676,9 @@ Singleton {
     function saveHistory() {
         if (historyStorage) {
             root._isSavingHistory = true
-            historyStorage.setText(JSON.stringify(root.history, null, 2))
+            const jsonStr = JSON.stringify(root.history, null, 2)
+            root._lastSavedHistoryJson = jsonStr
+            historyStorage.setText(jsonStr)
             Qt.callLater(() => { root._isSavingHistory = false })
         }
     }

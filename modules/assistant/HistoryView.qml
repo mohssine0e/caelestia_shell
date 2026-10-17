@@ -139,6 +139,11 @@ FocusScope {
         return items
     }
 
+    property int visibleLimit: 30
+    onSearchQueryChanged: visibleLimit = 30
+    onSelectedTagChanged: visibleLimit = 30
+    readonly property var displayedHistory: (root.filteredHistory || []).slice(0, root.visibleLimit)
+
     function focusSearch() {
         searchInput.forceActiveFocus()
     }
@@ -532,12 +537,13 @@ FocusScope {
                     spacing: 8
 
                     Repeater {
-                        model: root.filteredHistory
+                        model: root.displayedHistory
 
                         delegate: StyledRect {
                             id: itemCard
                             required property var modelData
-                            readonly property bool expanded: root.expandedId === String(itemCard.modelData.id)
+                            readonly property var itemData: modelData || ({})
+                            readonly property bool expanded: itemData.id ? root.expandedId === String(itemData.id) : false
 
                             Layout.fillWidth: true
                             implicitHeight: cardContent.implicitHeight + Tokens.padding.small * 2
@@ -546,7 +552,7 @@ FocusScope {
                             border.width: 1
                             border.color: {
                                 if (itemCard.expanded) return Qt.alpha(Colours.palette.m3primary, 0.5)
-                                if (itemCard.modelData.context_excluded) return Qt.alpha(Colours.palette.m3error, 0.25)
+                                if (itemCard.itemData.context_excluded) return Qt.alpha(Colours.palette.m3error, 0.25)
                                 return Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
                             }
 
@@ -562,8 +568,10 @@ FocusScope {
                                 radius: itemCard.radius
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    const sid = String(itemCard.modelData.id)
-                                    root.expandedId = (root.expandedId === sid) ? "" : sid
+                                    const sid = itemCard.itemData.id ? String(itemCard.itemData.id) : ""
+                                    if (sid) {
+                                        root.expandedId = (root.expandedId === sid) ? "" : sid
+                                    }
                                 }
                             }
 
@@ -589,7 +597,7 @@ FocusScope {
 
                                         MaterialIcon {
                                             anchors.centerIn: parent
-                                            text: root.getActionIcon(itemCard.modelData.action)
+                                            text: root.getActionIcon(itemCard.itemData.action)
                                             fontStyle: Tokens.font.icon.small
                                             color: Colours.palette.m3primary
                                         }
@@ -599,7 +607,7 @@ FocusScope {
                                     StyledText {
                                         Layout.fillWidth: true
                                         text: {
-                                            const t = (itemCard.modelData.text || itemCard.modelData.prompt || "").trim()
+                                            const t = (itemCard.itemData.text || itemCard.itemData.prompt || "").trim()
                                             return t.replace(/\s+/g, " ")
                                         }
                                         elide: Text.ElideRight
@@ -609,7 +617,7 @@ FocusScope {
 
                                     // Timestamp
                                     StyledText {
-                                        text: root.formatTime(itemCard.modelData.timestamp)
+                                        text: root.formatTime(itemCard.itemData.timestamp)
                                         font: Tokens.font.label.small
                                         color: Colours.palette.m3outline
                                     }
@@ -617,25 +625,29 @@ FocusScope {
                                     // Context Recall Exclusion Toggle ("Forget this")
                                     IconButton {
                                         type: IconButton.Text
-                                        icon: itemCard.modelData.context_excluded ? "visibility_off" : "visibility"
+                                        icon: itemCard.itemData.context_excluded ? "visibility_off" : "visibility"
                                         font: Tokens.font.icon.small
                                         implicitWidth: 26
                                         implicitHeight: 26
                                         activeColour: "transparent"
                                         inactiveColour: "transparent"
-                                        activeOnColour: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
-                                        inactiveOnColour: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3outline
-                                        onClicked: Assistant.toggleContextExcluded(itemCard.modelData.id)
+                                        activeOnColour: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
+                                        inactiveOnColour: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3outline
+                                        onClicked: {
+                                            if (itemCard.itemData.id) Assistant.toggleContextExcluded(itemCard.itemData.id)
+                                        }
                                     }
 
                                     // Star Button
                                     IconButton {
                                         type: IconButton.Text
-                                        icon: itemCard.modelData.starred ? "star" : "star_outline"
+                                        icon: itemCard.itemData.starred ? "star" : "star_outline"
                                         font: Tokens.font.icon.small
                                         implicitWidth: 26
                                         implicitHeight: 26
-                                        onClicked: Assistant.toggleStar(itemCard.modelData.id)
+                                        onClicked: {
+                                            if (itemCard.itemData.id) Assistant.toggleStar(itemCard.itemData.id)
+                                        }
                                     }
 
                                     // Expand Chevron
@@ -677,11 +689,11 @@ FocusScope {
                                                     anchors.margins: Tokens.padding.small
                                                     text: {
                                                         let str = ""
-                                                        if (itemCard.modelData.prompt && itemCard.modelData.prompt.length > 0) {
-                                                            str += "Q: " + itemCard.modelData.prompt + "\n\n"
+                                                        if (itemCard.itemData.prompt && itemCard.itemData.prompt.length > 0) {
+                                                            str += "Q: " + itemCard.itemData.prompt + "\n\n"
                                                         }
-                                                        if (itemCard.modelData.text && itemCard.modelData.text.length > 0) {
-                                                            str += itemCard.modelData.text
+                                                        if (itemCard.itemData.text && itemCard.itemData.text.length > 0) {
+                                                            str += itemCard.itemData.text
                                                         }
                                                         return str.trim()
                                                     }
@@ -694,15 +706,17 @@ FocusScope {
                                             // Full AI Answer (Selectable Markdown)
                                             StyledRect {
                                                 Layout.fillWidth: true
-                                                implicitHeight: answerText.contentHeight + Tokens.padding.small * 2
+                                                implicitHeight: answerText.implicitHeight + Tokens.padding.small * 2
                                                 radius: Tokens.rounding.extraSmall
                                                 color: Colours.palette.m3surfaceContainerLowest
 
                                                 TextEdit {
                                                     id: answerText
-                                                    anchors.fill: parent
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
                                                     anchors.margins: Tokens.padding.small
-                                                    text: Assistant.cleanMarkdown(itemCard.modelData.answer || "")
+                                                    text: Assistant.cleanMarkdown(itemCard.itemData.answer || "")
                                                     readOnly: true
                                                     selectByMouse: true
                                                     selectByKeyboard: true
@@ -715,7 +729,7 @@ FocusScope {
                                                     selectedTextColor: Colours.palette.m3onSurface
                                                     renderType: TextEdit.NativeRendering
                                                     readonly property bool isArabicResult: {
-                                                        const act = itemCard.modelData ? itemCard.modelData.action : ""
+                                                        const act = itemCard.itemData.action || ""
                                                         if (act !== "translate" || !text) return false
                                                         const arabicMatches = text.match(/[\u0600-\u06FF]/g)
                                                         const latinMatches = text.match(/[A-Za-z]/g)
@@ -730,11 +744,11 @@ FocusScope {
                                             // Tags Pills (if present)
                                             RowLayout {
                                                 Layout.fillWidth: true
-                                                visible: itemCard.modelData.tags && itemCard.modelData.tags.length > 0
+                                                visible: itemCard.itemData.tags && itemCard.itemData.tags.length > 0
                                                 spacing: 4
 
                                                 Repeater {
-                                                    model: itemCard.modelData.tags || []
+                                                    model: itemCard.itemData.tags || []
 
                                                     delegate: StyledRect {
                                                         id: tagBadge
@@ -767,7 +781,9 @@ FocusScope {
                                                                 inactiveColour: "transparent"
                                                                 activeOnColour: Colours.palette.m3error
                                                                 inactiveOnColour: Qt.alpha(Colours.palette.m3primary, 0.7)
-                                                                onClicked: Assistant.removeTagFromItem(itemCard.modelData.id, tagBadge.modelData)
+                                                                onClicked: {
+                                                                    if (itemCard.itemData.id) Assistant.removeTagFromItem(itemCard.itemData.id, tagBadge.modelData)
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -784,11 +800,11 @@ FocusScope {
                                                     implicitWidth: excludePillRow.implicitWidth + Tokens.padding.small * 2
                                                     implicitHeight: 28
                                                     radius: Tokens.rounding.full
-                                                    color: itemCard.modelData.context_excluded
+                                                    color: itemCard.itemData.context_excluded
                                                         ? Qt.alpha(Colours.palette.m3error, 0.15)
                                                         : Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.6)
                                                     border.width: 1
-                                                    border.color: itemCard.modelData.context_excluded
+                                                    border.color: itemCard.itemData.context_excluded
                                                         ? Qt.alpha(Colours.palette.m3error, 0.4)
                                                         : Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
 
@@ -798,15 +814,15 @@ FocusScope {
                                                         spacing: 4
 
                                                         MaterialIcon {
-                                                            text: itemCard.modelData.context_excluded ? "visibility_off" : "visibility"
+                                                            text: itemCard.itemData.context_excluded ? "visibility_off" : "visibility"
                                                             fontStyle: Tokens.font.icon.small
-                                                            color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
+                                                            color: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
                                                         }
 
                                                         StyledText {
-                                                            text: itemCard.modelData.context_excluded ? qsTr("Excluded from AI context") : qsTr("Active in AI context")
+                                                            text: itemCard.itemData.context_excluded ? qsTr("Excluded from AI context") : qsTr("Active in AI context")
                                                             font: Tokens.font.label.small
-                                                            color: itemCard.modelData.context_excluded ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
+                                                            color: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
                                                         }
                                                     }
 
@@ -814,7 +830,9 @@ FocusScope {
                                                         anchors.fill: parent
                                                         radius: parent.radius
                                                         cursorShape: Qt.PointingHandCursor
-                                                        onClicked: Assistant.toggleContextExcluded(itemCard.modelData.id)
+                                                        onClicked: {
+                                                            if (itemCard.itemData.id) Assistant.toggleContextExcluded(itemCard.itemData.id)
+                                                        }
                                                     }
                                                 }
 
@@ -830,7 +848,7 @@ FocusScope {
                                                     implicitWidth: 30
                                                     implicitHeight: 30
                                                     onClicked: {
-                                                        const ans = itemCard.modelData.answer || ""
+                                                        const ans = itemCard.itemData.answer || ""
                                                         Quickshell.clipboardText = ans
                                                         Assistant.lastSeenClipboard = ans.trim()
                                                         copied = true
@@ -852,7 +870,7 @@ FocusScope {
                                                     implicitWidth: 30
                                                     implicitHeight: 30
                                                     onClicked: {
-                                                        Assistant.reopenItem(itemCard.modelData)
+                                                        Assistant.reopenItem(itemCard.itemData)
                                                         root.backRequested()
                                                     }
                                                 }
@@ -864,13 +882,54 @@ FocusScope {
                                                     font: Tokens.font.icon.small
                                                     implicitWidth: 30
                                                     implicitHeight: 30
-                                                    onClicked: Assistant.deleteHistoryItem(itemCard.modelData.id)
+                                                    onClicked: {
+                                                        if (itemCard.itemData.id) Assistant.deleteHistoryItem(itemCard.itemData.id)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Load more button for pagination
+                    StyledRect {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: Tokens.spacing.small
+                        Layout.bottomMargin: Tokens.spacing.medium
+                        visible: root.filteredHistory.length > root.visibleLimit
+                        implicitWidth: showMoreRow.implicitWidth + Tokens.padding.medium * 2
+                        implicitHeight: 32
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+                        border.width: 1
+                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+                        RowLayout {
+                            id: showMoreRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            MaterialIcon {
+                                text: "expand_more"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3primary
+                            }
+
+                            StyledText {
+                                text: qsTr("Show More (%1 remaining)").arg(root.filteredHistory.length - root.visibleLimit)
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3primary
+                            }
+                        }
+
+                        StateLayer {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.visibleLimit += 30
                         }
                     }
                 }

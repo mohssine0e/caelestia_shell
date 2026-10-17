@@ -173,6 +173,7 @@ FocusScope {
         }
 
         Behavior on implicitHeight {
+            enabled: !Assistant.isStreaming
             Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
         }
 
@@ -501,7 +502,7 @@ FocusScope {
 
                             StyledText {
                                 id: textSnippet
-                                width: snippetFlick.width - (snippetFlick.contentHeight > snippetFlick.height ? Tokens.padding.small : 0)
+                                width: snippetFlick.width - Tokens.padding.small
                                 text: Assistant.selectedText.length > 0
                                     ? Assistant.selectedText
                                     : (Assistant.listenClipboard
@@ -576,7 +577,7 @@ FocusScope {
                 id: resultContainer
                 Layout.fillWidth: true
                 implicitHeight: {
-                    if (Assistant.isLoading) return 240
+                    if (Assistant.isLoading || Assistant.isStreaming) return 360
                     if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 240
                     if (Assistant.resultText.length === 0) return 180
                     // Dynamically fit content size, capped between 200px and 540px for a taller, comfortable reading area
@@ -589,6 +590,7 @@ FocusScope {
                 border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
 
                 Behavior on implicitHeight {
+                    enabled: !Assistant.isStreaming
                     Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
                 }
 
@@ -931,6 +933,12 @@ FocusScope {
                     contentHeight: contentText.contentHeight
                     clip: true
 
+                    onContentHeightChanged: {
+                        if (Assistant.isStreaming) {
+                            flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+                        }
+                    }
+
                     StyledScrollBar.vertical: StyledScrollBar {
                         flickable: flick
                     }
@@ -944,7 +952,7 @@ FocusScope {
                         selectByKeyboard: true
                         mouseSelectionMode: TextEdit.SelectCharacters
                         cursorVisible: false
-                        textFormat: TextEdit.MarkdownText
+                        textFormat: Assistant.isStreaming ? TextEdit.PlainText : TextEdit.MarkdownText
                         wrapMode: TextEdit.Wrap
                         font: Tokens.font.body.builders.small.size(11).build()
                         color: Colours.palette.m3onSurface
