@@ -93,7 +93,7 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
-        if (root.currentView === "history" || root.currentView === "profile") {
+        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") {
             event.accepted = false
             return
         }

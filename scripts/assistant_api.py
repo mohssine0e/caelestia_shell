@@ -895,6 +895,7 @@ def main():
     mode = "auto"
     thread_raw = "[]"
     topic_anchor = ""
+    extra_context = ""
     positional = []
     i = 2
     while i < len(sys.argv):
@@ -907,6 +908,9 @@ def main():
             i += 2
         elif arg == "--anchor" and i + 1 < len(sys.argv):
             topic_anchor = sys.argv[i + 1]
+            i += 2
+        elif arg == "--context" and i + 1 < len(sys.argv):
+            extra_context = sys.argv[i + 1]
             i += 2
         else:
             positional.append(arg)
@@ -994,6 +998,9 @@ def main():
     profile_prefix = get_profile_prompt_prefix()
     if profile_prefix:
         system_instruction = f"{profile_prefix}\n{system_instruction}"
+
+    if extra_context:
+        system_instruction = f"{extra_context}\n{system_instruction}"
 
     latex_symbol_rule = (
         "Formatting rules: Always output standard Unicode characters directly for symbols and arrows "

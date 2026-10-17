@@ -39,111 +39,29 @@ Singleton {
     property var recalledContext: null
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
 
-    // Curated Memory (File 2)
-    property var memory: []
-    property bool isDistilling: false
-    property string distillError: ""
-    readonly property string memoryPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory.json"
-
-    property bool _isSavingMemory: false
-
-    FileView {
-        id: memoryStorage
-        printErrors: false
-        path: root.memoryPath
-        onLoaded: {
-            if (root._isSavingMemory) return
-            try {
-                const parsed = JSON.parse(text())
-                if (Array.isArray(parsed)) {
-                    root.memory = parsed
-                }
-            } catch (e) {
-                root.memory = []
-            }
-        }
-        onLoadFailed: err => {
-            if (root._isSavingMemory) return
-            root.memory = []
-            if (err === FileViewError.FileNotFound) {
-                Qt.callLater(() => memoryStorage.setText("[]"))
-            }
-        }
-    }
+    // Delegated to Memory.qml singleton
+    readonly property var memory: Memory.cards
+    readonly property bool isDistilling: Memory.isDistilling
+    readonly property string distillError: Memory.distillError
 
     function loadMemory() {
-        if (memoryStorage) {
-            memoryStorage.reload()
-        }
+        Memory.reload()
     }
 
     function saveMemory() {
-        if (memoryStorage) {
-            root._isSavingMemory = true
-            memoryStorage.setText(JSON.stringify(root.memory, null, 2))
-            Qt.callLater(() => { root._isSavingMemory = false })
-        }
+        Memory.save()
     }
 
     function updateMemoryCard(id, updatedLines, updatedTopic) {
-        if (!root.memory) return
-        const list = root.memory.slice()
-        for (let i = 0; i < list.length; i++) {
-            if (String(list[i].id) === String(id)) {
-                list[i].lines = updatedLines
-                if (updatedTopic !== undefined && updatedTopic.trim().length > 0) {
-                    list[i].topic = updatedTopic.trim()
-                }
-                list[i].updated = new Date().toISOString()
-                break
-            }
-        }
-        root.memory = list
-        root.saveMemory()
+        Memory.updateCard(id, updatedLines, updatedTopic)
     }
 
     function deleteMemoryCard(id) {
-        if (!root.memory) return
-        root.memory = root.memory.filter(card => String(card.id) !== String(id))
-        root.saveMemory()
-    }
-
-    Process {
-        id: distillProc
-        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py", "distill"]
-        stdout: SplitParser {
-            onRead: data => {
-                const line = data.trim()
-                if (!line) return
-                try {
-                    const msg = JSON.parse(line)
-                    if (msg.success) {
-                        root.isDistilling = false
-                        root.distillError = ""
-                        root.loadMemory()
-                    } else if (msg.error) {
-                        root.isDistilling = false
-                        root.distillError = msg.message || msg.error || (msg.raw ? "Parse failed: " + msg.raw : "Distill failed.")
-                    }
-                } catch (e) {
-                    root.isDistilling = false
-                    root.distillError = "Invalid response from distill process."
-                }
-            }
-        }
-        onExited: (code) => {
-            root.isDistilling = false
-            if (code !== 0 && !root.distillError) {
-                root.distillError = "Distill process exited with code " + code
-            }
-        }
+        Memory.deleteCard(id)
     }
 
     function distill() {
-        if (root.isDistilling) return
-        root.isDistilling = true
-        root.distillError = ""
-        distillProc.running = true
+        Memory.distill()
     }
 
     // Developer Dossier / Profile
@@ -1064,6 +982,13 @@ Singleton {
                 args.push("--anchor", root.topicAnchor)
             }
         }
+
+        const queryForContext = (action === "ask") ? (customPrompt || root.selectedText) : root.selectedText
+        const memContext = Memory.getPromptInjection(queryForContext)
+        if (memContext && memContext.length > 0) {
+            args.push("--context", memContext)
+        }
+
         apiProc.command = args
         apiProc.running = true
     }
