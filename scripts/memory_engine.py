@@ -449,6 +449,7 @@ KNOWLEDGE HIERARCHY & CONSOLIDATION RULES:
 4. IGNORE NOISE: Skip greetings, simple translations, pure arithmetic, short tests, and transient banter.
 5. LINE LINEAGE: Each bullet in 'lines' or 'sections' must trace directly to a source interaction ID in 'sources'.
 6. GENERAL & CONCISE CARD TITLES (5-7 WORDS MAX): When naming or updating card topics, the title MUST be a clean, broad, general concept (e.g., 'Java Core & Concurrency Hub', 'Spring Boot Engineering Hub', 'Docker Architecture & Linux Kernel Primitives') and strictly 5 to 7 words maximum. Never use hyper-specific multi-clause sentences for card titles.
+7. EXTRACT ESSENTIAL GENERAL RULES (NOT SITUATIONAL EXAMPLES): Formulate knowledge as universal technical invariants, patterns, and rules, NOT as task-specific project walk-throughs or history anecdotes. Do NOT mention specific temporary repo names, local file paths, or ephemeral exercise narratives. Extract the enduring, transferable learning point.
 
 OUTPUT FORMAT:
 Return a JSON object with a single key 'cards', containing an array of card objects:
@@ -1097,6 +1098,7 @@ CONSOLIDATION PRINCIPLES:
 3. CONCISE CODE SNIPPETS: Each section must provide a short, focused, practical code snippet (under 8-10 lines max). Do NOT provide full boilerplate classes, endless imports, or package headers. Show only the clean, essential pattern.
 4. PITFALLS & BLINDSPOTS: Retain and clearly list deadly traps, gotchas, and concurrency/memory pitfalls.
 5. CLEAN DISTINCT TOPIC (5-7 WORDS MAX): Keep core languages and large frameworks separate. Ensure card topics are general, clean, and strictly 5 to 7 words maximum (e.g. 'Java Core & Concurrency Hub', 'Spring Boot Engineering Hub'). Never use long hyper-specific sentences for card titles.
+6. EXTRACT ESSENTIAL GENERAL RULES (NOT SITUATIONAL EXAMPLES): Synthesize universal engineering principles, invariants, and syntax gotchas. Eliminate all situational project names, temporary filenames, and conversational history narratives.
 
 OUTPUT FORMAT:
 Return a JSON object with a single key 'card':

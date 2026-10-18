@@ -40,9 +40,6 @@ FocusScope {
     property int activeQuestionIndex: 0
     property var userAnswers: ({})
 
-    // Study Primer Expand State
-    property var expandedStudyCards: ({})
-
     // Dynamic Topics & Concepts Extraction
     readonly property int uniqueTopicCount: {
         const list = Memory.cards || []
@@ -125,17 +122,6 @@ FocusScope {
         event.accepted = true
     }
 
-    function toggleStudy(cardId) {
-        const idStr = String(cardId)
-        const updated = Object.assign({}, root.expandedStudyCards)
-        updated[idStr] = !updated[idStr]
-        root.expandedStudyCards = updated
-    }
-
-    function isStudyOpen(cardId) {
-        return !!root.expandedStudyCards[String(cardId)]
-    }
-
     function jumpToCard(cardId) {
         if (!cardId) return
         const targetId = String(cardId)
@@ -146,10 +132,6 @@ FocusScope {
         if (searchInput) searchInput.text = ""
 
         root.expandedCardId = targetId
-
-        const updated = Object.assign({}, root.expandedStudyCards)
-        updated[targetId] = true
-        root.expandedStudyCards = updated
 
         Qt.callLater(() => {
             const list = root.filteredCards || []
@@ -1633,7 +1615,6 @@ FocusScope {
                     readonly property bool isEditing: root.editingCardId.length > 0 && root.editingCardId === cardId
                     readonly property bool isMastered: cardData ? (cardData.status === "mastered") : false
                     readonly property bool hasFailFeedback: !!(cardData && cardData.last_fail_feedback && cardData.last_fail_feedback.length > 0)
-                    readonly property bool isStudyOpen: root.isStudyOpen(cardId)
                     readonly property bool isEnrichingThis: (Memory.isEnriching && Memory.enrichingCardId === cardId)
                     readonly property var cardSections: cardData ? (cardData.sections || []) : []
                     readonly property bool isCodeHub: cardData ? (cardData.type === "code_hub" || cardSections.length > 0) : false
@@ -2065,7 +2046,7 @@ FocusScope {
                                 color: Qt.alpha(Colours.palette.m3primary, 0.08)
                                 border.width: 1
                                 border.color: Qt.alpha(Colours.palette.m3primary, 0.2)
-                                visible: cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen && cardItem.cardSections.length === 0
+                                visible: cardItem.isMastered && !cardItem.isEditing && cardItem.cardSections.length === 0
 
                                 ColumnLayout {
                                     id: masterCol
@@ -2120,7 +2101,7 @@ FocusScope {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 8
-                                visible: cardItem.cardSections.length > 0 && !cardItem.isEditing && !cardItem.isStudyOpen
+                                visible: cardItem.cardSections.length > 0 && !cardItem.isEditing
 
                                 // Section Tabs (Horizontal pill strip)
                                 Flickable {
@@ -2241,6 +2222,32 @@ FocusScope {
                                             }
                                         }
 
+                                        // Section Traps & Gotchas (Merged with danger icon)
+                                        Repeater {
+                                            model: cardItem.currentSection ? (cardItem.currentSection.pitfalls || []) : []
+
+                                            delegate: RowLayout {
+                                                required property string modelData
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                MaterialIcon {
+                                                    text: "warning"
+                                                    fontStyle: Tokens.font.icon.small
+                                                    color: Colours.palette.m3error
+                                                    Layout.alignment: Qt.AlignTop
+                                                    Layout.topMargin: 1
+                                                }
+
+                                                SelectableText {
+                                                    Layout.fillWidth: true
+                                                    text: modelData
+                                                    font: Tokens.font.body.small
+                                                    color: Colours.palette.m3onSurface
+                                                }
+                                            }
+                                        }
+
                                         // Section Code Snippet
                                         StyledRect {
                                             visible: !!(cardItem.currentSection && cardItem.currentSection.snippet && cardItem.currentSection.snippet.length > 0)
@@ -2300,248 +2307,224 @@ FocusScope {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
 
-                                        // Section Specific Pitfalls
-                                        StyledRect {
-                                            visible: !!(cardItem.currentSection && cardItem.currentSection.pitfalls && cardItem.currentSection.pitfalls.length > 0)
+                            // Knowledge & Info Stream (for Cards without sections)
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                visible: !cardItem.isMastered && !cardItem.isEditing && cardItem.cardSections.length === 0
+
+                                // 1. Base Knowledge Lines
+                                Repeater {
+                                    model: cardItem.cardData ? (cardItem.cardData.lines || []) : []
+
+                                    delegate: RowLayout {
+                                        required property string modelData
+                                        Layout.fillWidth: true
+                                        spacing: 6
+
+                                        Rectangle {
+                                            width: 5
+                                            height: 5
+                                            radius: 2.5
+                                            color: Colours.palette.m3primary
+                                            Layout.alignment: Qt.AlignTop
+                                            Layout.topMargin: 5
+                                        }
+
+                                        SelectableText {
                                             Layout.fillWidth: true
-                                            implicitHeight: secPitInner.implicitHeight + 14
-                                            radius: Tokens.rounding.small
-                                            color: Qt.alpha(Colours.palette.m3error, 0.08)
-                                            border.width: 1
-                                            border.color: Qt.alpha(Colours.palette.m3error, 0.25)
+                                            text: modelData
+                                            font: Tokens.font.body.small
+                                            color: Colours.palette.m3onSurface
+                                        }
+                                    }
+                                }
 
-                                            ColumnLayout {
-                                                id: secPitInner
-                                                anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 4
+                                // 2. Enriched Additional Info / Primer Rules (Marked with ✨ icon)
+                                Repeater {
+                                    model: (cardItem.cardPrimer && cardItem.cardPrimer.rules) ? cardItem.cardPrimer.rules : []
 
-                                                RowLayout {
-                                                    spacing: 4
-                                                    MaterialIcon { text: "warning"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3error }
-                                                    StyledText { text: qsTr("Section Traps & Gotchas:"); font: Tokens.font.label.small; color: Colours.palette.m3error }
-                                                }
+                                    delegate: RowLayout {
+                                        required property string modelData
+                                        Layout.fillWidth: true
+                                        spacing: 6
 
-                                                Repeater {
-                                                    model: cardItem.currentSection ? (cardItem.currentSection.pitfalls || []) : []
+                                        MaterialIcon {
+                                            text: "auto_awesome"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3tertiary
+                                            Layout.alignment: Qt.AlignTop
+                                            Layout.topMargin: 1
+                                        }
 
-                                                    delegate: SelectableText {
-                                                        required property string modelData
-                                                        Layout.fillWidth: true
-                                                        text: "• " + modelData
-                                                        font: Tokens.font.body.small
-                                                        color: Colours.palette.m3onSurface
+                                        SelectableText {
+                                            Layout.fillWidth: true
+                                            text: modelData
+                                            font: Tokens.font.body.small
+                                            color: Colours.palette.m3onSurface
+                                        }
+                                    }
+                                }
+
+                                // 3. Enriched Pitfall (Merged with ⚠️ danger icon)
+                                RowLayout {
+                                    visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.pitfall && cardItem.cardPrimer.pitfall.length > 0)
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    MaterialIcon {
+                                        text: "warning"
+                                        fontStyle: Tokens.font.icon.small
+                                        color: Colours.palette.m3error
+                                        Layout.alignment: Qt.AlignTop
+                                        Layout.topMargin: 1
+                                    }
+
+                                    SelectableText {
+                                        Layout.fillWidth: true
+                                        text: cardItem.cardPrimer ? String(cardItem.cardPrimer.pitfall || "") : ""
+                                        font: Tokens.font.body.small
+                                        color: Colours.palette.m3onSurface
+                                    }
+                                }
+
+                                // 4. Enriched Snippet (if present in primer)
+                                StyledRect {
+                                    visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.snippet && cardItem.cardPrimer.snippet.length > 0)
+                                    Layout.fillWidth: true
+                                    implicitHeight: primerSnipInner.implicitHeight + 16
+                                    radius: Tokens.rounding.small
+                                    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.95)
+                                    border.width: 1
+                                    border.color: Qt.alpha(Colours.palette.m3outline, 0.3)
+
+                                    ColumnLayout {
+                                        id: primerSnipInner
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            MaterialIcon { text: "code"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
+                                            StyledText { text: qsTr("Code Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
+                                            Item { Layout.fillWidth: true }
+                                            IconButton {
+                                                type: IconButton.Text
+                                                icon: "content_copy"
+                                                font: Tokens.font.icon.small
+                                                implicitWidth: 22
+                                                implicitHeight: 22
+                                                onClicked: {
+                                                    if (cardItem.cardPrimer && cardItem.cardPrimer.snippet) {
+                                                        let s = String(cardItem.cardPrimer.snippet).trim()
+                                                        if (s.startsWith("```")) {
+                                                            const firstNl = s.indexOf("\n")
+                                                            if (firstNl !== -1) s = s.substring(firstNl + 1)
+                                                            if (s.endsWith("```")) s = s.substring(0, s.length - 3)
+                                                        }
+                                                        Quickshell.clipboardText = s.trim()
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                }
-                            }
 
-                            // Learning Notes Block (for Standard Cards without sections)
-                            SelectableText {
-                                Layout.fillWidth: true
-                                visible: !cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen && cardItem.cardSections.length === 0
-                                text: {
-                                    const lines = cardItem.cardData ? (cardItem.cardData.lines || []) : []
-                                    if (lines.length === 0) return ""
-                                    return lines.map(l => "•  " + l).join("\n")
-                                }
-                                color: Colours.palette.m3onSurfaceVariant
-                            }
-
-                            // Personal Traps & Caveats Block
-                            StyledRect {
-                                Layout.fillWidth: true
-                                implicitHeight: trapsCol.implicitHeight + 20
-                                radius: Tokens.rounding.small
-                                color: Qt.alpha(Colours.palette.m3error, 0.08)
-                                border.width: 1
-                                border.color: Qt.alpha(Colours.palette.m3error, 0.25)
-                                visible: (cardItem.cardData.personal_traps || []).length > 0 && !cardItem.isEditing
-
-                                ColumnLayout {
-                                    id: trapsCol
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 6
-
-                                    RowLayout {
-                                        spacing: 6
-                                        MaterialIcon {
-                                            text: "crisis_alert"
-                                            fontStyle: Tokens.font.icon.small
-                                            color: Colours.palette.m3error
-                                        }
-                                        StyledText {
-                                            text: qsTr("Personal Traps & Caveats (%1):").arg(cardItem.cardData.personal_traps ? cardItem.cardData.personal_traps.length : 0)
-                                            font: Tokens.font.label.small
-                                            color: Colours.palette.m3error
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: cardItem.cardData.personal_traps || []
-
-                                        RowLayout {
-                                            id: trapRowItem
-                                            required property string modelData
-                                            required property int index
+                                        SelectableText {
                                             Layout.fillWidth: true
-                                            spacing: 6
-
-                                            MaterialIcon {
-                                                text: "shield_with_heart"
-                                                fontStyle: Tokens.font.icon.small
-                                                color: Colours.palette.m3error
+                                            text: {
+                                                if (!cardItem.cardPrimer || !cardItem.cardPrimer.snippet) return ""
+                                                let s = String(cardItem.cardPrimer.snippet).trim()
+                                                if (s.startsWith("```")) {
+                                                    const firstNl = s.indexOf("\n")
+                                                    if (firstNl !== -1) s = s.substring(firstNl + 1)
+                                                    if (s.endsWith("```")) s = s.substring(0, s.length - 3)
+                                                }
+                                                return s.trim()
                                             }
-
-                                            SelectableText {
-                                                Layout.fillWidth: true
-                                                text: trapRowItem.modelData
-                                                color: Colours.palette.m3onSurface
-                                            }
-
-                                            IconButton {
-                                                type: IconButton.Text
-                                                icon: "close"
-                                                font: Tokens.font.icon.small
-                                                implicitWidth: 20
-                                                implicitHeight: 20
-                                                onClicked: Memory.removeTrap(cardItem.cardId, trapRowItem.modelData)
-                                            }
+                                            font.family: "monospace"
+                                            font.pointSize: Tokens.font.body.small.pointSize - 0.5
+                                            color: Colours.palette.m3onSurface
                                         }
                                     }
                                 }
                             }
 
-                            // Connected Knowledge Graph Relations
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 6
-                                visible: (cardItem.cardData.relations || []).length > 0 && !cardItem.isEditing
+                            // Personal Traps & Caveats (Merged with ⚠️ danger icon, no heavy box)
+                            Repeater {
+                                model: cardItem.cardData.personal_traps || []
 
-                                RowLayout {
-                                    spacing: 6
-                                    MaterialIcon {
-                                        text: "hub"
-                                        fontStyle: Tokens.font.icon.small
-                                        color: Colours.palette.m3secondary
-                                    }
-                                    StyledText {
-                                        text: qsTr("Connected Concepts:")
-                                        font: Tokens.font.label.small
-                                        color: Colours.palette.m3secondary
-                                    }
-                                }
-
-                                Flow {
+                                delegate: RowLayout {
+                                    id: trapRowItem
+                                    required property string modelData
+                                    required property int index
                                     Layout.fillWidth: true
                                     spacing: 6
+                                    visible: !cardItem.isEditing
 
-                                    Repeater {
-                                        model: cardItem.cardData.relations || []
+                                    MaterialIcon {
+                                        text: "crisis_alert"
+                                        fontStyle: Tokens.font.icon.small
+                                        color: Colours.palette.m3error
+                                        Layout.alignment: Qt.AlignTop
+                                        Layout.topMargin: 1
+                                    }
 
-                                        StyledRect {
-                                            id: relChip
-                                            required property var modelData
+                                    SelectableText {
+                                        Layout.fillWidth: true
+                                        text: trapRowItem.modelData
+                                        font: Tokens.font.body.small
+                                        color: Colours.palette.m3onSurface
+                                    }
 
-                                            readonly property string relType: String(modelData.type || "related")
-                                            readonly property color relColor: {
-                                                if (relType.startsWith("prereq")) return Colours.palette.m3tertiary
-                                                if (relType.startsWith("evol")) return Colours.palette.m3secondary
-                                                return Colours.palette.m3primary
-                                            }
-                                            readonly property string relIcon: {
-                                                if (relType === "prerequisite") return "arrow_upward"
-                                                if (relType === "prerequisite_for") return "arrow_downward"
-                                                if (relType === "evolution" || relType === "evolved_to") return "trending_up"
-                                                return "polyline"
-                                            }
-                                            readonly property string relPrefix: {
-                                                if (relType === "prerequisite") return "Prereq: "
-                                                if (relType === "prerequisite_for") return "Enables: "
-                                                if (relType === "evolution") return "Evolved from: "
-                                                if (relType === "evolved_to") return "Evolved to: "
-                                                return ""
-                                            }
-
-                                            implicitHeight: 26
-                                            implicitWidth: relContentRow.implicitWidth + 16
-                                            radius: Tokens.rounding.full
-                                            color: relChipMouse.containsMouse ? Qt.alpha(relColor, 0.22) : Qt.alpha(relColor, 0.10)
-                                            border.width: 1
-                                            border.color: Qt.alpha(relColor, relChipMouse.containsMouse ? 0.6 : 0.25)
-
-                                            RowLayout {
-                                                id: relContentRow
-                                                anchors.centerIn: parent
-                                                spacing: 6
-
-                                                MaterialIcon {
-                                                    text: relChip.relIcon
-                                                    fontStyle: Tokens.font.icon.small
-                                                    color: relChip.relColor
-                                                }
-
-                                                StyledText {
-                                                    text: relChip.relPrefix + (relChip.modelData.target_topic || "Related")
-                                                    font: Tokens.font.label.small
-                                                    color: Colours.palette.m3onSurface
-                                                }
-                                            }
-
-                                            MouseArea {
-                                                id: relChipMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.jumpToCard(relChip.modelData.target_id)
-                                            }
-                                        }
+                                    IconButton {
+                                        type: IconButton.Text
+                                        icon: "close"
+                                        font: Tokens.font.icon.small
+                                        implicitWidth: 20
+                                        implicitHeight: 20
+                                        onClicked: Memory.removeTrap(cardItem.cardId, trapRowItem.modelData)
                                     }
                                 }
                             }
 
-                            // Card Action Dock (Bottom Bar)
+                            // Card Action Dock (Compact Sleek Bottom Bar)
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 8
                                 visible: !cardItem.isEditing
 
                                 IconTextButton {
-                                    text: cardItem.isStudyOpen
-                                        ? qsTr("Close Primer")
-                                        : (cardItem.cardPrimer ? qsTr("Study Primer") : qsTr("Build Primer ✨"))
-                                    icon: cardItem.isStudyOpen ? "expand_less" : (cardItem.cardPrimer ? "menu_book" : "auto_awesome")
-                                    type: cardItem.isStudyOpen ? IconTextButton.Filled : IconTextButton.Tonal
-                                    implicitHeight: 32
-                                    onClicked: root.toggleStudy(cardItem.cardId)
+                                    enabled: !cardItem.isEnrichingThis
+                                    text: cardItem.isEnrichingThis ? qsTr("Adding Info…") : (cardItem.cardPrimer ? qsTr("Enriched ✨") : qsTr("Add Info ✨"))
+                                    icon: cardItem.isEnrichingThis ? "progress_activity" : "auto_awesome"
+                                    type: IconTextButton.Tonal
+                                    implicitHeight: 26
+                                    horizontalPadding: 8
+                                    onClicked: {
+                                        if (!cardItem.isEnrichingThis) {
+                                            Memory.enrichCard(cardItem.cardId)
+                                        }
+                                    }
                                 }
 
                                 Item { Layout.fillWidth: true }
 
                                 IconTextButton {
-                                    text: cardItem.isMastered ? qsTr("Practice Trial ⚔️") : qsTr("Test Mastery ⚔️")
+                                    text: cardItem.isMastered ? qsTr("Practice") : qsTr("Test Mastery")
                                     icon: "psychology_alt"
                                     type: IconTextButton.Filled
-                                    implicitHeight: 32
+                                    implicitHeight: 26
+                                    horizontalPadding: 8
                                     onClicked: {
                                         root.activeQuestionIndex = 0
                                         root.userAnswers = ({})
                                         Memory.startChallenge(cardItem.cardId)
                                     }
                                 }
-                            }
-
-                            // Lazy Loader for Study Primer Drawer (Zero overhead when closed!)
-                            Loader {
-                                Layout.fillWidth: true
-                                active: cardItem.isStudyOpen && !cardItem.isEditing
-                                visible: active
-                                sourceComponent: primerDrawerComp
                             }
 
                             // Lazy Loader for Edit Mode Drawer
@@ -2553,296 +2536,13 @@ FocusScope {
                             }
                         }
                     }
-                    }
+                }
 
-                    // ═════════════════════════════════════════════════
-                    // Component: Study Primer Drawer (Lazy Loaded)
-                    // ═════════════════════════════════════════════════
-                    Component {
-                        id: primerDrawerComp
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-
-                            // If card already has an enriched primer:
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-                                visible: !!cardItem.cardPrimer
-
-                                // 1. Mental Model
-                                StyledRect {
-                                    Layout.fillWidth: true
-                                    implicitHeight: mmCol.implicitHeight + 20
-                                    radius: Tokens.rounding.small
-                                    color: Qt.alpha(Colours.palette.m3primary, 0.08)
-                                    border.width: 1
-                                    border.color: Qt.alpha(Colours.palette.m3primary, 0.25)
-
-                                    ColumnLayout {
-                                        id: mmCol
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            spacing: 6
-                                            MaterialIcon { text: "psychology"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
-                                            StyledText { text: qsTr("1. The Mental Model (Underlying Mechanics):"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
-                                        }
-
-                                        SelectableText {
-                                            Layout.fillWidth: true
-                                            text: cardItem.cardPrimer ? String(cardItem.cardPrimer.mental_model || "") : ""
-                                            color: Colours.palette.m3onSurface
-                                        }
-                                    }
-                                }
-
-                                // 2. Golden Rules / Invariants
-                                StyledRect {
-                                    Layout.fillWidth: true
-                                    implicitHeight: rulesCol.implicitHeight + 20
-                                    radius: Tokens.rounding.small
-                                    color: Colours.palette.m3surfaceContainerLowest
-
-                                    ColumnLayout {
-                                        id: rulesCol
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            spacing: 6
-                                            MaterialIcon { text: "rule"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
-                                            StyledText { text: qsTr("2. Golden Rules / Invariants:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
-                                        }
-
-                                        Repeater {
-                                            model: (cardItem.cardPrimer && cardItem.cardPrimer.rules) ? cardItem.cardPrimer.rules : []
-
-                                            delegate: RowLayout {
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                spacing: 6
-
-                                                StyledText { text: "⚡"; font: Tokens.font.body.small }
-                                                SelectableText {
-                                                    Layout.fillWidth: true
-                                                    text: String(modelData)
-                                                    color: Colours.palette.m3onSurfaceVariant
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 3. Deadly Pitfall
-                                StyledRect {
-                                    visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.pitfall && cardItem.cardPrimer.pitfall.length > 0)
-                                    Layout.fillWidth: true
-                                    implicitHeight: pitCol.implicitHeight + 20
-                                    radius: Tokens.rounding.small
-                                    color: Qt.alpha(Colours.palette.m3error, 0.08)
-                                    border.width: 1
-                                    border.color: Qt.alpha(Colours.palette.m3error, 0.3)
-
-                                    ColumnLayout {
-                                        id: pitCol
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            spacing: 6
-                                            MaterialIcon { text: "warning"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3error }
-                                            StyledText { text: qsTr("3. Deadly Pitfall / Edge Case:"); font: Tokens.font.label.small; color: Colours.palette.m3error }
-                                        }
-
-                                        SelectableText {
-                                            Layout.fillWidth: true
-                                            text: cardItem.cardPrimer ? String(cardItem.cardPrimer.pitfall || "") : ""
-                                            color: Colours.palette.m3onSurface
-                                        }
-                                    }
-                                }
-
-                                // 4A. Canonical Code Snippet (for Code Concepts)
-                                StyledRect {
-                                    visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.snippet && cardItem.cardPrimer.snippet.length > 0)
-                                    Layout.fillWidth: true
-                                    implicitHeight: snipCol.implicitHeight + 22
-                                    radius: Tokens.rounding.small
-                                    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.95)
-                                    border.width: 1
-                                    border.color: Qt.alpha(Colours.palette.m3outline, 0.3)
-
-                                    ColumnLayout {
-                                        id: snipCol
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
-                                            MaterialIcon { text: "terminal"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
-                                            StyledText { text: qsTr("4. Canonical Code Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
-                                            Item { Layout.fillWidth: true }
-                                            IconButton {
-                                                type: IconButton.Text
-                                                icon: "content_copy"
-                                                font: Tokens.font.icon.small
-                                                implicitWidth: 24
-                                                implicitHeight: 24
-                                                onClicked: {
-                                                    if (cardItem.cardPrimer && cardItem.cardPrimer.snippet) {
-                                                        Quickshell.clipboardText = cardItem.cardPrimer.snippet
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        SelectableText {
-                                            Layout.fillWidth: true
-                                            text: cardItem.cardPrimer ? String(cardItem.cardPrimer.snippet || "") : ""
-                                            textFormat: TextEdit.MarkdownText
-                                            font.family: "monospace"
-                                            font.pointSize: Tokens.font.body.small.pointSize - 0.5
-                                            color: Colours.palette.m3onSurface
-                                        }
-                                    }
-                                }
-
-                                // 4B. Actionable Execution Protocol (for Non-Code Concepts)
-                                StyledRect {
-                                    visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.protocol_flow && cardItem.cardPrimer.protocol_flow.length > 0)
-                                    Layout.fillWidth: true
-                                    implicitHeight: protoCol.implicitHeight + 20
-                                    radius: Tokens.rounding.small
-                                    color: Qt.alpha(Colours.palette.m3tertiary, 0.08)
-                                    border.width: 1
-                                    border.color: Qt.alpha(Colours.palette.m3tertiary, 0.25)
-
-                                    ColumnLayout {
-                                        id: protoCol
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            spacing: 6
-                                            MaterialIcon { text: "format_list_numbered"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3tertiary }
-                                            StyledText { text: qsTr("4. Actionable Execution Protocol:"); font: Tokens.font.label.small; color: Colours.palette.m3tertiary }
-                                        }
-
-                                        Repeater {
-                                            model: (cardItem.cardPrimer && cardItem.cardPrimer.protocol_flow) ? cardItem.cardPrimer.protocol_flow : []
-
-                                            delegate: RowLayout {
-                                                required property var modelData
-                                                required property int index
-                                                Layout.fillWidth: true
-                                                spacing: 6
-
-                                                StyledRect {
-                                                    implicitWidth: stepBadge.implicitWidth + 8
-                                                    implicitHeight: 20
-                                                    radius: Tokens.rounding.full
-                                                    color: Colours.palette.m3tertiaryContainer
-
-                                                    StyledText {
-                                                        id: stepBadge
-                                                        anchors.centerIn: parent
-                                                        text: String(index + 1)
-                                                        font: Tokens.font.label.small
-                                                        color: Colours.palette.m3onTertiaryContainer
-                                                    }
-                                                }
-
-                                                SelectableText {
-                                                    Layout.fillWidth: true
-                                                    text: String(modelData)
-                                                    color: Colours.palette.m3onSurface
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Actions: Deepen again or jump to test
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    IconTextButton {
-                                        enabled: !cardItem.isEnrichingThis
-                                        text: cardItem.isEnrichingThis ? qsTr("Refreshing…") : qsTr("Refresh Primer")
-                                        icon: cardItem.isEnrichingThis ? "progress_activity" : "refresh"
-                                        type: IconTextButton.Tonal
-                                        implicitHeight: 32
-                                        onClicked: Memory.enrichCard(cardItem.cardId)
-                                    }
-
-                                    Item { Layout.fillWidth: true }
-
-                                    IconTextButton {
-                                        text: qsTr("Ready? Test Knowledge ⚔️")
-                                        icon: "psychology_alt"
-                                        type: IconTextButton.Filled
-                                        implicitHeight: 32
-                                        onClicked: {
-                                            root.activeQuestionIndex = 0
-                                            root.userAnswers = ({})
-                                            Memory.startChallenge(cardItem.cardId)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // If card does NOT have an enriched primer yet:
-                            StyledRect {
-                                visible: !cardItem.cardPrimer
-                                Layout.fillWidth: true
-                                implicitHeight: unEnrichedCol.implicitHeight + 24
-                                radius: Tokens.rounding.small
-                                color: Colours.palette.m3surfaceContainerLowest
-                                border.width: 1
-                                border.color: Colours.palette.m3outlineVariant
-
-                                ColumnLayout {
-                                    id: unEnrichedCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 8
-
-                                    StyledText {
-                                        Layout.fillWidth: true
-                                        text: qsTr("This card currently only holds raw search notes. Click below to complete its knowledge into a high-density Technical Primer (Mental Model, Invariants, Edge Cases, Code/Protocol):")
-                                        font: Tokens.font.body.small
-                                        color: Colours.palette.m3outline
-                                        wrapMode: Text.Wrap
-                                    }
-
-                                    IconTextButton {
-                                        enabled: !cardItem.isEnrichingThis
-                                        text: cardItem.isEnrichingThis ? qsTr("Synthesizing Deep Primer…") : qsTr("✨ Complete Knowledge (Build Primer)")
-                                        icon: cardItem.isEnrichingThis ? "progress_activity" : "auto_awesome"
-                                        type: IconTextButton.Filled
-                                        implicitHeight: 32
-                                        onClicked: Memory.enrichCard(cardItem.cardId)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ═════════════════════════════════════════════════
-                    // Component: Edit Mode Drawer (Lazy Loaded)
-                    // ═════════════════════════════════════════════════
-                    Component {
-                        id: editDrawerComp
+                // ═════════════════════════════════════════════════
+                // Component: Edit Mode Drawer (Lazy Loaded)
+                // ═════════════════════════════════════════════════
+                Component {
+                    id: editDrawerComp
 
                         ColumnLayout {
                             Layout.fillWidth: true
