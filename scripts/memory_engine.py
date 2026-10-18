@@ -442,12 +442,13 @@ Your task is to analyze new interactions from the user's history and curate high
 
 KNOWLEDGE HIERARCHY & CONSOLIDATION RULES:
 1. DUAL-LAYER ARCHITECTURE:
-   - DOMAIN CODE HUBS (type: "code_hub"): Concrete programming language idioms, framework patterns, and code recipes belonging to the same language/ecosystem (e.g., Java, Python, Shell) MUST be consolidated into a single master Domain Code Hub (e.g. 'card_java_engineering_hub'). Use 'sections' to group related topics (e.g., Concurrency, Web & Spring, Network I/O & Streaming, Process Execution).
+   - DOMAIN CODE HUBS (type: "code_hub"): Concrete programming language idioms, framework patterns, and code recipes. IMPORTANT: Keep core language patterns and major enterprise frameworks separate (e.g., 'card_java_core_hub' for core Java concurrency/virtual threads/records, and 'card_spring_boot_hub' for Spring Boot JPA/DTO/SSE). Use 'sections' to group related topics.
    - ARCHITECTURAL CONCEPTS (type: "concept"): High-level system design, distributed architectures, and development paradigms (e.g., MVP, PaaS overhead, OCI containers, TCP/IP fundamentals) must remain distinct conceptual cards.
 2. CONSOLIDATE, DO NOT FRAGMENT: If incoming interactions discuss code or idioms for an ecosystem that already has a Domain Code Hub in 'current_memory', APPEND or UPDATE the relevant section in that card instead of generating a new isolated card.
-3. HIGH DENSITY & CODE SNIPPETS: Cards are NOT limited to 2 short lines. Provide deep, production-grade code snippets, clear execution rules, and real gotchas.
+3. CONCISE CODE SNIPPETS: Provide short, focused, practical code snippets (under 8-10 lines max). Do NOT provide giant boilerplate classes or package/import scaffolding. Focus cleanly on the core idiom/pattern.
 4. IGNORE NOISE: Skip greetings, simple translations, pure arithmetic, short tests, and transient banter.
 5. LINE LINEAGE: Each bullet in 'lines' or 'sections' must trace directly to a source interaction ID in 'sources'.
+6. GENERAL & CONCISE CARD TITLES (5-7 WORDS MAX): When naming or updating card topics, the title MUST be a clean, broad, general concept (e.g., 'Java Core & Concurrency Hub', 'Spring Boot Engineering Hub', 'Docker Architecture & Linux Kernel Primitives') and strictly 5 to 7 words maximum. Never use hyper-specific multi-clause sentences for card titles.
 
 OUTPUT FORMAT:
 Return a JSON object with a single key 'cards', containing an array of card objects:
@@ -1092,10 +1093,10 @@ Your task is to consolidate multiple fragmented cards from the same technical do
 
 CONSOLIDATION PRINCIPLES:
 1. TECHNICAL DEPTH: Do NOT compress into 2 superficial bullet points. Preserve and synthesize all technical nuance, exact idioms, edge cases, and code patterns from the original cards.
-2. MODULAR SECTIONS: Organize the knowledge into 3-6 logical, well-structured sections (e.g., Concurrency & Memory Visibility, Spring Framework & Proxy Rules, Modern HttpClient & Stream Debouncing, Process Execution, Performance Tuning).
-3. PRODUCTION CODE SNIPPETS: Each section must provide a real, compilable, production-grade code snippet demonstrating the idiom or pattern.
+2. MODULAR SECTIONS: Organize the knowledge into 2-4 logical, well-structured sections.
+3. CONCISE CODE SNIPPETS: Each section must provide a short, focused, practical code snippet (under 8-10 lines max). Do NOT provide full boilerplate classes, endless imports, or package headers. Show only the clean, essential pattern.
 4. PITFALLS & BLINDSPOTS: Retain and clearly list deadly traps, gotchas, and concurrency/memory pitfalls.
-5. CLEAN UNIFIED TOPIC: Set a clean, authoritative topic like "Java & Spring Engineering Hub" or "Linux Shell & Scripting Hub".
+5. CLEAN DISTINCT TOPIC (5-7 WORDS MAX): Keep core languages and large frameworks separate. Ensure card topics are general, clean, and strictly 5 to 7 words maximum (e.g. 'Java Core & Concurrency Hub', 'Spring Boot Engineering Hub'). Never use long hyper-specific sentences for card titles.
 
 OUTPUT FORMAT:
 Return a JSON object with a single key 'card':

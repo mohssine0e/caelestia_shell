@@ -2143,7 +2143,7 @@ FocusScope {
                                                 required property int index
                                                 readonly property bool isCurrent: cardItem.activeSectionIndex === index
 
-                                                implicitWidth: secPillInner.implicitWidth + 14
+                                                implicitWidth: Math.min(secPillInner.implicitWidth + 14, 220)
                                                 implicitHeight: 26
                                                 radius: Tokens.rounding.full
                                                 color: isCurrent ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHigh
@@ -2165,6 +2165,8 @@ FocusScope {
                                                         text: secPill.modelData.title || qsTr("Module %1").arg(secPill.index + 1)
                                                         font: Tokens.font.label.small
                                                         color: secPill.isCurrent ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                                        elide: Text.ElideRight
+                                                        Layout.maximumWidth: 180
                                                     }
                                                 }
 
@@ -2239,7 +2241,7 @@ FocusScope {
                                             }
                                         }
 
-                                        // Section Production Code Snippet
+                                        // Section Code Snippet
                                         StyledRect {
                                             visible: !!(cardItem.currentSection && cardItem.currentSection.snippet && cardItem.currentSection.snippet.length > 0)
                                             Layout.fillWidth: true
@@ -2257,8 +2259,8 @@ FocusScope {
 
                                                 RowLayout {
                                                     Layout.fillWidth: true
-                                                    MaterialIcon { text: "terminal"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
-                                                    StyledText { text: qsTr("Production Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
+                                                    MaterialIcon { text: "code"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
+                                                    StyledText { text: qsTr("Code Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
                                                     Item { Layout.fillWidth: true }
                                                     IconButton {
                                                         type: IconButton.Text
@@ -2268,7 +2270,13 @@ FocusScope {
                                                         implicitHeight: 22
                                                         onClicked: {
                                                             if (cardItem.currentSection && cardItem.currentSection.snippet) {
-                                                                Quickshell.clipboardText = cardItem.currentSection.snippet
+                                                                let s = String(cardItem.currentSection.snippet).trim()
+                                                                if (s.startsWith("```")) {
+                                                                    const firstNl = s.indexOf("\n")
+                                                                    if (firstNl !== -1) s = s.substring(firstNl + 1)
+                                                                    if (s.endsWith("```")) s = s.substring(0, s.length - 3)
+                                                                }
+                                                                Quickshell.clipboardText = s.trim()
                                                             }
                                                         }
                                                     }
@@ -2276,8 +2284,16 @@ FocusScope {
 
                                                 SelectableText {
                                                     Layout.fillWidth: true
-                                                    text: cardItem.currentSection ? String(cardItem.currentSection.snippet || "") : ""
-                                                    textFormat: TextEdit.MarkdownText
+                                                    text: {
+                                                        if (!cardItem.currentSection || !cardItem.currentSection.snippet) return ""
+                                                        let s = String(cardItem.currentSection.snippet).trim()
+                                                        if (s.startsWith("```")) {
+                                                            const firstNl = s.indexOf("\n")
+                                                            if (firstNl !== -1) s = s.substring(firstNl + 1)
+                                                            if (s.endsWith("```")) s = s.substring(0, s.length - 3)
+                                                        }
+                                                        return s.trim()
+                                                    }
                                                     font.family: "monospace"
                                                     font.pointSize: Tokens.font.body.small.pointSize - 0.5
                                                     color: Colours.palette.m3onSurface
