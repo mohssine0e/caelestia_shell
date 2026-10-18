@@ -1881,12 +1881,83 @@ FocusScope {
                                 }
 
                                 IconButton {
+                                    id: deleteCardButton
                                     type: IconButton.Text
-                                    icon: "delete"
+                                    icon: "delete_outline"
                                     font: Tokens.font.icon.small
                                     implicitWidth: 24
                                     implicitHeight: 24
-                                    onClicked: Memory.deleteCard(cardItem.cardId)
+
+                                    property bool isShaking: false
+
+                                    onClicked: {
+                                        if (!isShaking) {
+                                            isShaking = true
+                                            shakeAnim.start()
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.LeftButton
+                                        onClicked: deleteCardButton.clicked()
+                                        onDoubleClicked: {
+                                            if (root.expandedCardId === cardItem.cardId) {
+                                                root.expandedCardId = ""
+                                            }
+                                            Memory.deleteCard(cardItem.cardId)
+                                        }
+                                    }
+
+                                    SequentialAnimation {
+                                        id: shakeAnim
+                                        onFinished: {
+                                            deleteCardButton.isShaking = false
+                                            deleteCardButton.rotation = 0
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: -8
+                                            to: 8
+                                            duration: 80
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: 8
+                                            to: -8
+                                            duration: 80
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: -8
+                                            to: 8
+                                            duration: 80
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: 8
+                                            to: -8
+                                            duration: 80
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: -4
+                                            to: 4
+                                            duration: 50
+                                        }
+                                        PropertyAnimation {
+                                            target: deleteCardButton
+                                            property: "rotation"
+                                            from: 4
+                                            to: 0
+                                            duration: 50
+                                        }
+                                    }
                                 }
                             }
 
