@@ -1861,61 +1861,83 @@ FocusScope {
                                     }
                                 }
 
-                                Flow {
+                                Flickable {
+                                    id: tagsFlickable
                                     Layout.fillWidth: true
-                                    spacing: 6
+                                    implicitHeight: 24
+                                    contentWidth: tagsRow.implicitWidth
+                                    contentHeight: height
+                                    clip: true
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    boundsBehavior: Flickable.StopAtBounds
                                     visible: !cardItem.isEditing && (cardItem.cardData.tags || []).length > 0
 
-                                    Repeater {
-                                        model: cardItem.cardData.tags || []
+                                    RowLayout {
+                                        id: tagsRow
+                                        spacing: 6
+                                        anchors.verticalCenter: parent.verticalCenter
 
-                                        delegate: StyledRect {
-                                            id: cardTagChip
-                                            required property var modelData
-                                            readonly property string tagStr: String(modelData).toLowerCase()
-                                            readonly property bool isTagSelected: root.selectedConcept === tagStr
+                                        Repeater {
+                                            model: cardItem.cardData.tags || []
 
-                                            implicitWidth: tagRow.implicitWidth + 10
-                                            implicitHeight: 22
-                                            radius: Tokens.rounding.full
-                                            color: isTagSelected
-                                                ? Colours.palette.m3secondaryContainer
-                                                : (tagMouse.containsMouse ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
-                                            border.width: isTagSelected ? 1 : 0
-                                            border.color: Colours.palette.m3secondary
+                                            delegate: StyledRect {
+                                                id: cardTagChip
+                                                required property var modelData
+                                                readonly property string tagStr: String(modelData).toLowerCase()
+                                                readonly property bool isTagSelected: root.selectedConcept === tagStr
 
-                                            RowLayout {
-                                                id: tagRow
-                                                anchors.centerIn: parent
-                                                spacing: 3
+                                                implicitWidth: tagRow.implicitWidth + 10
+                                                implicitHeight: 22
+                                                radius: Tokens.rounding.full
+                                                color: isTagSelected
+                                                    ? Colours.palette.m3secondaryContainer
+                                                    : (tagMouse.containsMouse ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
+                                                border.width: isTagSelected ? 1 : 0
+                                                border.color: Colours.palette.m3secondary
 
-                                                StyledText {
-                                                    text: "#" + String(cardTagChip.modelData)
-                                                    font: Tokens.font.label.small
-                                                    color: cardTagChip.isTagSelected
-                                                        ? Colours.palette.m3onSecondaryContainer
-                                                        : Colours.palette.m3outline
+                                                RowLayout {
+                                                    id: tagRow
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+
+                                                    StyledText {
+                                                        text: "#" + String(cardTagChip.modelData)
+                                                        font: Tokens.font.label.small
+                                                        color: cardTagChip.isTagSelected
+                                                            ? Colours.palette.m3onSecondaryContainer
+                                                            : Colours.palette.m3outline
+                                                    }
                                                 }
-                                            }
 
-                                            MouseArea {
-                                                id: tagMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    if (root.selectedConcept === cardTagChip.tagStr) {
-                                                        root.selectedConcept = ""
-                                                    } else {
-                                                        root.selectedConcept = cardTagChip.tagStr
+                                                MouseArea {
+                                                    id: tagMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (root.selectedConcept === cardTagChip.tagStr) {
+                                                            root.selectedConcept = ""
+                                                        } else {
+                                                            root.selectedConcept = cardTagChip.tagStr
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
+
+                                    WheelHandler {
+                                        onWheel: event => {
+                                            const delta = event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x
+                                            tagsFlickable.contentX = Math.max(0, Math.min(tagsFlickable.contentWidth - tagsFlickable.width, tagsFlickable.contentX - delta))
+                                        }
+                                    }
                                 }
 
-                                Item { Layout.fillWidth: true }
+                                Item {
+                                    Layout.fillWidth: true
+                                    visible: !tagsFlickable.visible
+                                }
 
                                 IconButton {
                                     type: IconButton.Text
