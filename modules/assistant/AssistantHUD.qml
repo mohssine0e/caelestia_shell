@@ -38,7 +38,11 @@ FocusScope {
     }
 
     focus: true
-    width: (root.currentView === "profile" || root.currentView === "history" || root.currentView === "memory") ? 680 : 640
+    width: {
+        if (root.currentView === "memory") return 680
+        if (root.currentView === "profile" || root.currentView === "history") return 680
+        return 640
+    }
     implicitWidth: width
     implicitHeight: mainCard.implicitHeight
 
@@ -142,9 +146,9 @@ FocusScope {
         }
 
         if (event.key === Qt.Key_Slash) {
-            if (root.currentView === "history") {
-                historyView.focusSearch()
-            } else {
+            if (root.currentView === "memory") {
+                memoryView.focusSearch()
+            } else if (root.currentView === "main") {
                 customQuestionInput.forceActiveFocus()
             }
             event.accepted = true
@@ -168,7 +172,8 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") return 680
+            if (root.currentView === "memory") return 620
+            if (root.currentView === "history" || root.currentView === "profile") return 680
             return cardLayout.implicitHeight + Tokens.padding.medium * 2
         }
 

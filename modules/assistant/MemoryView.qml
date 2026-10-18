@@ -25,6 +25,7 @@ FocusScope {
     property string editingCardId: ""
     property string editingTopic: ""
     property string editingLinesText: ""
+    property string expandedCardId: ""
 
     Timer {
         id: searchDebounceTimer
@@ -135,8 +136,35 @@ FocusScope {
         return !!root.expandedStudyCards[String(cardId)]
     }
 
+    function jumpToCard(cardId) {
+        if (!cardId) return
+        const targetId = String(cardId)
+        root.statusFilter = "all"
+        root.selectedConcept = ""
+        root.searchQuery = ""
+        root.debouncedSearchQuery = ""
+        if (searchInput) searchInput.text = ""
+
+        root.expandedCardId = targetId
+
+        const updated = Object.assign({}, root.expandedStudyCards)
+        updated[targetId] = true
+        root.expandedStudyCards = updated
+
+        Qt.callLater(() => {
+            const list = root.filteredCards || []
+            for (let i = 0; i < list.length; i++) {
+                if (String(list[i].id) === targetId) {
+                    if (cardsListView) cardsListView.positionViewAtIndex(i, ListView.Beginning)
+                    break
+                }
+            }
+        })
+    }
+
     function startEditing(card) {
         if (!card) return
+        root.expandedCardId = String(card.id || "")
         root.editingCardId = String(card.id || "")
         root.editingTopic = card.topic || ""
         root.editingLinesText = (card.lines || []).join("\n")
@@ -146,6 +174,10 @@ FocusScope {
         root.editingCardId = ""
         root.editingTopic = ""
         root.editingLinesText = ""
+    }
+
+    function focusSearch() {
+        if (searchInput) searchInput.forceActiveFocus()
     }
 
     function saveEditing(cardId) {
@@ -250,7 +282,7 @@ FocusScope {
         return list.sort((a, b) => (b._ts || 0) - (a._ts || 0))
     }
 
-    readonly property bool isInChallengeMode: (Memory.activeChallenge !== null || Memory.isGeneratingChallenge || Memory.lastGradeResult !== null || Memory.challengeError.length > 0)
+    readonly property bool isInChallengeMode: (Memory.activeChallenge !== null || Memory.isGeneratingChallenge || Memory.isDailyGauntletLoading || Memory.lastGradeResult !== null || Memory.challengeError.length > 0 || Memory.dailyGauntletError.length > 0)
 
     readonly property var currentQuestions: {
         if (!Memory.activeChallenge) return []
@@ -288,7 +320,7 @@ FocusScope {
     // ─────────────────────────────────────────────────────────────
     ColumnLayout {
         anchors.fill: parent
-        spacing: 6
+        spacing: 10
 
         // ═════════════════════════════════════════════════════════
         // TOP HEADER
@@ -340,7 +372,9 @@ FocusScope {
                     }
 
                     StyledText {
-                        text: root.isInChallengeMode ? qsTr("Mastery Gauntlet") : qsTr("Knowledge & Mastery")
+                        text: root.isInChallengeMode 
+                            ? (Memory.activeChallenge && Memory.activeChallenge.is_daily_gauntlet ? qsTr("Daily Gauntlet") : qsTr("Mastery Gauntlet")) 
+                            : qsTr("Knowledge & Mastery")
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
                     }
@@ -357,7 +391,7 @@ FocusScope {
                     RowLayout {
                         id: statsRow
                         anchors.centerIn: parent
-                        spacing: 6
+                        spacing: 5
 
                         StyledText {
                             text: qsTr("%1 cards").arg(Memory.totalCount)
@@ -376,22 +410,63 @@ FocusScope {
                             font: Tokens.font.label.small
                             color: Colours.palette.m3onSurfaceVariant
                         }
-
-                        StyledText {
-                            text: "•"
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3outline
-                        }
-
-                        StyledText {
-                            text: qsTr("%1 concepts").arg(root.availableConcepts.length)
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3outline
-                        }
                     }
                 }
 
                 Item { Layout.fillWidth: true }
+
+                // Daily Gauntlet Action (Compact 28x28 button saving maximum header space)
+                IconButton {
+                    visible: !Memory.isDistilling && !root.isInChallengeMode
+                    icon: Memory.isDailyGauntletLoading ? "progress_activity" : "psychology_alt"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    type: IconButton.Tonal
+                    enabled: !Memory.isDailyGauntletLoading
+                    onClicked: {
+                        root.activeQuestionIndex = 0
+                        root.userAnswers = ({})
+                        Memory.startDailyGauntlet()
+                    }
+                }
+
+                // Knowledge Graph Sync Action
+                RowLayout {
+                    spacing: 4
+                    visible: Memory.isSyncingGraph && !root.isInChallengeMode
+
+                    MaterialIcon {
+                        text: "progress_activity"
+                        fontStyle: Tokens.font.icon.small
+                        color: Colours.palette.m3secondary
+
+                        RotationAnimation on rotation {
+                            from: 0
+                            to: 360
+                            duration: 1100
+                            loops: Animation.Infinite
+                            running: Memory.isSyncingGraph
+                        }
+                    }
+
+                    StyledText {
+                        text: qsTr("Mapping…")
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3secondary
+                    }
+                }
+
+                IconButton {
+                    visible: !Memory.isSyncingGraph && !Memory.isDistilling && !root.isInChallengeMode
+                    icon: "hub"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    type: IconButton.Tonal
+                    enabled: Memory.totalCount >= 2
+                    onClicked: Memory.syncGraph()
+                }
 
                 // Distill Actions
                 RowLayout {
@@ -425,6 +500,7 @@ FocusScope {
                     icon: "auto_awesome"
                     type: IconTextButton.Tonal
                     implicitHeight: 28
+                    horizontalPadding: Tokens.padding.small
                     onClicked: Memory.distill()
                 }
 
@@ -475,6 +551,63 @@ FocusScope {
         }
 
         // ═════════════════════════════════════════════════════════
+        // KNOWLEDGE GRAPH NOTIFICATIONS
+        // ═════════════════════════════════════════════════════════
+        StyledRect {
+            Layout.fillWidth: true
+            implicitHeight: 28
+            radius: Tokens.rounding.small
+            color: Qt.alpha(Colours.palette.m3secondary, 0.15)
+            visible: Memory.syncGraphMessage.length > 0 && !root.isInChallengeMode
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 4
+                spacing: 6
+
+                MaterialIcon {
+                    text: "hub"
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3secondary
+                }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: Memory.syncGraphMessage
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3onSurface
+                }
+            }
+        }
+
+        StyledRect {
+            Layout.fillWidth: true
+            implicitHeight: 28
+            radius: Tokens.rounding.small
+            color: Qt.alpha(Colours.palette.m3error, 0.15)
+            visible: Memory.syncGraphError.length > 0 && !root.isInChallengeMode
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 4
+                spacing: 6
+
+                MaterialIcon {
+                    text: "error"
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3error
+                }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: Memory.syncGraphError
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3error
+                }
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════
         // VIEW 1: CHALLENGE / GAUNTLET MODE (Multi-Question)
         // ═════════════════════════════════════════════════════════
         ColumnLayout {
@@ -491,7 +624,7 @@ FocusScope {
                 color: Qt.alpha(Colours.palette.m3error, 0.15)
                 border.width: 1
                 border.color: Colours.palette.m3error
-                visible: Memory.challengeError.length > 0
+                visible: (Memory.challengeError.length > 0 || Memory.dailyGauntletError.length > 0)
 
                 ColumnLayout {
                     id: errCol
@@ -515,7 +648,7 @@ FocusScope {
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: Memory.challengeError
+                        text: Memory.challengeError || Memory.dailyGauntletError
                         font: Tokens.font.body.small
                         color: Colours.palette.m3onSurface
                         wrapMode: Text.Wrap
@@ -538,7 +671,7 @@ FocusScope {
                 Layout.fillHeight: true
                 radius: Tokens.rounding.medium
                 color: Colours.palette.m3surfaceContainerLow
-                visible: Memory.isGeneratingChallenge
+                visible: Memory.isGeneratingChallenge || Memory.isDailyGauntletLoading
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -555,20 +688,20 @@ FocusScope {
                             to: 360
                             duration: 1000
                             loops: Animation.Infinite
-                            running: Memory.isGeneratingChallenge
+                            running: Memory.isGeneratingChallenge || Memory.isDailyGauntletLoading
                         }
                     }
 
                     StyledText {
                         Layout.alignment: Qt.AlignHCenter
-                        text: qsTr("Generating 3-Question Trial…")
+                        text: Memory.isDailyGauntletLoading ? qsTr("Crafting Daily Gauntlet…") : qsTr("Generating Mastery Assessment…")
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
                     }
 
                     StyledText {
                         Layout.alignment: Qt.AlignHCenter
-                        text: qsTr("QCM Concept Check • Bug Hunt • Edge Case")
+                        text: qsTr("Adaptive Concept Checks • Bug Hunts • Architectural Edge Cases")
                         font: Tokens.font.label.small
                         color: Colours.palette.m3outline
                     }
@@ -1107,18 +1240,18 @@ FocusScope {
         // ═════════════════════════════════════════════════════════
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 5
+            spacing: 8
             visible: !root.isInChallengeMode
 
             // Row 1: Search Bar & Segmented Status Capsule
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 8
 
                 // Search Box
                 StyledRect {
                     Layout.fillWidth: true
-                    implicitHeight: 30
+                    implicitHeight: 34
                     radius: Tokens.rounding.full
                     color: Colours.palette.m3surfaceContainerLowest
                     border.width: 1
@@ -1126,9 +1259,9 @@ FocusScope {
 
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 6
-                        spacing: 6
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 8
+                        spacing: 8
 
                         MaterialIcon {
                             text: "search"
@@ -1166,8 +1299,8 @@ FocusScope {
                             type: IconButton.Text
                             icon: "close"
                             font: Tokens.font.icon.small
-                            implicitWidth: 18
-                            implicitHeight: 18
+                            implicitWidth: 20
+                            implicitHeight: 20
                             onClicked: {
                                 searchInput.text = ""
                                 root.searchQuery = ""
@@ -1180,8 +1313,8 @@ FocusScope {
 
                 // Compact Segmented Status Capsule (Counts + Filter)
                 StyledRect {
-                    implicitHeight: 30
-                    implicitWidth: statusSegmentRow.implicitWidth + 6
+                    implicitHeight: 34
+                    implicitWidth: statusSegmentRow.implicitWidth + 8
                     radius: Tokens.rounding.full
                     color: Colours.palette.m3surfaceContainerLow
                     border.width: 1
@@ -1190,11 +1323,11 @@ FocusScope {
                     RowLayout {
                         id: statusSegmentRow
                         anchors.centerIn: parent
-                        spacing: 2
+                        spacing: 3
 
                         // All Segment
                         StyledRect {
-                            implicitHeight: 24
+                            implicitHeight: 26
                             implicitWidth: allText.implicitWidth + 14
                             radius: Tokens.rounding.full
                             color: root.statusFilter === "all" ? Colours.palette.m3primary : "transparent"
@@ -1216,12 +1349,12 @@ FocusScope {
 
                         // Learning Segment
                         StyledRect {
-                            implicitHeight: 24
+                            implicitHeight: 26
                             implicitWidth: learningRow.implicitWidth + 14
                             radius: Tokens.rounding.full
-                            color: root.statusFilter === "learning" ? Qt.alpha(Colours.palette.m3tertiary, 0.25) : "transparent"
+                            color: root.statusFilter === "learning" ? Qt.alpha(Qt.color("#fbbf24"), 0.2) : "transparent"
                             border.width: root.statusFilter === "learning" ? 1 : 0
-                            border.color: Colours.palette.m3tertiary
+                            border.color: "#fbbf24"
 
                             RowLayout {
                                 id: learningRow
@@ -1230,13 +1363,13 @@ FocusScope {
 
                                 Rectangle {
                                     width: 7; height: 7; radius: 3.5
-                                    color: Colours.palette.m3tertiary
+                                    color: "#fbbf24"
                                 }
 
                                 StyledText {
                                     text: String(Memory.learningCount)
                                     font: Tokens.font.label.small
-                                    color: root.statusFilter === "learning" ? Colours.palette.m3tertiary : Colours.palette.m3onSurfaceVariant
+                                    color: root.statusFilter === "learning" ? "#fbbf24" : Colours.palette.m3onSurfaceVariant
                                 }
                             }
 
@@ -1249,12 +1382,12 @@ FocusScope {
 
                         // Mastered Segment
                         StyledRect {
-                            implicitHeight: 24
+                            implicitHeight: 26
                             implicitWidth: masteredRow.implicitWidth + 14
                             radius: Tokens.rounding.full
-                            color: root.statusFilter === "mastered" ? Qt.alpha(Colours.palette.m3primary, 0.25) : "transparent"
+                            color: root.statusFilter === "mastered" ? Qt.alpha(Qt.color("#4ade80"), 0.2) : "transparent"
                             border.width: root.statusFilter === "mastered" ? 1 : 0
-                            border.color: Colours.palette.m3primary
+                            border.color: "#4ade80"
 
                             RowLayout {
                                 id: masteredRow
@@ -1263,13 +1396,13 @@ FocusScope {
 
                                 Rectangle {
                                     width: 7; height: 7; radius: 3.5
-                                    color: Colours.palette.m3primary
+                                    color: "#4ade80"
                                 }
 
                                 StyledText {
                                     text: String(Memory.masteredCount)
                                     font: Tokens.font.label.small
-                                    color: root.statusFilter === "mastered" ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                                    color: root.statusFilter === "mastered" ? "#4ade80" : Colours.palette.m3onSurfaceVariant
                                 }
                             }
 
@@ -1286,7 +1419,7 @@ FocusScope {
             // Row 2: Concepts / Topics Filter Strip (Horizontal scrolling chips)
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 8
                 visible: root.filterChips.length > 1
 
                 MaterialIcon {
@@ -1298,9 +1431,9 @@ FocusScope {
                 ListView {
                     id: conceptListView
                     Layout.fillWidth: true
-                    implicitHeight: 26
+                    implicitHeight: 30
                     orientation: ListView.Horizontal
-                    spacing: 4
+                    spacing: 6
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
 
@@ -1313,7 +1446,7 @@ FocusScope {
 
                         readonly property bool isSelected: (modelData.tag === "" && root.selectedConcept === "") || (modelData.tag !== "" && root.selectedConcept === modelData.tag)
 
-                        implicitHeight: 24
+                        implicitHeight: 26
                         implicitWidth: chipInner.implicitWidth + 14
                         radius: Tokens.rounding.full
                         color: isSelected
@@ -1446,17 +1579,23 @@ FocusScope {
                 clip: true
                 spacing: 6
                 boundsBehavior: Flickable.StopAtBounds
-                cacheBuffer: 300
+                cacheBuffer: 600
                 reuseItems: true
                 model: root.filteredCards
                 visible: root.filteredCards.length > 0
 
+                StyledScrollBar.vertical: StyledScrollBar {
+                    flickable: cardsListView
+                }
+
                 delegate: Item {
                     id: cardItem
                     required property var modelData
+                    property bool showArchived: false
 
                     width: ListView.view ? ListView.view.width : parent ? parent.width : 0
                     implicitHeight: cardRect.implicitHeight
+                    height: cardRect.implicitHeight
 
                     readonly property var cardData: (cardItem && cardItem.modelData) ? cardItem.modelData : ({})
                     readonly property var cardPrimer: cardData ? (cardData.primer || null) : null
@@ -1466,43 +1605,154 @@ FocusScope {
                     readonly property bool hasFailFeedback: !!(cardData && cardData.last_fail_feedback && cardData.last_fail_feedback.length > 0)
                     readonly property bool isStudyOpen: root.isStudyOpen(cardId)
                     readonly property bool isEnrichingThis: (Memory.isEnriching && Memory.enrichingCardId === cardId)
+                    readonly property bool expanded: (cardId.length > 0 && root.expandedCardId === cardId) || isEditing
+                    readonly property bool isReviewDue: {
+                        if (!cardData) return false
+                        const lr = cardData.last_reviewed || cardData.updated || cardData.created
+                        if (!lr) return false
+                        const t = Date.parse(lr)
+                        if (isNaN(t) || t <= 0) return false
+                        const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
+                        return (Date.now() - t) > FOURTEEN_DAYS_MS
+                    }
+                    readonly property bool isInjectedInPrompt: {
+                        const list = Memory.lastInjectedCardIds || []
+                        return list.indexOf(cardId) !== -1
+                    }
 
                     StyledRect {
                         id: cardRect
+                        anchors.top: parent.top
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        implicitHeight: cardContent.implicitHeight + 16
+                        implicitHeight: cardContent.implicitHeight + 18
                         radius: Tokens.rounding.medium
                         color: Colours.palette.m3surfaceContainerLow
-                        border.width: 1
-                        border.color: cardItem.isMastered ? Qt.alpha(Colours.palette.m3primary, 0.4) : Colours.palette.m3outlineVariant
+                        clip: true
+
+                        border.width: (cardItem.expanded || cardItem.isInjectedInPrompt) ? 1.5 : 1
+                        border.color: {
+                            if (cardItem.isInjectedInPrompt) return Colours.palette.m3secondary
+                            if (cardItem.expanded || cardHover.hovered) return Qt.alpha(Colours.palette.m3primary, 0.5)
+                            if (cardItem.isMastered) return Qt.alpha(Qt.color("#4ade80"), 0.35)
+                            return Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                        }
+
+                        Behavior on border.color {
+                            ColorAnimation { duration: Tokens.anim.durations.expressiveDefaultEffects }
+                        }
+
+                        Behavior on implicitHeight {
+                            Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
+                        }
+
+                        HoverHandler {
+                            id: cardHover
+                        }
+
+                        MouseArea {
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 38
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                const sid = cardItem.cardId
+                                if (sid) {
+                                    root.expandedCardId = (root.expandedCardId === sid) ? "" : sid
+                                }
+                            }
+                        }
 
                         ColumnLayout {
                             id: cardContent
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 8
-                            spacing: 4
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 14
+                            anchors.topMargin: 9
+                            anchors.bottomMargin: 9
+                            spacing: 8
 
-                            // Header row: Status Dot, Topic, Actions
+                            // Tier 1: Status Dot, Topic Title, Badges, and Timestamp
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 8
 
+                                // Status Dot: Mastered (Emerald Green #4ade80) vs Learning (Warm Amber #fbbf24)
                                 Rectangle {
-                                    width: 8
-                                    height: 8
-                                    radius: 4
-                                    color: cardItem.isMastered ? Colours.palette.m3primary : Colours.palette.m3tertiary
+                                    width: 7
+                                    height: 7
+                                    radius: 3.5
+                                    color: cardItem.isMastered ? "#4ade80" : "#fbbf24"
                                 }
 
                                 StyledText {
                                     Layout.fillWidth: true
                                     text: cardItem.cardData.topic || qsTr("Untitled Card")
-                                    font: Tokens.font.label.large
+                                    font: Tokens.font.body.medium
                                     color: Colours.palette.m3onSurface
                                     elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+
+                                // Active In-Context Badge (HUD Prompt Injection)
+                                StyledRect {
+                                    visible: cardItem.isInjectedInPrompt
+                                    implicitWidth: injectedRow.implicitWidth + 10
+                                    implicitHeight: 20
+                                    radius: Tokens.rounding.full
+                                    color: Qt.alpha(Colours.palette.m3secondary, 0.16)
+                                    border.width: 1
+                                    border.color: Colours.palette.m3secondary
+
+                                    RowLayout {
+                                        id: injectedRow
+                                        anchors.centerIn: parent
+                                        spacing: 4
+
+                                        MaterialIcon {
+                                            text: "psychology"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3secondary
+                                        }
+
+                                        StyledText {
+                                            text: qsTr("In Context")
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3secondary
+                                        }
+                                    }
+                                }
+
+                                // Spaced Repetition: Review Due Badge (> 14 days)
+                                StyledRect {
+                                    visible: cardItem.isReviewDue
+                                    implicitWidth: reviewDueRow.implicitWidth + 10
+                                    implicitHeight: 20
+                                    radius: Tokens.rounding.full
+                                    color: Qt.alpha(Colours.palette.m3tertiary, 0.16)
+                                    border.width: 1
+                                    border.color: Colours.palette.m3tertiary
+
+                                    RowLayout {
+                                        id: reviewDueRow
+                                        anchors.centerIn: parent
+                                        spacing: 4
+
+                                        MaterialIcon {
+                                            text: "schedule"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3tertiary
+                                        }
+
+                                        StyledText {
+                                            text: qsTr("Review Due")
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3tertiary
+                                        }
+                                    }
                                 }
 
                                 StyledText {
@@ -1511,25 +1761,115 @@ FocusScope {
                                     color: Colours.palette.m3outline
                                 }
 
-                                // Study Primer Button
-                                IconTextButton {
-                                    text: cardItem.isStudyOpen ? qsTr("Close") : qsTr("Primer")
-                                    icon: cardItem.isStudyOpen ? "expand_less" : "menu_book"
-                                    type: cardItem.isStudyOpen ? IconTextButton.Filled : IconTextButton.Tonal
-                                    onClicked: root.toggleStudy(cardItem.cardId)
+                                // Expand Chevron
+                                MaterialIcon {
+                                    text: cardItem.expanded ? "expand_less" : "expand_more"
+                                    fontStyle: Tokens.font.icon.small
+                                    color: cardItem.expanded ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                                }
+                            }
+
+                            // Expanded Content (Collapsible Details)
+                            ColumnLayout {
+                                id: cardDetails
+                                Layout.fillWidth: true
+                                visible: cardItem.expanded
+                                spacing: 10
+
+                                // Divider Line
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
                                 }
 
-                                // Trial Gauntlet Button
-                                IconTextButton {
-                                    text: qsTr("Trial")
-                                    icon: "psychology_alt"
-                                    type: IconTextButton.Tonal
-                                    onClicked: {
-                                        root.activeQuestionIndex = 0
-                                        root.userAnswers = ({})
-                                        Memory.startChallenge(cardItem.cardId)
+                            // Tier 2: Primer Status Badge, Tag Chips, and Subtle Management Icons
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                StyledRect {
+                                    implicitWidth: primerTagRow.implicitWidth + 10
+                                    implicitHeight: 22
+                                    radius: Tokens.rounding.full
+                                    color: cardItem.cardPrimer
+                                        ? Qt.alpha(Colours.palette.m3primary, 0.12)
+                                        : Colours.palette.m3surfaceContainerHigh
+
+                                    RowLayout {
+                                        id: primerTagRow
+                                        anchors.centerIn: parent
+                                        spacing: 4
+
+                                        MaterialIcon {
+                                            text: cardItem.cardPrimer ? "auto_awesome" : "notes"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: cardItem.cardPrimer ? Colours.palette.m3primary : Colours.palette.m3outline
+                                        }
+
+                                        StyledText {
+                                            text: cardItem.cardPrimer ? qsTr("Primer Ready") : qsTr("Raw Notes")
+                                            font: Tokens.font.label.small
+                                            color: cardItem.cardPrimer ? Colours.palette.m3primary : Colours.palette.m3outline
+                                        }
                                     }
                                 }
+
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    visible: !cardItem.isEditing && (cardItem.cardData.tags || []).length > 0
+
+                                    Repeater {
+                                        model: cardItem.cardData.tags || []
+
+                                        delegate: StyledRect {
+                                            id: cardTagChip
+                                            required property var modelData
+                                            readonly property string tagStr: String(modelData).toLowerCase()
+                                            readonly property bool isTagSelected: root.selectedConcept === tagStr
+
+                                            implicitWidth: tagRow.implicitWidth + 10
+                                            implicitHeight: 22
+                                            radius: Tokens.rounding.full
+                                            color: isTagSelected
+                                                ? Colours.palette.m3secondaryContainer
+                                                : (tagMouse.containsMouse ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
+                                            border.width: isTagSelected ? 1 : 0
+                                            border.color: Colours.palette.m3secondary
+
+                                            RowLayout {
+                                                id: tagRow
+                                                anchors.centerIn: parent
+                                                spacing: 3
+
+                                                StyledText {
+                                                    text: "#" + String(cardTagChip.modelData)
+                                                    font: Tokens.font.label.small
+                                                    color: cardTagChip.isTagSelected
+                                                        ? Colours.palette.m3onSecondaryContainer
+                                                        : Colours.palette.m3outline
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: tagMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (root.selectedConcept === cardTagChip.tagStr) {
+                                                        root.selectedConcept = ""
+                                                    } else {
+                                                        root.selectedConcept = cardTagChip.tagStr
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
 
                                 IconButton {
                                     type: IconButton.Text
@@ -1553,17 +1893,17 @@ FocusScope {
                             // Last Fail Feedback Alert (if present)
                             StyledRect {
                                 Layout.fillWidth: true
-                                implicitHeight: failRow.implicitHeight + 8
+                                implicitHeight: failRow.implicitHeight + 12
                                 radius: Tokens.rounding.small
-                                color: Qt.alpha(Colours.palette.m3error, 0.12)
+                                color: Qt.alpha(Colours.palette.m3error, 0.1)
                                 border.width: 1
-                                border.color: Qt.alpha(Colours.palette.m3error, 0.3)
+                                border.color: Qt.alpha(Colours.palette.m3error, 0.25)
                                 visible: cardItem.hasFailFeedback && !cardItem.isMastered
 
                                 RowLayout {
                                     id: failRow
                                     anchors.fill: parent
-                                    anchors.margins: 4
+                                    anchors.margins: 8
                                     spacing: 6
 
                                     MaterialIcon {
@@ -1581,10 +1921,67 @@ FocusScope {
                                 }
                             }
 
-                            // Normal display: Single-block bullet lines (fast, selectable, continuous drag)
+                            // Mastered Invariant Highlight Box (for Mastered Cards)
+                            StyledRect {
+                                Layout.fillWidth: true
+                                implicitHeight: masterCol.implicitHeight + 16
+                                radius: Tokens.rounding.small
+                                color: Qt.alpha(Colours.palette.m3primary, 0.08)
+                                border.width: 1
+                                border.color: Qt.alpha(Colours.palette.m3primary, 0.2)
+                                visible: cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen
+
+                                ColumnLayout {
+                                    id: masterCol
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 6
+
+                                    RowLayout {
+                                        spacing: 6
+                                        MaterialIcon {
+                                            text: "verified"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3primary
+                                        }
+                                        StyledText {
+                                            text: qsTr("Distilled Invariant:")
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3primary
+                                        }
+                                    }
+
+                                    SelectableText {
+                                        Layout.fillWidth: true
+                                        text: {
+                                            const lines = cardItem.cardData ? (cardItem.cardData.lines || []) : []
+                                            return lines.join("\n")
+                                        }
+                                        color: Colours.palette.m3onSurface
+                                    }
+
+                                    TextButton {
+                                        visible: (cardItem.cardData.archived_lines || []).length > 0
+                                        text: cardItem.showArchived
+                                            ? qsTr("Hide %1 archived notes ▴").arg(cardItem.cardData.archived_lines.length)
+                                            : qsTr("Show %1 archived notes ▾").arg(cardItem.cardData.archived_lines.length)
+                                        type: TextButton.Text
+                                        onClicked: cardItem.showArchived = !cardItem.showArchived
+                                    }
+
+                                    SelectableText {
+                                        visible: cardItem.showArchived
+                                        Layout.fillWidth: true
+                                        text: (cardItem.cardData.archived_lines || []).map(l => "•  " + l).join("\n")
+                                        color: Colours.palette.m3outline
+                                    }
+                                }
+                            }
+
+                            // Learning Notes Block (for Learning Cards)
                             SelectableText {
                                 Layout.fillWidth: true
-                                visible: !cardItem.isEditing && !cardItem.isStudyOpen
+                                visible: !cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen
                                 text: {
                                     const lines = cardItem.cardData ? (cardItem.cardData.lines || []) : []
                                     if (lines.length === 0) return ""
@@ -1593,57 +1990,186 @@ FocusScope {
                                 color: Colours.palette.m3onSurfaceVariant
                             }
 
-                            // Tags Flow
-                            Flow {
+                            // Personal Traps & Caveats Block
+                            StyledRect {
                                 Layout.fillWidth: true
-                                spacing: 4
-                                visible: !cardItem.isEditing && (cardItem.cardData.tags || []).length > 0
+                                implicitHeight: trapsCol.implicitHeight + 20
+                                radius: Tokens.rounding.small
+                                color: Qt.alpha(Colours.palette.m3error, 0.08)
+                                border.width: 1
+                                border.color: Qt.alpha(Colours.palette.m3error, 0.25)
+                                visible: (cardItem.cardData.personal_traps || []).length > 0 && !cardItem.isEditing
 
-                                Repeater {
-                                    model: cardItem.cardData.tags || []
+                                ColumnLayout {
+                                    id: trapsCol
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 6
 
-                                    delegate: StyledRect {
-                                        id: cardTagChip
-                                        required property var modelData
-                                        readonly property string tagStr: String(modelData).toLowerCase()
-                                        readonly property bool isTagSelected: root.selectedConcept === tagStr
+                                    RowLayout {
+                                        spacing: 6
+                                        MaterialIcon {
+                                            text: "crisis_alert"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3error
+                                        }
+                                        StyledText {
+                                            text: qsTr("Personal Traps & Caveats (%1):").arg(cardItem.cardData.personal_traps ? cardItem.cardData.personal_traps.length : 0)
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3error
+                                        }
+                                    }
 
-                                        implicitWidth: tagRow.implicitWidth + 10
-                                        implicitHeight: 20
-                                        radius: Tokens.rounding.full
-                                        color: isTagSelected
-                                            ? Colours.palette.m3secondaryContainer
-                                            : (tagMouse.containsMouse ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
-                                        border.width: isTagSelected ? 1 : 0
-                                        border.color: Colours.palette.m3secondary
+                                    Repeater {
+                                        model: cardItem.cardData.personal_traps || []
 
                                         RowLayout {
-                                            id: tagRow
-                                            anchors.centerIn: parent
-                                            spacing: 3
+                                            id: trapRowItem
+                                            required property string modelData
+                                            required property int index
+                                            Layout.fillWidth: true
+                                            spacing: 6
 
-                                            StyledText {
-                                                text: "#" + String(cardTagChip.modelData)
-                                                font: Tokens.font.label.small
-                                                color: cardTagChip.isTagSelected
-                                                    ? Colours.palette.m3onSecondaryContainer
-                                                    : Colours.palette.m3outline
+                                            MaterialIcon {
+                                                text: "shield_with_heart"
+                                                fontStyle: Tokens.font.icon.small
+                                                color: Colours.palette.m3error
+                                            }
+
+                                            SelectableText {
+                                                Layout.fillWidth: true
+                                                text: trapRowItem.modelData
+                                                color: Colours.palette.m3onSurface
+                                            }
+
+                                            IconButton {
+                                                type: IconButton.Text
+                                                icon: "close"
+                                                font: Tokens.font.icon.small
+                                                implicitWidth: 20
+                                                implicitHeight: 20
+                                                onClicked: Memory.removeTrap(cardItem.cardId, trapRowItem.modelData)
                                             }
                                         }
+                                    }
+                                }
+                            }
 
-                                        MouseArea {
-                                            id: tagMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (root.selectedConcept === cardTagChip.tagStr) {
-                                                    root.selectedConcept = ""
-                                                } else {
-                                                    root.selectedConcept = cardTagChip.tagStr
+                            // Connected Knowledge Graph Relations
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                visible: (cardItem.cardData.relations || []).length > 0 && !cardItem.isEditing
+
+                                RowLayout {
+                                    spacing: 6
+                                    MaterialIcon {
+                                        text: "hub"
+                                        fontStyle: Tokens.font.icon.small
+                                        color: Colours.palette.m3secondary
+                                    }
+                                    StyledText {
+                                        text: qsTr("Connected Concepts:")
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3secondary
+                                    }
+                                }
+
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Repeater {
+                                        model: cardItem.cardData.relations || []
+
+                                        StyledRect {
+                                            id: relChip
+                                            required property var modelData
+
+                                            readonly property string relType: String(modelData.type || "related")
+                                            readonly property color relColor: {
+                                                if (relType.startsWith("prereq")) return Colours.palette.m3tertiary
+                                                if (relType.startsWith("evol")) return Colours.palette.m3secondary
+                                                return Colours.palette.m3primary
+                                            }
+                                            readonly property string relIcon: {
+                                                if (relType === "prerequisite") return "arrow_upward"
+                                                if (relType === "prerequisite_for") return "arrow_downward"
+                                                if (relType === "evolution" || relType === "evolved_to") return "trending_up"
+                                                return "polyline"
+                                            }
+                                            readonly property string relPrefix: {
+                                                if (relType === "prerequisite") return "Prereq: "
+                                                if (relType === "prerequisite_for") return "Enables: "
+                                                if (relType === "evolution") return "Evolved from: "
+                                                if (relType === "evolved_to") return "Evolved to: "
+                                                return ""
+                                            }
+
+                                            implicitHeight: 26
+                                            implicitWidth: relContentRow.implicitWidth + 16
+                                            radius: Tokens.rounding.full
+                                            color: relChipMouse.containsMouse ? Qt.alpha(relColor, 0.22) : Qt.alpha(relColor, 0.10)
+                                            border.width: 1
+                                            border.color: Qt.alpha(relColor, relChipMouse.containsMouse ? 0.6 : 0.25)
+
+                                            RowLayout {
+                                                id: relContentRow
+                                                anchors.centerIn: parent
+                                                spacing: 6
+
+                                                MaterialIcon {
+                                                    text: relChip.relIcon
+                                                    fontStyle: Tokens.font.icon.small
+                                                    color: relChip.relColor
+                                                }
+
+                                                StyledText {
+                                                    text: relChip.relPrefix + (relChip.modelData.target_topic || "Related")
+                                                    font: Tokens.font.label.small
+                                                    color: Colours.palette.m3onSurface
                                                 }
                                             }
+
+                                            MouseArea {
+                                                id: relChipMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.jumpToCard(relChip.modelData.target_id)
+                                            }
                                         }
+                                    }
+                                }
+                            }
+
+                            // Card Action Dock (Bottom Bar)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: !cardItem.isEditing
+
+                                IconTextButton {
+                                    text: cardItem.isStudyOpen
+                                        ? qsTr("Close Primer")
+                                        : (cardItem.cardPrimer ? qsTr("Study Primer") : qsTr("Build Primer ✨"))
+                                    icon: cardItem.isStudyOpen ? "expand_less" : (cardItem.cardPrimer ? "menu_book" : "auto_awesome")
+                                    type: cardItem.isStudyOpen ? IconTextButton.Filled : IconTextButton.Tonal
+                                    implicitHeight: 32
+                                    onClicked: root.toggleStudy(cardItem.cardId)
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                IconTextButton {
+                                    text: cardItem.isMastered ? qsTr("Practice Trial ⚔️") : qsTr("Test Mastery ⚔️")
+                                    icon: "psychology_alt"
+                                    type: IconTextButton.Filled
+                                    implicitHeight: 32
+                                    onClicked: {
+                                        root.activeQuestionIndex = 0
+                                        root.userAnswers = ({})
+                                        Memory.startChallenge(cardItem.cardId)
                                     }
                                 }
                             }
@@ -1665,6 +2191,7 @@ FocusScope {
                             }
                         }
                     }
+                    }
 
                     // ═════════════════════════════════════════════════
                     // Component: Study Primer Drawer (Lazy Loaded)
@@ -1679,13 +2206,13 @@ FocusScope {
                             // If card already has an enriched primer:
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 10
                                 visible: !!cardItem.cardPrimer
 
                                 // 1. Mental Model
                                 StyledRect {
                                     Layout.fillWidth: true
-                                    implicitHeight: mmCol.implicitHeight + 10
+                                    implicitHeight: mmCol.implicitHeight + 20
                                     radius: Tokens.rounding.small
                                     color: Qt.alpha(Colours.palette.m3primary, 0.08)
                                     border.width: 1
@@ -1694,11 +2221,11 @@ FocusScope {
                                     ColumnLayout {
                                         id: mmCol
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        spacing: 2
+                                        anchors.margins: 10
+                                        spacing: 6
 
                                         RowLayout {
-                                            spacing: 4
+                                            spacing: 6
                                             MaterialIcon { text: "psychology"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
                                             StyledText { text: qsTr("1. The Mental Model (Underlying Mechanics):"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
                                         }
@@ -1714,18 +2241,18 @@ FocusScope {
                                 // 2. Golden Rules / Invariants
                                 StyledRect {
                                     Layout.fillWidth: true
-                                    implicitHeight: rulesCol.implicitHeight + 10
+                                    implicitHeight: rulesCol.implicitHeight + 20
                                     radius: Tokens.rounding.small
                                     color: Colours.palette.m3surfaceContainerLowest
 
                                     ColumnLayout {
                                         id: rulesCol
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        spacing: 2
+                                        anchors.margins: 10
+                                        spacing: 6
 
                                         RowLayout {
-                                            spacing: 4
+                                            spacing: 6
                                             MaterialIcon { text: "rule"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
                                             StyledText { text: qsTr("2. Golden Rules / Invariants:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
                                         }
@@ -1736,7 +2263,7 @@ FocusScope {
                                             delegate: RowLayout {
                                                 required property var modelData
                                                 Layout.fillWidth: true
-                                                spacing: 4
+                                                spacing: 6
 
                                                 StyledText { text: "⚡"; font: Tokens.font.body.small }
                                                 SelectableText {
@@ -1753,7 +2280,7 @@ FocusScope {
                                 StyledRect {
                                     visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.pitfall && cardItem.cardPrimer.pitfall.length > 0)
                                     Layout.fillWidth: true
-                                    implicitHeight: pitCol.implicitHeight + 10
+                                    implicitHeight: pitCol.implicitHeight + 20
                                     radius: Tokens.rounding.small
                                     color: Qt.alpha(Colours.palette.m3error, 0.08)
                                     border.width: 1
@@ -1762,11 +2289,11 @@ FocusScope {
                                     ColumnLayout {
                                         id: pitCol
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        spacing: 2
+                                        anchors.margins: 10
+                                        spacing: 6
 
                                         RowLayout {
-                                            spacing: 4
+                                            spacing: 6
                                             MaterialIcon { text: "warning"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3error }
                                             StyledText { text: qsTr("3. Deadly Pitfall / Edge Case:"); font: Tokens.font.label.small; color: Colours.palette.m3error }
                                         }
@@ -1783,28 +2310,44 @@ FocusScope {
                                 StyledRect {
                                     visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.snippet && cardItem.cardPrimer.snippet.length > 0)
                                     Layout.fillWidth: true
-                                    implicitHeight: snipCol.implicitHeight + 10
+                                    implicitHeight: snipCol.implicitHeight + 22
                                     radius: Tokens.rounding.small
-                                    color: Colours.palette.m3surfaceContainerLowest
+                                    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.95)
                                     border.width: 1
-                                    border.color: Colours.palette.m3outlineVariant
+                                    border.color: Qt.alpha(Colours.palette.m3outline, 0.3)
 
                                     ColumnLayout {
                                         id: snipCol
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        spacing: 2
+                                        anchors.margins: 10
+                                        spacing: 6
 
                                         RowLayout {
-                                            spacing: 4
-                                            MaterialIcon { text: "code"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3outline }
-                                            StyledText { text: qsTr("4. Canonical Code Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3outline }
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            MaterialIcon { text: "terminal"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
+                                            StyledText { text: qsTr("4. Canonical Code Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
+                                            Item { Layout.fillWidth: true }
+                                            IconButton {
+                                                type: IconButton.Text
+                                                icon: "content_copy"
+                                                font: Tokens.font.icon.small
+                                                implicitWidth: 24
+                                                implicitHeight: 24
+                                                onClicked: {
+                                                    if (cardItem.cardPrimer && cardItem.cardPrimer.snippet) {
+                                                        Quickshell.clipboardText = cardItem.cardPrimer.snippet
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         SelectableText {
                                             Layout.fillWidth: true
                                             text: cardItem.cardPrimer ? String(cardItem.cardPrimer.snippet || "") : ""
                                             textFormat: TextEdit.MarkdownText
+                                            font.family: "monospace"
+                                            font.pointSize: Tokens.font.body.small.pointSize - 0.5
                                             color: Colours.palette.m3onSurface
                                         }
                                     }
@@ -1814,7 +2357,7 @@ FocusScope {
                                 StyledRect {
                                     visible: !!(cardItem.cardPrimer && cardItem.cardPrimer.protocol_flow && cardItem.cardPrimer.protocol_flow.length > 0)
                                     Layout.fillWidth: true
-                                    implicitHeight: protoCol.implicitHeight + 10
+                                    implicitHeight: protoCol.implicitHeight + 20
                                     radius: Tokens.rounding.small
                                     color: Qt.alpha(Colours.palette.m3tertiary, 0.08)
                                     border.width: 1
@@ -1823,11 +2366,11 @@ FocusScope {
                                     ColumnLayout {
                                         id: protoCol
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        spacing: 4
+                                        anchors.margins: 10
+                                        spacing: 6
 
                                         RowLayout {
-                                            spacing: 4
+                                            spacing: 6
                                             MaterialIcon { text: "format_list_numbered"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3tertiary }
                                             StyledText { text: qsTr("4. Actionable Execution Protocol:"); font: Tokens.font.label.small; color: Colours.palette.m3tertiary }
                                         }
@@ -1843,7 +2386,7 @@ FocusScope {
 
                                                 StyledRect {
                                                     implicitWidth: stepBadge.implicitWidth + 8
-                                                    implicitHeight: 18
+                                                    implicitHeight: 20
                                                     radius: Tokens.rounding.full
                                                     color: Colours.palette.m3tertiaryContainer
 
@@ -1869,13 +2412,14 @@ FocusScope {
                                 // Actions: Deepen again or jump to test
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 6
+                                    spacing: 8
 
                                     IconTextButton {
                                         enabled: !cardItem.isEnrichingThis
                                         text: cardItem.isEnrichingThis ? qsTr("Refreshing…") : qsTr("Refresh Primer")
                                         icon: cardItem.isEnrichingThis ? "progress_activity" : "refresh"
                                         type: IconTextButton.Tonal
+                                        implicitHeight: 32
                                         onClicked: Memory.enrichCard(cardItem.cardId)
                                     }
 
@@ -1885,6 +2429,7 @@ FocusScope {
                                         text: qsTr("Ready? Test Knowledge ⚔️")
                                         icon: "psychology_alt"
                                         type: IconTextButton.Filled
+                                        implicitHeight: 32
                                         onClicked: {
                                             root.activeQuestionIndex = 0
                                             root.userAnswers = ({})
@@ -1898,7 +2443,7 @@ FocusScope {
                             StyledRect {
                                 visible: !cardItem.cardPrimer
                                 Layout.fillWidth: true
-                                implicitHeight: unEnrichedCol.implicitHeight + 12
+                                implicitHeight: unEnrichedCol.implicitHeight + 24
                                 radius: Tokens.rounding.small
                                 color: Colours.palette.m3surfaceContainerLowest
                                 border.width: 1
@@ -1907,8 +2452,8 @@ FocusScope {
                                 ColumnLayout {
                                     id: unEnrichedCol
                                     anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 6
+                                    anchors.margins: 12
+                                    spacing: 8
 
                                     StyledText {
                                         Layout.fillWidth: true
@@ -1923,6 +2468,7 @@ FocusScope {
                                         text: cardItem.isEnrichingThis ? qsTr("Synthesizing Deep Primer…") : qsTr("✨ Complete Knowledge (Build Primer)")
                                         icon: cardItem.isEnrichingThis ? "progress_activity" : "auto_awesome"
                                         type: IconTextButton.Filled
+                                        implicitHeight: 32
                                         onClicked: Memory.enrichCard(cardItem.cardId)
                                     }
                                 }
@@ -1938,11 +2484,11 @@ FocusScope {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 4
+                            spacing: 8
 
                             StyledRect {
                                 Layout.fillWidth: true
-                                implicitHeight: Math.max(70, editArea.implicitHeight + 8)
+                                implicitHeight: Math.max(90, editArea.implicitHeight + 16)
                                 radius: Tokens.rounding.small
                                 color: Colours.palette.m3surfaceContainerLowest
                                 border.width: 1
@@ -1950,7 +2496,7 @@ FocusScope {
 
                                 Flickable {
                                     anchors.fill: parent
-                                    anchors.margins: 4
+                                    anchors.margins: 8
                                     contentWidth: width
                                     contentHeight: editArea.implicitHeight
                                     clip: true
@@ -1973,13 +2519,14 @@ FocusScope {
 
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 8
 
                                 Item { Layout.fillWidth: true }
 
                                 TextButton {
                                     text: qsTr("Cancel")
                                     type: TextButton.Tonal
+                                    implicitHeight: 32
                                     onClicked: root.cancelEditing()
                                 }
 
@@ -1987,6 +2534,7 @@ FocusScope {
                                     text: qsTr("Save")
                                     icon: "check"
                                     type: IconTextButton.Filled
+                                    implicitHeight: 32
                                     onClicked: root.saveEditing(cardItem.cardId)
                                 }
                             }

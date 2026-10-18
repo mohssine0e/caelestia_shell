@@ -778,6 +778,7 @@ Singleton {
                                 }
                             }
                             root.history = updated
+                            root.saveHistory()
                         }
                         if (msg.proposed_profile) {
                             root.proposedProfile = msg.proposed_profile
@@ -838,76 +839,6 @@ Singleton {
         def.last_updated = new Date().toISOString().slice(0, 10)
         root.saveProfile(def)
         root.proposedProfile = null
-    }
-
-    // ── Starred Concept Challenge (Active Recall) ─────────────────
-    property var challengeCache: ({})
-    property bool isChallenging: false
-    property string activeChallengeItemId: ""
-    property int challengeCooldownSec: 0
-
-    Timer {
-        id: challengeCooldownTimer
-        interval: 1000
-        repeat: true
-        running: root.challengeCooldownSec > 0
-        onTriggered: {
-            if (root.challengeCooldownSec > 0) {
-                root.challengeCooldownSec -= 1
-            }
-        }
-    }
-
-    Process {
-        id: challengeProc
-        stdout: SplitParser {
-            onRead: data => {
-                const line = data.trim()
-                if (!line) return
-                try {
-                    const msg = JSON.parse(line)
-                    if (msg.type === "challenge_done") {
-                        root.isChallenging = false
-                        root.activeChallengeItemId = ""
-                        const cache = Object.assign({}, root.challengeCache)
-                        cache[msg.item_id] = {
-                            question: msg.question,
-                            hint: msg.hint,
-                            solution: msg.solution
-                        }
-                        root.challengeCache = cache
-                        root.challengeCooldownSec = 15
-                    } else if (msg.type === "error") {
-                        root.isChallenging = false
-                        root.activeChallengeItemId = ""
-                    }
-                } catch (e) {
-                    root.isChallenging = false
-                    root.activeChallengeItemId = ""
-                }
-            }
-        }
-        onExited: {
-            root.isChallenging = false
-            root.activeChallengeItemId = ""
-        }
-    }
-
-    function requestChallenge(item) {
-        if (!item || !item.id) return
-        if (root.challengeCache[String(item.id)]) return
-        if (root.isChallenging) return
-        if (root.challengeCooldownSec > 0) return
-
-        root.isChallenging = true
-        root.activeChallengeItemId = String(item.id)
-
-        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
-        challengeProc.command = [
-            "python3", scriptPath, "challenge",
-            JSON.stringify(item)
-        ]
-        challengeProc.running = true
     }
 
     function runAction(action, customPrompt) {

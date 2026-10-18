@@ -8,6 +8,7 @@ Strictly decoupled: Pure Python 3 standard library.
 import sys
 import os
 import json
+import ast
 import re
 import time
 import urllib.request
@@ -64,6 +65,10 @@ CODE_TOKEN_PATTERN = re.compile(
     r')'
 )
 
+WORD_PATTERN = re.compile(r'[a-zA-Z0-9_]+')
+JSON_CLEAN_PATTERN = re.compile(r'```(?:json)?\s*(.*?)\s*```', re.DOTALL)
+DEMOTION_THRESHOLD_SECONDS = 30 * 86400  # 30-day mastery decay
+
 # ---------------------------------------------------------
 # Utilities & I/O
 # ---------------------------------------------------------
@@ -93,14 +98,16 @@ def load_config():
         cfg["groq_key"] = os.environ.get("GROQ_API_KEY", "")
     return cfg
 
-def load_memory():
+def load_memory(auto_demote=True):
     if not os.path.exists(MEMORY_PATH):
         return []
     try:
         with open(MEMORY_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
-                # Normalize schema fields
+                now_epoch = time.time()
+                mutated = False
+                # Normalize schema fields & evaluate 30-day decay
                 for card in data:
                     if not isinstance(card, dict):
                         continue
@@ -116,6 +123,28 @@ def load_memory():
                         card["mastery_score"] = 1.0 if card.get("status") == "mastered" else 0.0
                     if "last_reviewed" not in card:
                         card["last_reviewed"] = card.get("updated") or card.get("created") or ""
+                    if "personal_traps" not in card or not isinstance(card["personal_traps"], list):
+                        card["personal_traps"] = []
+                    if "relations" not in card or not isinstance(card["relations"], list):
+                        card["relations"] = []
+
+                    # Spaced Repetition: 30-day decay demotion check
+                    if auto_demote and card.get("status") == "mastered":
+                        lr_str = card.get("last_reviewed") or card.get("updated") or card.get("created") or ""
+                        if lr_str:
+                            try:
+                                lr_dt = datetime.fromisoformat(lr_str.replace("Z", "+00:00"))
+                                if (now_epoch - lr_dt.timestamp()) > DEMOTION_THRESHOLD_SECONDS:
+                                    card["status"] = "learning"
+                                    card["mastery_score"] = 0.65
+                                    card["last_fail_feedback"] = "Decay: Unreviewed for over 30 days. Re-test to reaffirm mastery."
+                                    mutated = True
+                            except Exception:
+                                pass
+
+                if mutated and auto_demote:
+                    atomic_save_memory(data)
+
                 return data
     except Exception:
         pass
@@ -173,6 +202,35 @@ def clean_json_response(raw_text):
     if not text:
         raise ValueError("Received empty or malformed JSON from model.")
     return text
+
+def parse_json_safely(raw_text):
+    text = clean_json_response(raw_text)
+    try:
+        return json.loads(text, strict=False)
+    except Exception as e1:
+        # Fallback 1: Python dicts with single quotes
+        try:
+            val = ast.literal_eval(text)
+            if isinstance(val, dict):
+                return val
+        except Exception:
+            pass
+
+        # Fallback 2: Remove trailing commas before closing braces/brackets
+        try:
+            cleaned = re.sub(r',\s*([\]}])', r'\1', text)
+            return json.loads(cleaned, strict=False)
+        except Exception:
+            pass
+
+        # Fallback 3: Convert unescaped single quotes
+        try:
+            cleaned = re.sub(r"(?<!\\)'", '"', text)
+            return json.loads(cleaned, strict=False)
+        except Exception:
+            pass
+
+        raise e1
 
 # ---------------------------------------------------------
 # AI Calling Helper (Groq / Gemini Hybrid)
@@ -268,7 +326,7 @@ def call_llm(system_instruction, user_payload, expect_json=True, temperature=0.2
 def extract_keywords(text):
     if not text:
         return set()
-    words = re.findall(r'[a-zA-Z0-9_]+', text.lower())
+    words = WORD_PATTERN.findall(text.lower())
     return {w for w in words if len(w) >= 3 and w not in STOP_WORDS}
 
 def extract_code_tokens(text):
@@ -284,7 +342,7 @@ def extract_code_tokens(text):
 def get_context(query_text):
     cards = load_memory()
     if not cards or not query_text or len(query_text.strip()) < 3:
-        emit({"matched": False, "cards": [], "prompt_injection": ""})
+        emit({"matched": False, "cards": [], "card_ids": [], "prompt_injection": ""})
         return
 
     q_clean = query_text.strip()
@@ -326,7 +384,7 @@ def get_context(query_text):
     matched_cards = [c for _, c in scored[:2]]
 
     if not matched_cards:
-        emit({"matched": False, "cards": [], "prompt_injection": ""})
+        emit({"matched": False, "cards": [], "card_ids": [], "prompt_injection": ""})
         return
 
     injection_parts = []
@@ -371,6 +429,7 @@ def get_context(query_text):
                 "summary": c.get("lines", [""])[0] if c.get("lines") else ""
             } for c in matched_cards
         ],
+        "card_ids": [str(c.get("id")) for c in matched_cards if c.get("id")],
         "prompt_injection": " ".join(injection_parts)
     })
 
@@ -485,7 +544,7 @@ def distill():
 
     try:
         raw_resp = call_llm(DISTILL_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = json.loads(clean_json_response(raw_resp))
+        resp_data = parse_json_safely(raw_resp)
         new_cards = resp_data.get("cards", [])
         if not isinstance(new_cards, list):
             new_cards = []
@@ -563,6 +622,10 @@ ADAPTIVE ASSESSMENT RULES:
      - 'bug_hunt' (or scenario diagnosis): A realistic real-world protocol execution scenario where someone applied the concept incorrectly or under suboptimal conditions. Ask to identify what went wrong and how to correct the protocol. DO NOT USE FAKE CODE SNIPPETS.
      - 'edge_case': What fails under extreme conditions (e.g. severe sleep deficit, high stress, boundary constraints) and why.
 
+3. TARGETED WEAKNESS & PERSONAL TRAP FOCUS:
+   - If 'personal_traps' contains items, AT LEAST ONE question (e.g. q1 or a diagnosis scenario) MUST specifically target and test whether the user has overcome their documented personal traps: {personal_traps}. Probe them deliberately on their past mistakes!
+   - If 'last_fail_feedback' is present and non-empty, directly probe and diagnose the exact pitfall or misconception described to verify that the user has corrected their understanding.
+
 FORMAT REQUIREMENT:
 Return valid JSON with:
 {
@@ -589,7 +652,7 @@ Return valid JSON with:
 }
 """
 
-def challenge(card_id):
+def challenge(card_id, is_daily=False):
     cards = load_memory()
     card = next((c for c in cards if c.get("id") == card_id), None)
     if not card:
@@ -609,14 +672,17 @@ def challenge(card_id):
         "lines": card.get("lines"),
         "archived_lines": card.get("archived_lines", []),
         "last_fail_feedback": card.get("last_fail_feedback", ""),
+        "personal_traps": card.get("personal_traps", []),
         "primer": primer
     }
 
     try:
         raw_resp = call_llm(CHALLENGE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = json.loads(clean_json_response(raw_resp))
+        resp_data = parse_json_safely(raw_resp)
         resp_data["card_id"] = card_id
         resp_data["success"] = True
+        if is_daily:
+            resp_data["is_daily_gauntlet"] = True
 
         questions = resp_data.get("questions", [])
         if not questions:
@@ -650,9 +716,11 @@ Focus strictly on whether their causal understanding, logic, and technical insig
 GRADING CRITERIA:
 - Evaluate each question fairly against its criteria.
 - In 'q_results', provide an entry for every question present in 'questions' (e.g. q1, q2, ...).
-- Calculate an overall score from 0.0 to 1.0 (Passing score >= 0.75).
+- Calculate an overall score from 0.0 to 1.0 (Mastery graduation requires score >= 0.85).
 - ALWAYS provide the canonical, authoritative 'correct_solution' for every question so the user can study what the exact model answer or code fix was, especially if they were wrong!
-- If passed, provide a crisp 1-sentence 'compressed_summary' capturing the master-level lesson.
+- If passed with score >= 0.85, provide a crisp 1-sentence 'compressed_summary' capturing the master-level lesson.
+- ADAPTIVE PERSONAL TRAP EXTRACTION:
+  If the user made any errors, had blindspots, or scored < 0.85, formulate EXACTLY ONE crisp, actionable 'personal_trap' sentence diagnosing the exact mistake or misconception they made (e.g. 'Assumed Promise callbacks run before the current synchronous block', or 'Confused sleep latency with caffeine absorption timing'). If user answered flawlessly, set 'personal_trap' to "".
 
 OUTPUT JSON:
 {
@@ -667,6 +735,7 @@ OUTPUT JSON:
   },
   "strengths": "Summary of what they understood well",
   "blindspots": "Summary of what was missing, imprecise, or misunderstood",
+  "personal_trap": "Concise 1-sentence personal trap or caveat that tripped them up, or empty string if perfect",
   "explanation": "Master-level clarification of the core concepts",
   "compressed_summary": "1-sentence distillation of the rule (only if pass)"
 }
@@ -702,7 +771,7 @@ def grade(card_id, user_answer_raw):
 
     try:
         raw_resp = call_llm(MULTI_GRADE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = json.loads(clean_json_response(raw_resp))
+        resp_data = parse_json_safely(raw_resp)
 
         verdict = resp_data.get("verdict", "fail").lower()
         score = float(resp_data.get("score", 0.0))
@@ -715,7 +784,8 @@ def grade(card_id, user_answer_raw):
             "verdict": verdict,
             "score": score,
             "q_results": resp_data.get("q_results", {}),
-            "feedback": resp_data.get("blindspots") or resp_data.get("explanation", "")
+            "feedback": resp_data.get("blindspots") or resp_data.get("explanation", ""),
+            "personal_trap": resp_data.get("personal_trap", "")
         }
 
         if "trials" not in card:
@@ -724,7 +794,17 @@ def grade(card_id, user_answer_raw):
         card["last_reviewed"] = now_iso
         card["updated"] = now_iso
 
-        if verdict == "pass":
+        # Adaptive Weakness Tracking: Auto-append personal trap if score < 0.85 or verdict != pass
+        trap = (resp_data.get("personal_trap") or "").strip()
+        if trap and trap.lower() not in ["none", "n/a", "no trap", "empty", "\"\"", "''"]:
+            if "personal_traps" not in card or not isinstance(card["personal_traps"], list):
+                card["personal_traps"] = []
+            if not any(trap.lower() == existing.lower() for existing in card["personal_traps"]):
+                card["personal_traps"].insert(0, trap)
+                card["personal_traps"] = card["personal_traps"][:5]
+
+        # Enforce score >= 0.85 for true mastery graduation
+        if verdict == "pass" and score >= 0.85:
             card["status"] = "mastered"
             card["mastery_score"] = score
             card["last_fail_feedback"] = ""
@@ -736,7 +816,10 @@ def grade(card_id, user_answer_raw):
         else:
             card["status"] = "learning"
             card["mastery_score"] = score
-            card["last_fail_feedback"] = resp_data.get("blindspots") or resp_data.get("explanation", "")
+            if verdict == "pass" and score < 0.85:
+                card["last_fail_feedback"] = f"Passing score was {int(score*100)}%, but mastery graduation requires >= 85%. Review the edge cases and re-test to graduate."
+            else:
+                card["last_fail_feedback"] = resp_data.get("blindspots") or resp_data.get("explanation", "")
 
         # Clear the active trial
         card.pop("active_trial", None)
@@ -798,7 +881,7 @@ def suggest_profile():
 
     try:
         raw_resp = call_llm(PROFILE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = json.loads(clean_json_response(raw_resp))
+        resp_data = parse_json_safely(raw_resp)
         resp_data["success"] = True
         emit(resp_data)
     except Exception as e:
@@ -880,7 +963,7 @@ def enrich(card_id):
 
     try:
         raw_resp = call_llm(ENRICH_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = json.loads(clean_json_response(raw_resp))
+        resp_data = parse_json_safely(raw_resp)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         domain = resp_data.get("domain", "code" if extract_code_tokens(card.get("topic", "") + " " + " ".join(card.get("lines", []))) else "protocol")
@@ -909,13 +992,223 @@ def enrich(card_id):
         emit({"success": False, "error": f"Enrichment failed: {e}"})
 
 # ---------------------------------------------------------
+# CLI Command: merge <id1> <id2>
+# Deduplication & merging of cards (card2 into card1)
+# ---------------------------------------------------------
+def merge_cards(id1, id2):
+    cards = load_memory(auto_demote=False)
+    card1 = next((c for c in cards if str(c.get("id")) == str(id1)), None)
+    card2 = next((c for c in cards if str(c.get("id")) == str(id2)), None)
+    if not card1 or not card2:
+        emit({"success": False, "error": f"One or both cards not found: '{id1}', '{id2}'"})
+        return
+    if id1 == id2:
+        emit({"success": False, "error": "Cannot merge a card into itself."})
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Merge lines
+    existing_lines = list(card1.get("lines") or [])
+    for line in (card2.get("lines") or []):
+        if line and line not in existing_lines:
+            existing_lines.append(line)
+    card1["lines"] = existing_lines
+
+    # Merge archived lines
+    existing_archived = list(card1.get("archived_lines") or [])
+    for line in (card2.get("archived_lines") or []):
+        if line and line not in existing_archived:
+            existing_archived.append(line)
+    card1["archived_lines"] = existing_archived
+
+    # Union tags & sources
+    card1["tags"] = list(set((card1.get("tags") or []) + (card2.get("tags") or [])))
+    card1["sources"] = list(set((card1.get("sources") or []) + (card2.get("sources") or [])))
+
+    # Combine trials chronologically
+    combined_trials = (card1.get("trials") or []) + (card2.get("trials") or [])
+    combined_trials.sort(key=lambda t: t.get("timestamp", 0))
+    card1["trials"] = combined_trials
+
+    # Inherit primer if card1 lacks one
+    if not card1.get("primer") and card2.get("primer"):
+        card1["primer"] = card2["primer"]
+
+    # Status & score
+    if card1.get("status") != "mastered" and card2.get("status") == "mastered":
+        card1["status"] = "mastered"
+        card1["mastery_score"] = card2.get("mastery_score", 1.0)
+    else:
+        card1["mastery_score"] = max(float(card1.get("mastery_score", 0.0)), float(card2.get("mastery_score", 0.0)))
+
+    card1["updated"] = now_iso
+
+    # Remove card2
+    remaining_cards = [c for c in cards if str(c.get("id")) != str(id2)]
+    atomic_save_memory(remaining_cards)
+
+    emit({
+        "success": True,
+        "merged_into": id1,
+        "deleted_id": id2,
+        "total_cards": len(remaining_cards)
+    })
+
+# ---------------------------------------------------------
+# CLI Command: daily_challenge
+# Spaced repetition gauntlet prioritizing due & blindspot cards
+# ---------------------------------------------------------
+def daily_challenge():
+    cards = load_memory()
+    if not cards:
+        emit({"success": False, "error": "No memory cards found to generate daily gauntlet."})
+        return
+
+    now_epoch = time.time()
+    FOURTEEN_DAYS = 14 * 86400
+
+    def card_priority(c):
+        score = 100
+        # Priority 1: Unresolved blindspots
+        if c.get("status") != "mastered" and c.get("last_fail_feedback"):
+            score = 10
+        # Priority 2: Unmastered concepts
+        elif c.get("status") != "mastered":
+            score = 20
+        else:
+            # Priority 3: Mastered cards due for review (> 14 days)
+            lr_str = c.get("last_reviewed") or c.get("updated") or c.get("created") or ""
+            try:
+                lr_dt = datetime.fromisoformat(lr_str.replace("Z", "+00:00"))
+                age = now_epoch - lr_dt.timestamp()
+                if age > FOURTEEN_DAYS:
+                    score = 30 - min(10, int(age / (30 * 86400) * 10))
+                else:
+                    score = 50 + int(age / 86400)
+            except Exception:
+                score = 60
+        return score
+
+    sorted_candidates = sorted(cards, key=card_priority)
+    chosen_card = sorted_candidates[0]
+    challenge(chosen_card.get("id"), is_daily=True)
+# ---------------------------------------------------------
+# CLI Command: sync_graph
+# Constructs Knowledge Graph relationships (prerequisites, evolutions, related)
+# ---------------------------------------------------------
+GRAPH_PROMPT = """You are an expert software knowledge graph architect and mentor.
+Analyze the provided developer memory cards and map ALL high-value knowledge graph connections between them across all domains (Java, Concurrency, Networking, Linux, Architecture, System Design).
+
+CONNECTION TYPES:
+1. "prerequisite": Target card is foundational or required to understand or implement the source card (e.g., OSI Model / TCP is a prerequisite for HTTP SSE Streaming; basic Java Concurrency is a prerequisite for ConcurrentHashMap internals).
+2. "evolution": Source card evolved from, modernizes, or solves advanced/edge-case problems of the target card (e.g., CopyOnWriteArrayList evolves from basic Java Collections; OCI ADR Containers evolves from general Docker primitives).
+3. "related": Sibling concepts that frequently co-occur in architectures or solve adjacent facets of the same problem (e.g., Docker Architecture and OCI Containers, URI vs URL and Networking Protocols, Spring Boot Config and Thymeleaf Integration).
+
+RULES:
+- Review the entire list of cards thoroughly. Create genuine, high-value connections wherever conceptual linkage exists.
+- Aim to link related cards into cohesive topic clusters so the developer can navigate between connected concepts.
+- 'reason' MUST be a crisp, informative 1-sentence explanation of why they are linked.
+
+OUTPUT JSON FORMAT:
+{
+  "connections": [
+    {
+      "source_id": "<card_id_1>",
+      "target_id": "<card_id_2>",
+      "type": "prerequisite" | "evolution" | "related",
+      "reason": "Clear 1-sentence explanation of the conceptual link"
+    }
+  ]
+}
+"""
+
+def sync_graph():
+    cards = load_memory()
+    if len(cards) < 2:
+        emit({"success": True, "connections_count": 0, "message": "Need at least 2 cards to form a knowledge graph."})
+        return
+
+    manifest = []
+    card_map = {c["id"]: c for c in cards}
+    for c in cards:
+        lines = c.get("lines") or []
+        summary = lines[0] if lines else ""
+        manifest.append({
+            "id": c["id"],
+            "topic": c.get("topic", "Untitled"),
+            "summary": summary[:120]
+        })
+
+    try:
+        raw_resp = call_llm(GRAPH_PROMPT, json.dumps({"cards": manifest}, ensure_ascii=False), expect_json=True)
+        resp_data = parse_json_safely(raw_resp)
+        connections = resp_data.get("connections", [])
+
+        # Reset existing relations
+        for c in cards:
+            c["relations"] = []
+
+        valid_count = 0
+        for conn in connections:
+            s_id = conn.get("source_id")
+            t_id = conn.get("target_id")
+            rel_type = conn.get("type", "related")
+            reason = conn.get("reason", "")
+
+            if s_id in card_map and t_id in card_map and s_id != t_id:
+                s_card = card_map[s_id]
+                t_card = card_map[t_id]
+
+                # Check duplicate on source
+                if not any(r.get("target_id") == t_id for r in s_card["relations"]):
+                    s_card["relations"].append({
+                        "target_id": t_id,
+                        "target_topic": t_card.get("topic", "Untitled"),
+                        "type": rel_type,
+                        "reason": reason
+                    })
+                    valid_count += 1
+
+                # Add reciprocal link if not already present
+                rev_type = "prerequisite_for" if rel_type == "prerequisite" else ("evolved_to" if rel_type == "evolution" else "related")
+                if not any(r.get("target_id") == s_id for r in t_card["relations"]):
+                    t_card["relations"].append({
+                        "target_id": s_id,
+                        "target_topic": s_card.get("topic", "Untitled"),
+                        "type": rev_type,
+                        "reason": reason
+                    })
+
+        atomic_save_memory(cards)
+        emit({
+            "success": True,
+            "connections_count": valid_count,
+            "cards_count": len(cards),
+            "message": f"Successfully mapped {valid_count} graph connections across {len(cards)} cards."
+        })
+    except Exception as e:
+        emit({"success": False, "error": f"Knowledge graph sync failed: {e}"})
+
+def remove_trap(card_id, trap_text):
+    cards = load_memory()
+    card = next((c for c in cards if c.get("id") == card_id), None)
+    if not card:
+        emit({"success": False, "error": f"Card '{card_id}' not found."})
+        return
+    traps = card.get("personal_traps", [])
+    card["personal_traps"] = [t for t in traps if t.strip() != trap_text.strip()]
+    atomic_save_memory(cards)
+    emit({"success": True, "personal_traps": card["personal_traps"]})
+
+# ---------------------------------------------------------
 # Main CLI Dispatcher
 # ---------------------------------------------------------
 def main():
     if len(sys.argv) < 2:
         emit({
             "error": "USAGE",
-            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|suggest_profile|enrich> [args...]"
+            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|suggest_profile|enrich|merge|daily_challenge|sync_graph|remove_trap> [args...]"
         })
         sys.exit(1)
 
@@ -931,6 +1224,8 @@ def main():
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py challenge <card_id>"})
             sys.exit(1)
         challenge(sys.argv[2])
+    elif cmd == "daily_challenge":
+        daily_challenge()
     elif cmd == "grade":
         if len(sys.argv) < 4:
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py grade <card_id> \"<answer>\""})
@@ -941,6 +1236,18 @@ def main():
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py enrich <card_id>"})
             sys.exit(1)
         enrich(sys.argv[2])
+    elif cmd == "merge":
+        if len(sys.argv) < 4:
+            emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py merge <card_id1> <card_id2>"})
+            sys.exit(1)
+        merge_cards(sys.argv[2], sys.argv[3])
+    elif cmd == "sync_graph":
+        sync_graph()
+    elif cmd == "remove_trap":
+        if len(sys.argv) < 4:
+            emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py remove_trap <card_id> \"<trap_text>\""})
+            sys.exit(1)
+        remove_trap(sys.argv[2], sys.argv[3])
     elif cmd == "suggest_profile":
         suggest_profile()
     else:
@@ -949,3 +1256,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

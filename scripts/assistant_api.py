@@ -407,8 +407,13 @@ def organize_history():
         emit({"type": "organize_done", "tags": [], "mapping": {}})
         return
 
+    # Prioritize untagged items first
+    untagged = [item for item in history if not item.get("tags") or len(item.get("tags")) == 0]
+    tagged = [item for item in history if item.get("tags") and len(item.get("tags")) > 0]
+    ordered_items = (untagged + tagged)[:100]
+
     items_to_tag = []
-    for item in history[:100]:
+    for item in ordered_items:
         snippet = (item.get("text") or item.get("prompt") or "")[:80].replace("\n", " ").strip()
         if snippet:
             items_to_tag.append({
@@ -515,9 +520,9 @@ def organize_history():
 
     try:
         clean_text = response_text.strip()
-        if clean_text.startswith("```"):
-            clean_text = clean_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        parsed = json.loads(clean_text)
+        if "```" in clean_text:
+            clean_text = clean_text.split("```json")[-1].split("```")[0].strip() if "```json" in clean_text else clean_text.split("```")[1].strip()
+        parsed = json.loads(clean_text, strict=False)
         tags = parsed.get("tags", [])
         mapping = parsed.get("mapping", {})
         proposed_profile = parsed.get("proposed_profile")
@@ -538,120 +543,6 @@ def organize_history():
         })
     except Exception as e:
         emit({"type": "error", "message": f"Failed to parse organization tags: {e}"})
-
-def generate_challenge(item_json_str):
-    try:
-        item = json.loads(item_json_str)
-    except Exception as e:
-        emit({"type": "error", "message": f"Invalid item JSON: {e}"})
-        return
-
-    config = load_config()
-    gemini_key = config.get("gemini_key", "").strip()
-    groq_key = config.get("groq_key", "").strip()
-    primary = config.get("primary", "gemini").lower()
-
-    providers = []
-    if primary == "groq":
-        if groq_key: providers.append(("groq", groq_key))
-        if gemini_key: providers.append(("gemini", gemini_key))
-    else:
-        if gemini_key: providers.append(("gemini", gemini_key))
-        if groq_key: providers.append(("groq", groq_key))
-
-    if not providers:
-        emit({"type": "error", "error_type": "auth", "message": "No API key configured."})
-        return
-
-    snippet = (item.get("text") or "")[:400].strip()
-    prompt = (item.get("prompt") or "")[:200].strip()
-    answer = (item.get("answer") or "")[:800].strip()
-
-    system_instruction = (
-        "You are an expert tutor creating a practical concept-check challenge for active recall.\n"
-        "Given the past query, context, and answer:\n"
-        "Generate ONE new, concise conceptual question testing the user's understanding of the underlying principle or edge case.\n"
-        "Do NOT quiz trivial phrasing from the past answer; test actual conceptual mastery.\n"
-        "Respond ONLY with valid, raw JSON matching this schema without markdown codeblocks:\n"
-        "{\n"
-        "  \"question\": \"The test question...\",\n"
-        "  \"hint\": \"A brief 1-sentence hint...\",\n"
-        "  \"solution\": \"The direct answer and explanation...\"\n"
-        "}"
-    )
-
-    user_payload = json.dumps({
-        "context_snippet": snippet,
-        "query_prompt": prompt,
-        "reference_answer": answer
-    })
-
-    response_text = ""
-    for prov_name, key in providers:
-        try:
-            if prov_name == "gemini":
-                for model_name in GEMINI_CANDIDATE_MODELS:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
-                    req_data = json.dumps({
-                        "contents": [{"parts": [{"text": f"{system_instruction}\n\nTarget Material:\n{user_payload}"}]}],
-                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
-                    }).encode("utf-8")
-                    req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
-                    try:
-                        with urllib.request.urlopen(req, timeout=15) as resp:
-                            resp_json = json.loads(resp.read().decode("utf-8"))
-                            candidates = resp_json.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    response_text = parts[0].get("text", "")
-                                    break
-                    except Exception:
-                        continue
-            elif prov_name == "groq":
-                url = "https://api.groq.com/openai/v1/chat/completions"
-                req_data = json.dumps({
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": f"Target Material:\n{user_payload}"}
-                    ],
-                    "temperature": 0.3,
-                    "response_format": {"type": "json_object"}
-                }).encode("utf-8")
-                req = urllib.request.Request(url, data=req_data, headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {key}"
-                }, method="POST")
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    resp_json = json.loads(resp.read().decode("utf-8"))
-                    choices = resp_json.get("choices", [])
-                    if choices:
-                        response_text = choices[0].get("message", {}).get("content", "")
-
-            if response_text:
-                break
-        except Exception:
-            continue
-
-    if not response_text:
-        emit({"type": "error", "message": "Failed to generate concept challenge."})
-        return
-
-    try:
-        clean_text = response_text.strip()
-        if clean_text.startswith("```"):
-            clean_text = clean_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        parsed = json.loads(clean_text)
-        emit({
-            "type": "challenge_done",
-            "item_id": str(item.get("id")),
-            "question": parsed.get("question", ""),
-            "hint": parsed.get("hint", ""),
-            "solution": parsed.get("solution", "")
-        })
-    except Exception as e:
-        emit({"type": "error", "message": f"Failed to parse challenge question: {e}"})
 
 DISTILL_SYSTEM_PROMPT = (
     "You are an expert AI memory curator. You maintain a curated, structured long-term memory file (assistant_memory.json) "
@@ -880,11 +771,6 @@ def main():
 
     if cmd == "organize":
         organize_history()
-        sys.exit(0)
-
-    if cmd == "challenge":
-        item_json = sys.argv[2] if len(sys.argv) > 2 else "{}"
-        generate_challenge(item_json)
         sys.exit(0)
 
     if cmd == "distill" or (cmd == "--action" and len(sys.argv) > 2 and sys.argv[2] == "distill"):

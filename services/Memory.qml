@@ -22,9 +22,18 @@ Singleton {
     property string challengeError: ""
     property var activeChallenge: null // { card_id, topic, type, question, criteria }
 
+    property bool isDailyGauntletLoading: false
+    property string dailyGauntletError: ""
+
     property bool isGrading: false
     property string gradeError: ""
     property var lastGradeResult: null // { verdict, score, strengths, blindspots, explanation, card_id, status }
+
+    property var lastInjectedCardIds: []
+
+    property bool isSyncingGraph: false
+    property string syncGraphMessage: ""
+    property string syncGraphError: ""
 
     property bool _isSaving: false
 
@@ -40,7 +49,14 @@ Singleton {
     }
     readonly property int learningCount: totalCount - masteredCount
 
-    // ── Persistent Storage ───────────────────────────────────────
+    // ── Persistent Storage & Debounced I/O ───────────────────────
+    Timer {
+        id: saveDebounceTimer
+        interval: 300
+        repeat: false
+        onTriggered: root._doSave()
+    }
+
     FileView {
         id: memoryStorage
         printErrors: false
@@ -82,7 +98,18 @@ Singleton {
         if (memoryStorage) memoryStorage.reload()
     }
 
+    // Debounced disk save (300ms) to eliminate file I/O churn
     function save() {
+        if (!memoryStorage) return
+        saveDebounceTimer.restart()
+    }
+
+    function saveNow() {
+        saveDebounceTimer.stop()
+        root._doSave()
+    }
+
+    function _doSave() {
         if (!memoryStorage) return
         root._isSaving = true
         memoryStorage.setText(JSON.stringify(root.cards, null, 2))
@@ -113,13 +140,42 @@ Singleton {
         root.save()
     }
 
+    function getCardById(id) {
+        if (!root.cards || !id) return null
+        const target = String(id)
+        for (let i = 0; i < root.cards.length; i++) {
+            if (String(root.cards[i].id) === target) return root.cards[i]
+        }
+        return null
+    }
+
+    function removeTrap(cardId, trapText) {
+        if (!root.cards || !cardId || !trapText) return
+        const list = root.cards.slice()
+        for (let i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(cardId)) {
+                const traps = list[i].personal_traps || []
+                list[i].personal_traps = traps.filter(t => t.trim() !== trapText.trim())
+                list[i].updated = new Date().toISOString()
+                list[i]._ts = Date.now()
+                break
+            }
+        }
+        root.cards = list
+        root.save()
+    }
+
     // ── Instant Zero-Latency Keyword Matching (0ms) ──────────────
     function getPromptInjection(query) {
         if (!root.cards || root.cards.length === 0 || !query || query.trim().length < 3) {
+            root.lastInjectedCardIds = []
             return ""
         }
         const qWords = query.toLowerCase().match(/[a-z0-9_]{3,}/g) || []
-        if (qWords.length === 0) return ""
+        if (qWords.length === 0) {
+            root.lastInjectedCardIds = []
+            return ""
+        }
 
         let bestCard = null
         let bestScore = 0
@@ -143,7 +199,12 @@ Singleton {
             }
         }
 
-        if (!bestCard) return ""
+        if (!bestCard) {
+            root.lastInjectedCardIds = []
+            return ""
+        }
+
+        root.lastInjectedCardIds = [String(bestCard.id)]
 
         const status = (bestCard.status || "learning").toUpperCase()
         const topic = bestCard.topic || ""
@@ -333,11 +394,101 @@ Singleton {
         }
     }
 
+    function startDailyGauntlet() {
+        if (dailyGauntletProc.running || root.isGeneratingChallenge || root.isDailyGauntletLoading) return
+        root.isDailyGauntletLoading = true
+        root.dailyGauntletError = ""
+        root._dailyGauntletBuffer = ""
+        root.activeChallenge = null
+        root.lastGradeResult = null
+        dailyGauntletProc.command = ["python3", root.enginePath, "daily_challenge"]
+        dailyGauntletProc.running = true
+    }
+
+    property string _dailyGauntletBuffer: ""
+
+    Process {
+        id: dailyGauntletProc
+        stdout: SplitParser {
+            onRead: data => {
+                root._dailyGauntletBuffer += data
+            }
+        }
+        onExited: exitCode => {
+            root.isDailyGauntletLoading = false
+            const fullText = root._dailyGauntletBuffer.trim()
+            root._dailyGauntletBuffer = ""
+            if (!fullText) {
+                if (exitCode !== 0 && !root.dailyGauntletError) {
+                    root.dailyGauntletError = "Daily gauntlet exited with code " + exitCode
+                }
+                return
+            }
+            try {
+                const res = JSON.parse(fullText)
+                if (res.success) {
+                    root.activeChallenge = res
+                } else {
+                    root.dailyGauntletError = res.error || "Failed to start daily gauntlet."
+                }
+            } catch (e) {
+                root.dailyGauntletError = "Failed to parse gauntlet JSON: " + e.message
+            }
+        }
+    }
+
     function clearChallenge() {
         root.activeChallenge = null
         root.lastGradeResult = null
         root.challengeError = ""
         root.gradeError = ""
+        root.dailyGauntletError = ""
+    }
+
+    // ── Knowledge Graph Synchronization ──────────────────────────
+    property string _syncGraphBuffer: ""
+
+    function syncGraph() {
+        if (syncGraphProc.running || root.isSyncingGraph) return
+        root.isSyncingGraph = true
+        root.syncGraphError = ""
+        root.syncGraphMessage = ""
+        root._syncGraphBuffer = ""
+        syncGraphProc.command = ["python3", root.enginePath, "sync_graph"]
+        syncGraphProc.running = true
+    }
+
+    Process {
+        id: syncGraphProc
+        stdout: SplitParser {
+            onRead: data => {
+                root._syncGraphBuffer += data
+            }
+        }
+        onExited: exitCode => {
+            root.isSyncingGraph = false
+            const fullText = root._syncGraphBuffer.trim()
+            root._syncGraphBuffer = ""
+            if (!fullText) {
+                if (exitCode !== 0 && !root.syncGraphError) {
+                    root.syncGraphError = "Knowledge graph sync exited with code " + exitCode
+                }
+                return
+            }
+            try {
+                const res = JSON.parse(fullText)
+                if (res.success) {
+                    root.syncGraphMessage = res.message || "Knowledge graph synchronized."
+                    root.reload()
+                } else {
+                    root.syncGraphError = res.error || "Failed to sync knowledge graph."
+                }
+            } catch (e) {
+                root.syncGraphError = "Failed to parse graph JSON: " + e.message
+            }
+            root.reload()
+        }
     }
 }
+
 
