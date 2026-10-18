@@ -438,14 +438,16 @@ def get_context(query_text):
 # Thread-aware, noise-filtered memory card distillation
 # ---------------------------------------------------------
 DISTILL_PROMPT = """You are the Knowledge Distillation Engine for an advanced developer's Linux HUD Assistant.
-Your task is to analyze new interactions from the user's history and curate concise, high-value Knowledge Cards.
+Your task is to analyze new interactions from the user's history and curate high-value, deep Knowledge Cards.
 
-STRICT EXTRACTION RULES:
-1. IGNORE NOISE: Skip greetings, simple translations, pure arithmetic, short tests, and transient banter.
-2. THREAD GROUPING: Group multi-turn follow-ups or debugging steps about the same issue into ONE cohesive card.
-3. ATOMIC CARDS: Each card must represent a distinct architectural rule, command idiom, or solved pitfall.
-4. LINE LINEAGE: Each bullet in 'lines' must trace directly to a source interaction ID in 'sources'.
-5. MERGE/REFINE: If a concept already exists in 'current_memory', update and refine its lines instead of creating a duplicate card.
+KNOWLEDGE HIERARCHY & CONSOLIDATION RULES:
+1. DUAL-LAYER ARCHITECTURE:
+   - DOMAIN CODE HUBS (type: "code_hub"): Concrete programming language idioms, framework patterns, and code recipes belonging to the same language/ecosystem (e.g., Java, Python, Shell) MUST be consolidated into a single master Domain Code Hub (e.g. 'card_java_engineering_hub'). Use 'sections' to group related topics (e.g., Concurrency, Web & Spring, Network I/O & Streaming, Process Execution).
+   - ARCHITECTURAL CONCEPTS (type: "concept"): High-level system design, distributed architectures, and development paradigms (e.g., MVP, PaaS overhead, OCI containers, TCP/IP fundamentals) must remain distinct conceptual cards.
+2. CONSOLIDATE, DO NOT FRAGMENT: If incoming interactions discuss code or idioms for an ecosystem that already has a Domain Code Hub in 'current_memory', APPEND or UPDATE the relevant section in that card instead of generating a new isolated card.
+3. HIGH DENSITY & CODE SNIPPETS: Cards are NOT limited to 2 short lines. Provide deep, production-grade code snippets, clear execution rules, and real gotchas.
+4. IGNORE NOISE: Skip greetings, simple translations, pure arithmetic, short tests, and transient banter.
+5. LINE LINEAGE: Each bullet in 'lines' or 'sections' must trace directly to a source interaction ID in 'sources'.
 
 OUTPUT FORMAT:
 Return a JSON object with a single key 'cards', containing an array of card objects:
@@ -454,11 +456,21 @@ Return a JSON object with a single key 'cards', containing an array of card obje
     {
       "id": "card_<category>_<slug>",
       "topic": "Clear Descriptive Topic",
-      "category": "linux|qml|python|audio|general",
+      "category": "java|python|linux|architecture|networking|general",
+      "type": "code_hub|concept",
       "status": "learning",
       "lines": [
-        "Concise rule or insight 1",
-        "Concise rule or insight 2"
+        "Concise high-yield rule or insight 1",
+        "Concise high-yield rule or insight 2"
+      ],
+      "sections": [
+        {
+          "id": "subtopic_slug",
+          "title": "Subtopic Title",
+          "rules": ["Actionable rule 1", "Actionable rule 2"],
+          "snippet": "```lang\\n// Production code snippet\\n...\\n```",
+          "pitfalls": ["Common pitfall or anti-pattern"]
+        }
       ],
       "tags": ["relevant", "tags"],
       "sources": ["history_id_1", "history_id_2"]
@@ -563,10 +575,23 @@ def distill():
         if cid in existing_map:
             # Update existing card
             card = existing_map[cid]
+            if nc.get("type"):
+                card["type"] = nc.get("type")
+            if nc.get("sections"):
+                existing_sections = card.get("sections") or []
+                sec_map = {s.get("id"): s for s in existing_sections if s.get("id")}
+                for s in nc.get("sections"):
+                    sid = s.get("id")
+                    if sid and sid in sec_map:
+                        sec_map[sid].update(s)
+                    else:
+                        existing_sections.append(s)
+                card["sections"] = existing_sections
             card["lines"] = nc.get("lines", card.get("lines", []))
             card["updated"] = now_iso
             card["tags"] = list(set((card.get("tags") or []) + (nc.get("tags") or [])))
             card["sources"] = list(set((card.get("sources") or []) + (nc.get("sources") or [])))
+            card["_ts"] = int(time.time() * 1000)
             updated_count += 1
         else:
             # Create new card
@@ -574,9 +599,11 @@ def distill():
                 "id": cid,
                 "topic": nc.get("topic", "Untitled Concept"),
                 "category": nc.get("category", "general"),
+                "type": nc.get("type", "concept"),
                 "status": "learning",
                 "mastery_score": 0.0,
                 "lines": nc.get("lines", []),
+                "sections": nc.get("sections", []),
                 "archived_lines": [],
                 "tags": nc.get("tags", []),
                 "sources": nc.get("sources", []),
@@ -584,7 +611,8 @@ def distill():
                 "trials": [],
                 "created": now_iso,
                 "updated": now_iso,
-                "last_reviewed": now_iso
+                "last_reviewed": now_iso,
+                "_ts": int(time.time() * 1000)
             }
             existing_map[cid] = card
             created_count += 1
@@ -1056,6 +1084,176 @@ def merge_cards(id1, id2):
     })
 
 # ---------------------------------------------------------
+# CLI Command: consolidate <domain>
+# Synthesizes fragmented micro-cards into an authoritative Domain Code Hub
+# ---------------------------------------------------------
+CONSOLIDATE_PROMPT = """You are a Principal Software Engineer and Technical Knowledge Architect.
+Your task is to consolidate multiple fragmented cards from the same technical domain into ONE authoritative, cohesive Master Domain Code Hub.
+
+CONSOLIDATION PRINCIPLES:
+1. TECHNICAL DEPTH: Do NOT compress into 2 superficial bullet points. Preserve and synthesize all technical nuance, exact idioms, edge cases, and code patterns from the original cards.
+2. MODULAR SECTIONS: Organize the knowledge into 3-6 logical, well-structured sections (e.g., Concurrency & Memory Visibility, Spring Framework & Proxy Rules, Modern HttpClient & Stream Debouncing, Process Execution, Performance Tuning).
+3. PRODUCTION CODE SNIPPETS: Each section must provide a real, compilable, production-grade code snippet demonstrating the idiom or pattern.
+4. PITFALLS & BLINDSPOTS: Retain and clearly list deadly traps, gotchas, and concurrency/memory pitfalls.
+5. CLEAN UNIFIED TOPIC: Set a clean, authoritative topic like "Java & Spring Engineering Hub" or "Linux Shell & Scripting Hub".
+
+OUTPUT FORMAT:
+Return a JSON object with a single key 'card':
+{
+  "card": {
+    "id": "card_<domain>_engineering_hub",
+    "topic": "Domain & Framework Engineering Hub",
+    "category": "<domain>",
+    "type": "code_hub",
+    "summary": "1-2 sentence high-level overview of the engineering domain.",
+    "lines": [
+      "Top synthesized high-yield rule 1 across the domain",
+      "Top synthesized high-yield rule 2 across the domain"
+    ],
+    "sections": [
+      {
+        "id": "section_slug",
+        "title": "Section Title",
+        "rules": [
+          "Actionable technical rule 1",
+          "Actionable technical rule 2"
+        ],
+        "snippet": "```lang\\n// Production code snippet\\n...\\n```",
+        "pitfalls": [
+          "Deadly trap or common misstep"
+        ]
+      }
+    ],
+    "tags": ["domain", "tag1", "tag2"],
+    "personal_traps": [
+      "Personal traps gathered from user feedback"
+    ]
+  }
+}
+"""
+
+def consolidate_domain(domain_query="java"):
+    cards = load_memory(auto_demote=False)
+    if not cards:
+        emit({"success": False, "error": "No memory cards found."})
+        return
+
+    domain = (domain_query or "java").lower().strip()
+
+    # Identify candidate cards matching this domain
+    matched = []
+    for c in cards:
+        tags = [str(t).lower() for t in c.get("tags", [])]
+        topic = (c.get("topic") or "").lower()
+        cid = (c.get("id") or "").lower()
+        if domain in tags or domain in topic or domain in cid:
+            matched.append(c)
+
+    if len(matched) < 2:
+        emit({"success": False, "error": f"Found only {len(matched)} card(s) matching '{domain}'. At least 2 cards are needed to consolidate."})
+        return
+
+    payload = {
+        "domain": domain,
+        "cards_to_consolidate": [
+            {
+                "id": c.get("id"),
+                "topic": c.get("topic"),
+                "lines": c.get("lines", []),
+                "tags": c.get("tags", []),
+                "primer": c.get("primer"),
+                "personal_traps": c.get("personal_traps", []),
+                "last_fail_feedback": c.get("last_fail_feedback", "")
+            }
+            for c in matched
+        ]
+    }
+
+    try:
+        raw_resp = call_llm(CONSOLIDATE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
+        resp_data = parse_json_safely(raw_resp)
+        new_card_data = resp_data.get("card")
+        if not new_card_data or not isinstance(new_card_data, dict):
+            emit({"success": False, "error": "LLM failed to return a valid consolidated card structure."})
+            return
+    except Exception as e:
+        emit({"success": False, "error": f"Consolidation LLM call failed: {e}"})
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    matched_ids = {str(c.get("id")) for c in matched}
+
+    all_sources = set()
+    all_trials = []
+    all_traps = list(new_card_data.get("personal_traps", []))
+    all_relations = []
+    max_score = 0.0
+    any_mastered = False
+
+    for c in matched:
+        for s in c.get("sources", []):
+            if s:
+                all_sources.add(str(s))
+        for t in c.get("trials", []):
+            all_trials.append(t)
+        for trap in c.get("personal_traps", []):
+            if trap and trap not in all_traps:
+                all_traps.append(trap)
+        if c.get("last_fail_feedback") and c["last_fail_feedback"] not in all_traps:
+            all_traps.append(c["last_fail_feedback"])
+        for rel in c.get("relations", []):
+            if str(rel.get("target_id")) not in matched_ids:
+                all_relations.append(rel)
+        if c.get("status") == "mastered":
+            any_mastered = True
+        try:
+            score = float(c.get("mastery_score", 0.0))
+            if score > max_score:
+                max_score = score
+        except Exception:
+            pass
+
+    all_trials.sort(key=lambda t: t.get("timestamp", 0))
+
+    consolidated_id = new_card_data.get("id") or f"card_{domain}_engineering_hub"
+    consolidated_card = {
+        "id": consolidated_id,
+        "topic": new_card_data.get("topic") or f"{domain.capitalize()} Engineering Hub",
+        "category": domain,
+        "type": "code_hub",
+        "status": "mastered" if any_mastered else "learning",
+        "mastery_score": max_score,
+        "summary": new_card_data.get("summary", ""),
+        "lines": new_card_data.get("lines", []),
+        "sections": new_card_data.get("sections", []),
+        "tags": list(set(new_card_data.get("tags", [domain]) + [domain])),
+        "sources": list(all_sources),
+        "trials": all_trials,
+        "personal_traps": all_traps,
+        "relations": all_relations,
+        "created": now_iso,
+        "updated": now_iso,
+        "last_reviewed": now_iso,
+        "_ts": int(time.time() * 1000)
+    }
+
+    # Replace matched cards with the new consolidated card
+    remaining_cards = [c for c in cards if str(c.get("id")) not in matched_ids]
+    remaining_cards.insert(0, consolidated_card)
+    atomic_save_memory(remaining_cards)
+
+    emit({
+        "success": True,
+        "consolidated_id": consolidated_id,
+        "topic": consolidated_card["topic"],
+        "sections_count": len(consolidated_card.get("sections", [])),
+        "merged_card_count": len(matched),
+        "deleted_ids": list(matched_ids),
+        "total_cards": len(remaining_cards)
+    })
+
+
+# ---------------------------------------------------------
 # CLI Command: daily_challenge
 # Spaced repetition gauntlet prioritizing due & blindspot cards
 # ---------------------------------------------------------
@@ -1243,6 +1441,9 @@ def main():
         merge_cards(sys.argv[2], sys.argv[3])
     elif cmd == "sync_graph":
         sync_graph()
+    elif cmd == "consolidate":
+        domain = sys.argv[2] if len(sys.argv) > 2 else "java"
+        consolidate_domain(domain)
     elif cmd == "remove_trap":
         if len(sys.argv) < 4:
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py remove_trap <card_id> \"<trap_text>\""})

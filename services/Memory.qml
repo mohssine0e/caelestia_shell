@@ -18,6 +18,10 @@ Singleton {
     property string distillMessage: ""
     property string distillError: ""
 
+    property bool isConsolidating: false
+    property string consolidateMessage: ""
+    property string consolidateError: ""
+
     property bool isGeneratingChallenge: false
     property string challengeError: ""
     property var activeChallenge: null // { card_id, topic, type, question, criteria }
@@ -305,6 +309,54 @@ Singleton {
                 }
             } catch (e) {
                 root.distillError = "Failed to parse distill output: " + e.message
+            }
+            root.reload()
+        }
+    }
+
+    property string _consolidateBuffer: ""
+
+    function consolidate(domain) {
+        if (consolidateProc.running || root.isConsolidating) return
+        root.isConsolidating = true
+        root.consolidateMessage = "Consolidating domain knowledge..."
+        root.consolidateError = ""
+        root._consolidateBuffer = ""
+        const cmd = ["python3", root.enginePath, "consolidate"]
+        if (domain && domain.trim().length > 0) {
+            cmd.push(domain.trim())
+        }
+        consolidateProc.command = cmd
+        consolidateProc.running = true
+    }
+
+    Process {
+        id: consolidateProc
+        stdout: SplitParser {
+            onRead: data => {
+                root._consolidateBuffer += data
+            }
+        }
+        onExited: exitCode => {
+            root.isConsolidating = false
+            const fullText = root._consolidateBuffer.trim()
+            root._consolidateBuffer = ""
+            if (!fullText) {
+                if (exitCode !== 0 && !root.consolidateError) {
+                    root.consolidateError = "Consolidate process exited with code " + exitCode
+                }
+                return
+            }
+            try {
+                const res = JSON.parse(fullText)
+                if (res.success) {
+                    root.consolidateMessage = res.message || ("Consolidated into " + (res.hub_id || "hub") + " (" + (res.merged_cards_count || 0) + " merged)")
+                    root.reload()
+                } else {
+                    root.consolidateError = res.error || "Consolidation failed."
+                }
+            } catch (e) {
+                root.consolidateError = "Failed to parse consolidate output: " + e.message
             }
             root.reload()
         }

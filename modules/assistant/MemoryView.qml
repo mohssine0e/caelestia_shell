@@ -551,6 +551,36 @@ FocusScope {
         }
 
         // ═════════════════════════════════════════════════════════
+        // CONSOLIDATION NOTIFICATIONS
+        // ═════════════════════════════════════════════════════════
+        StyledRect {
+            Layout.fillWidth: true
+            implicitHeight: 28
+            radius: Tokens.rounding.small
+            color: Qt.alpha(Colours.palette.m3tertiary, 0.15)
+            visible: Memory.consolidateMessage.length > 0 && !root.isInChallengeMode
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 4
+                spacing: 6
+
+                MaterialIcon {
+                    text: "merge_type"
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3tertiary
+                }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: Memory.consolidateMessage
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3onSurface
+                }
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════
         // KNOWLEDGE GRAPH NOTIFICATIONS
         // ═════════════════════════════════════════════════════════
         StyledRect {
@@ -1605,6 +1635,10 @@ FocusScope {
                     readonly property bool hasFailFeedback: !!(cardData && cardData.last_fail_feedback && cardData.last_fail_feedback.length > 0)
                     readonly property bool isStudyOpen: root.isStudyOpen(cardId)
                     readonly property bool isEnrichingThis: (Memory.isEnriching && Memory.enrichingCardId === cardId)
+                    readonly property var cardSections: cardData ? (cardData.sections || []) : []
+                    readonly property bool isCodeHub: cardData ? (cardData.type === "code_hub" || cardSections.length > 0) : false
+                    property int activeSectionIndex: 0
+                    readonly property var currentSection: (cardSections && cardSections.length > 0 && activeSectionIndex >= 0 && activeSectionIndex < cardSections.length) ? cardSections[activeSectionIndex] : null
                     readonly property bool expanded: (cardId.length > 0 && root.expandedCardId === cardId) || isEditing
                     readonly property bool isReviewDue: {
                         if (!cardData) return false
@@ -1695,6 +1729,37 @@ FocusScope {
                                     color: Colours.palette.m3onSurface
                                     elide: Text.ElideRight
                                     maximumLineCount: 1
+                                }
+
+                                // Domain Code Hub badge (shows section count)
+                                StyledRect {
+                                    visible: cardItem.isCodeHub
+                                    implicitWidth: hubPillRow.implicitWidth + 8
+                                    implicitHeight: 18
+                                    radius: Tokens.rounding.full
+                                    color: Qt.alpha(Colours.palette.m3primary, 0.12)
+                                    border.width: 1
+                                    border.color: Qt.alpha(Colours.palette.m3primary, 0.3)
+
+                                    RowLayout {
+                                        id: hubPillRow
+                                        anchors.centerIn: parent
+                                        spacing: 3
+
+                                        MaterialIcon {
+                                            text: "code"
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3primary
+                                        }
+
+                                        StyledText {
+                                            text: cardItem.cardSections.length > 0
+                                                ? qsTr("%1 modules").arg(cardItem.cardSections.length)
+                                                : qsTr("Code Hub")
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3primary
+                                        }
+                                    }
                                 }
 
                                 // Active In-Context Badge (HUD Prompt Injection)
@@ -2000,7 +2065,7 @@ FocusScope {
                                 color: Qt.alpha(Colours.palette.m3primary, 0.08)
                                 border.width: 1
                                 border.color: Qt.alpha(Colours.palette.m3primary, 0.2)
-                                visible: cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen
+                                visible: cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen && cardItem.cardSections.length === 0
 
                                 ColumnLayout {
                                     id: masterCol
@@ -2049,10 +2114,220 @@ FocusScope {
                                 }
                             }
 
-                            // Learning Notes Block (for Learning Cards)
+                            // =========================================
+                            // DOMAIN CODE HUB: MULTI-SECTION BROWSER
+                            // =========================================
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: cardItem.cardSections.length > 0 && !cardItem.isEditing && !cardItem.isStudyOpen
+
+                                // Section Tabs (Horizontal pill strip)
+                                Flickable {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 28
+                                    contentWidth: secRow.implicitWidth
+                                    clip: true
+                                    flickableDirection: Flickable.HorizontalFlick
+
+                                    RowLayout {
+                                        id: secRow
+                                        spacing: 6
+
+                                        Repeater {
+                                            model: cardItem.cardSections
+
+                                            delegate: StyledRect {
+                                                id: secPill
+                                                required property var modelData
+                                                required property int index
+                                                readonly property bool isCurrent: cardItem.activeSectionIndex === index
+
+                                                implicitWidth: secPillInner.implicitWidth + 14
+                                                implicitHeight: 26
+                                                radius: Tokens.rounding.full
+                                                color: isCurrent ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHigh
+                                                border.width: isCurrent ? 0 : 1
+                                                border.color: Colours.palette.m3outlineVariant
+
+                                                RowLayout {
+                                                    id: secPillInner
+                                                    anchors.centerIn: parent
+                                                    spacing: 4
+
+                                                    MaterialIcon {
+                                                        text: "code"
+                                                        fontStyle: Tokens.font.icon.small
+                                                        color: secPill.isCurrent ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                                    }
+
+                                                    StyledText {
+                                                        text: secPill.modelData.title || qsTr("Module %1").arg(secPill.index + 1)
+                                                        font: Tokens.font.label.small
+                                                        color: secPill.isCurrent ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: cardItem.activeSectionIndex = secPill.index
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Active Section Box
+                                StyledRect {
+                                    Layout.fillWidth: true
+                                    implicitHeight: actSecCol.implicitHeight + 20
+                                    radius: Tokens.rounding.small
+                                    color: Colours.palette.m3surfaceContainerLowest
+                                    border.width: 1
+                                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.5)
+
+                                    ColumnLayout {
+                                        id: actSecCol
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 8
+
+                                        // Section Title Header
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            MaterialIcon {
+                                                text: "developer_mode"
+                                                fontStyle: Tokens.font.icon.small
+                                                color: Colours.palette.m3primary
+                                            }
+
+                                            StyledText {
+                                                Layout.fillWidth: true
+                                                text: cardItem.currentSection ? String(cardItem.currentSection.title || "") : ""
+                                                font: Tokens.font.label.large
+                                                color: Colours.palette.m3onSurface
+                                            }
+                                        }
+
+                                        // Section Rules
+                                        Repeater {
+                                            model: cardItem.currentSection ? (cardItem.currentSection.rules || []) : []
+
+                                            delegate: RowLayout {
+                                                required property string modelData
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Rectangle {
+                                                    width: 5
+                                                    height: 5
+                                                    radius: 2.5
+                                                    color: Colours.palette.m3primary
+                                                    Layout.alignment: Qt.AlignTop
+                                                    Layout.topMargin: 5
+                                                }
+
+                                                SelectableText {
+                                                    Layout.fillWidth: true
+                                                    text: modelData
+                                                    font: Tokens.font.body.small
+                                                    color: Colours.palette.m3onSurface
+                                                }
+                                            }
+                                        }
+
+                                        // Section Production Code Snippet
+                                        StyledRect {
+                                            visible: !!(cardItem.currentSection && cardItem.currentSection.snippet && cardItem.currentSection.snippet.length > 0)
+                                            Layout.fillWidth: true
+                                            implicitHeight: secSnipInner.implicitHeight + 16
+                                            radius: Tokens.rounding.small
+                                            color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.95)
+                                            border.width: 1
+                                            border.color: Qt.alpha(Colours.palette.m3outline, 0.3)
+
+                                            ColumnLayout {
+                                                id: secSnipInner
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 4
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    MaterialIcon { text: "terminal"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3primary }
+                                                    StyledText { text: qsTr("Production Snippet:"); font: Tokens.font.label.small; color: Colours.palette.m3primary }
+                                                    Item { Layout.fillWidth: true }
+                                                    IconButton {
+                                                        type: IconButton.Text
+                                                        icon: "content_copy"
+                                                        font: Tokens.font.icon.small
+                                                        implicitWidth: 22
+                                                        implicitHeight: 22
+                                                        onClicked: {
+                                                            if (cardItem.currentSection && cardItem.currentSection.snippet) {
+                                                                Quickshell.clipboardText = cardItem.currentSection.snippet
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                SelectableText {
+                                                    Layout.fillWidth: true
+                                                    text: cardItem.currentSection ? String(cardItem.currentSection.snippet || "") : ""
+                                                    textFormat: TextEdit.MarkdownText
+                                                    font.family: "monospace"
+                                                    font.pointSize: Tokens.font.body.small.pointSize - 0.5
+                                                    color: Colours.palette.m3onSurface
+                                                }
+                                            }
+                                        }
+
+                                        // Section Specific Pitfalls
+                                        StyledRect {
+                                            visible: !!(cardItem.currentSection && cardItem.currentSection.pitfalls && cardItem.currentSection.pitfalls.length > 0)
+                                            Layout.fillWidth: true
+                                            implicitHeight: secPitInner.implicitHeight + 14
+                                            radius: Tokens.rounding.small
+                                            color: Qt.alpha(Colours.palette.m3error, 0.08)
+                                            border.width: 1
+                                            border.color: Qt.alpha(Colours.palette.m3error, 0.25)
+
+                                            ColumnLayout {
+                                                id: secPitInner
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 4
+
+                                                RowLayout {
+                                                    spacing: 4
+                                                    MaterialIcon { text: "warning"; fontStyle: Tokens.font.icon.small; color: Colours.palette.m3error }
+                                                    StyledText { text: qsTr("Section Traps & Gotchas:"); font: Tokens.font.label.small; color: Colours.palette.m3error }
+                                                }
+
+                                                Repeater {
+                                                    model: cardItem.currentSection ? (cardItem.currentSection.pitfalls || []) : []
+
+                                                    delegate: SelectableText {
+                                                        required property string modelData
+                                                        Layout.fillWidth: true
+                                                        text: "• " + modelData
+                                                        font: Tokens.font.body.small
+                                                        color: Colours.palette.m3onSurface
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Learning Notes Block (for Standard Cards without sections)
                             SelectableText {
                                 Layout.fillWidth: true
-                                visible: !cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen
+                                visible: !cardItem.isMastered && !cardItem.isEditing && !cardItem.isStudyOpen && cardItem.cardSections.length === 0
                                 text: {
                                     const lines = cardItem.cardData ? (cardItem.cardData.lines || []) : []
                                     if (lines.length === 0) return ""
