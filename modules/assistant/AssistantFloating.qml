@@ -39,13 +39,6 @@ Scope {
                             win.st.assistant = false
                         Assistant.cancelCurrentRequest()
                         Assistant.isWindowActive = false
-                        hudCard.currentView = "assistant"
-                    } else {
-                        hudCard.currentView = "assistant"
-                        Qt.callLater(() => {
-                            win.contentItem.focus = true
-                            hudCard.forceActiveFocus()
-                        })
                     }
                     Assistant.isWatching = visible
                 }
@@ -62,7 +55,6 @@ Scope {
                 maximumSize.width: hudCard.implicitWidth
                 maximumSize.height: hudCard.implicitHeight
 
-                contentItem.focus: true
                 contentItem.Config.screen: loader.modelData.name
                 contentItem.Tokens.screen: loader.modelData.name
 
