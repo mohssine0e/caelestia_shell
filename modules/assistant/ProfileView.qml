@@ -74,11 +74,6 @@ FocusScope {
         feedbackTimer.restart()
     }
 
-    Keys.onEscapePressed: event => {
-        root.backRequested()
-        event.accepted = true
-    }
-
     ColumnLayout {
         anchors.fill: parent
         spacing: Tokens.spacing.medium

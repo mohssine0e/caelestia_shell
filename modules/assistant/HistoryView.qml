@@ -21,13 +21,6 @@ FocusScope {
     property string selectedTag: "all"
     property string expandedId: ""
 
-    focus: true
-
-    Keys.onEscapePressed: event => {
-        root.backRequested()
-        event.accepted = true
-    }
-
     function formatTime(ts) {
         if (!ts) return ""
         const diff = Math.floor((Date.now() - ts) / 1000)

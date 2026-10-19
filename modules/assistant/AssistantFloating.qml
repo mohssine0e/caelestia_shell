@@ -39,6 +39,8 @@ Scope {
                             win.st.assistant = false
                         Assistant.cancelCurrentRequest()
                         Assistant.isWindowActive = false
+                    } else {
+                        hudCard.forceActiveFocus()
                     }
                     Assistant.isWatching = visible
                 }

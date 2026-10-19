@@ -103,8 +103,6 @@ FocusScope {
         renderType: TextEdit.NativeRendering
     }
 
-    focus: true
-
     Keys.onEscapePressed: event => {
         if (root.isInChallengeMode) {
             Memory.clearChallenge()
@@ -118,8 +116,7 @@ FocusScope {
             event.accepted = true
             return
         }
-        root.backRequested()
-        event.accepted = true
+        event.accepted = false
     }
 
     function jumpToCard(cardId) {

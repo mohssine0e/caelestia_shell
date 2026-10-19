@@ -37,6 +37,10 @@ FocusScope {
         Assistant.isWindowActive = isHudActive
     }
 
+    onCurrentViewChanged: {
+        root.forceActiveFocus()
+    }
+
     focus: true
     width: {
         if (root.currentView === "memory") return 680
@@ -148,7 +152,7 @@ FocusScope {
         if (event.key === Qt.Key_Slash) {
             if (root.currentView === "memory") {
                 memoryView.focusSearch()
-            } else if (root.currentView === "main") {
+            } else if (root.currentView === "assistant") {
                 customQuestionInput.forceActiveFocus()
             }
             event.accepted = true
