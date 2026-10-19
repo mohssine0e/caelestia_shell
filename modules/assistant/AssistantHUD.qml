@@ -35,6 +35,23 @@ FocusScope {
 
     onIsHudActiveChanged: {
         Assistant.isWindowActive = isHudActive
+        if (isHudActive) {
+            Qt.callLater(() => root.forceActiveFocus())
+        }
+    }
+
+    onCurrentViewChanged: {
+        Qt.callLater(() => {
+            if (root.currentView === "assistant") {
+                root.forceActiveFocus()
+            } else if (root.currentView === "history") {
+                historyView.forceActiveFocus()
+            } else if (root.currentView === "profile") {
+                profileView.forceActiveFocus()
+            } else if (root.currentView === "memory") {
+                memoryView.forceActiveFocus()
+            }
+        })
     }
 
     focus: true
@@ -148,7 +165,7 @@ FocusScope {
         if (event.key === Qt.Key_Slash) {
             if (root.currentView === "memory") {
                 memoryView.focusSearch()
-            } else if (root.currentView === "main") {
+            } else if (root.currentView === "assistant") {
                 customQuestionInput.forceActiveFocus()
             }
             event.accepted = true
@@ -164,6 +181,7 @@ FocusScope {
 
     StyledRect {
         id: mainCard
+        focus: true
 
         anchors.fill: parent
         radius: Tokens.rounding.medium
@@ -732,6 +750,10 @@ FocusScope {
                             Layout.fillWidth: true
                             text: Assistant.geminiKey
                             placeholderText: "Google Gemini API Key..."
+                            Keys.onEscapePressed: event => {
+                                root.closeRequested()
+                                event.accepted = true
+                            }
                         }
 
                         StyledTextField {
@@ -739,6 +761,10 @@ FocusScope {
                             Layout.fillWidth: true
                             text: Assistant.groqKey
                             placeholderText: "Groq API Key (Optional)..."
+                            Keys.onEscapePressed: event => {
+                                root.closeRequested()
+                                event.accepted = true
+                            }
                         }
 
                         // Provider Selection Chips
@@ -965,6 +991,16 @@ FocusScope {
                         selectedTextColor: Colours.palette.m3onSurface
                         renderType: TextEdit.NativeRendering
 
+                        Keys.onEscapePressed: event => {
+                            if (selectedText.length > 0) {
+                                deselect()
+                                event.accepted = true
+                            } else {
+                                root.closeRequested()
+                                event.accepted = true
+                            }
+                        }
+
                         // Show Arabic way (RTL) ONLY when translating and result is Arabic; all other text is strictly LTR
                         readonly property bool isArabicResult: {
                             if (Assistant.activeAction !== "translate" || !text) return false
@@ -1094,6 +1130,20 @@ FocusScope {
                     Layout.fillWidth: true
                     placeholderText: root.askBoundToSelection ? qsTr("Ask about this selection...") : qsTr("Ask a custom question...")
                     placeholderFloats: false
+
+                    Keys.onEscapePressed: event => {
+                        if (text.length > 0) {
+                            text = ""
+                            event.accepted = true
+                        } else if (root.askBoundToSelection) {
+                            root.askBoundToSelection = false
+                            root.forceActiveFocus()
+                            event.accepted = true
+                        } else {
+                            root.closeRequested()
+                            event.accepted = true
+                        }
+                    }
 
                     Keys.onReturnPressed: {
                         if (!Assistant.isGenerating && text.trim().length > 0) {
