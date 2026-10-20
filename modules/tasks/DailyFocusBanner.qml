@@ -679,11 +679,18 @@ StyledRect {
         Flickable {
             id: flick
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            implicitHeight: Math.min(85, Math.max(50, scratchpadInput.contentHeight))
+            implicitHeight: Math.min(320, Math.max(65, scratchpadInput.contentHeight + 12))
             contentWidth: width
-            contentHeight: Math.max(height, scratchpadInput.contentHeight)
+            contentHeight: Math.max(implicitHeight, scratchpadInput.contentHeight + 12)
             clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            function ensureVisible(r) {
+                if (contentY >= r.y)
+                    contentY = r.y
+                else if (contentY + height <= r.y + r.height + 8)
+                    contentY = r.y + r.height + 8 - height
+            }
 
             TextEdit {
                 id: scratchpadInput
@@ -703,6 +710,10 @@ StyledRect {
                     font: scratchpadInput.font
                     color: Colours.palette.m3outline
                     opacity: 0.5
+                }
+
+                onCursorRectangleChanged: {
+                    flick.ensureVisible(cursorRectangle)
                 }
 
                 onTextEdited: {
