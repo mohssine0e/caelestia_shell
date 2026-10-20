@@ -197,6 +197,14 @@ FocusScope {
             list.requestSave()
         }
 
+        onTaskPinned: (taskId, pinned) => {
+            list.tasks = dataManager.tasks
+            list.updateMapsForTask(taskId)
+            list.updateFilteredModel()
+            list.rebuildNavCounts()
+            list.requestSave()
+        }
+
         onTaskRenamed: (taskId, oldTitle, newTitle) => {
             list.tasks = dataManager.tasks
             list.updateMapsForTask(taskId)
@@ -333,14 +341,21 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        var filteredIds = [];
+        var pinnedIds = [];
+        var unpinnedIds = [];
         var allIds = dataManager.getFilteredTasks("", "");
         for (var i = 0; i < allIds.length; i++) {
             var tid = allIds[i];
-            if (list.matchesFilter(list.taskMap[tid], tid)) {
-                filteredIds.push(tid);
+            var task = list.taskMap[tid];
+            if (list.matchesFilter(task, tid)) {
+                if (task && task.pinned) {
+                    pinnedIds.push(tid);
+                } else {
+                    unpinnedIds.push(tid);
+                }
             }
         }
+        var filteredIds = pinnedIds.concat(unpinnedIds);
 
         if (filteredModel.count === filteredIds.length) {
             var same = true;
@@ -674,6 +689,19 @@ FocusScope {
             return
         }
 
+        // P key to toggle pinned status of selected task
+        if (event.key === Qt.Key_P && !event.modifiers) {
+            if (navController.selectedIndex >= 0 && navController.selectedIndex < filteredModel.count) {
+                var tid = filteredModel.get(navController.selectedIndex).todoId;
+                var absIdx = list.taskIndexMap[tid];
+                if (absIdx !== undefined && absIdx >= 0) {
+                    dataManager.togglePin(absIdx);
+                    event.accepted = true;
+                    return;
+                }
+            }
+        }
+
 
         if (navController.handleKey(event.key, event.modifiers))
             event.accepted = true
@@ -696,6 +724,7 @@ FocusScope {
                     }
                     if (!t.todoId) t.todoId = String(t.id || Date.now() + "-" + i);
                     t.todoId = String(t.todoId);
+                    if (t.pinned === undefined) t.pinned = false;
                 }
                 list.resetCaches();
                 list.tasks = parsed;
@@ -843,6 +872,7 @@ FocusScope {
             }
 
             onToggleRequested: function(taskIdx) { dataManager.toggleTask(taskIdx) }
+            onPinRequested: function(taskIdx) { dataManager.togglePin(taskIdx) }
             onRenameRequested: function(taskIdx, newTitle) { dataManager.renameTask(taskIdx, newTitle) }
             onDeleteRequested: function(taskIdx) { dataManager.deleteTask(taskIdx) }
             onAddSubtaskRequested: function(taskIdx, title) { dataManager.addSubtask(taskIdx, title) }

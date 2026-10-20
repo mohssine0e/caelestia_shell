@@ -61,6 +61,7 @@ data model used: for both tasks and habits // to keep for reference
     signal taskDeleted(string taskId)
     signal taskToggled(string taskId, bool newState)
     signal taskRenamed(string taskId, string oldTitle, string newTitle)
+    signal taskPinned(string taskId, bool pinned)
 
     signal subtaskAdded(string taskId, string subtaskId)
     signal subtaskToggled(string taskId, string subtaskId, bool newState)
@@ -506,6 +507,7 @@ data model used: for both tasks and habits // to keep for reference
             minutes: 0,
             icon: icon || null,
             priority: null,
+            pinned: false,
             createdAt: Date.now(),
             subtasks: [],
             completionDates: [],
@@ -603,6 +605,18 @@ data model used: for both tasks and habits // to keep for reference
         }
         tasks = newTasks;
         taskDeleted(taskId);
+    }
+
+    function togglePin(i) {
+        if (i < 0 || i >= tasks.length) return;
+
+        var task = tasks[i];
+        var taskId = task.todoId;
+        var newPinned = !(task.pinned || false);
+        var newTask = copyTask(task, { pinned: newPinned });
+
+        updateTask(i, newTask);
+        taskPinned(taskId, newPinned);
     }
 
     // ── Subtask CRUD ──

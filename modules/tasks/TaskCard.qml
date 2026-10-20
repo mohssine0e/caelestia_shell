@@ -93,6 +93,7 @@ Item {
 
     // ── Signals ──────────────────────────────────────────────────
     signal toggleRequested(int taskIdx)
+    signal pinRequested(int taskIdx)
     signal renameRequested(int taskIdx, string newTitle)
     signal deleteRequested(int taskIdx)
     signal addSubtaskRequested(int taskIdx, string title)
@@ -129,6 +130,7 @@ Item {
     readonly property string taskId: root.taskData?.todoId ?? ""
     readonly property string taskTitle: root.taskData?.title ?? ""
     readonly property bool taskDone: root.taskData?.done ?? false
+    readonly property bool isPinned: !!root.taskData?.pinned
     readonly property bool taskPartial: root.dSub > 0 && root.dSub < root.nSub
     readonly property var subtasks: root.taskData?.subtasks ?? []
     readonly property var emptySub: ({ id: "", title: "", done: false, minutes: 0 })
@@ -193,6 +195,19 @@ Item {
         // ── Border ──
         border.width: root.isSelected ? 1 : 0
         border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
+
+        // ── Pinned visual indicator ──
+        StyledRect {
+            visible: root.isPinned
+            anchors {
+                left: parent.left
+                top: parent.top
+                bottom: parent.bottom
+            }
+            width: 3
+            radius: Tokens.rounding.small
+            color: Colours.palette.m3primary
+        }
 
         // No Behavior on implicitHeight: animating it re-flowed the whole
         // ListView (and resized the popout) on every frame.
@@ -296,6 +311,15 @@ Item {
                             }
                         }
                     }
+                }
+
+                // ── Pinned Icon Indicator ──────────────────────
+                MaterialIcon {
+                    visible: root.isPinned && !root.isEditing
+                    text: "push_pin"
+                    fontStyle: Tokens.font.icon.small
+                    color: Colours.palette.m3primary
+                    Layout.alignment: Qt.AlignVCenter
                 }
 
                 // ── Title ───────────────────────────────────────
@@ -519,6 +543,19 @@ Item {
                     spacing: 0
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
+
+                    // Pin toggle button
+                    IconButton {
+                        type: IconButton.Text
+                        font: Tokens.font.icon.small
+                        icon: "push_pin"
+                        color: root.isPinned ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                        opacity: root.isPinned ? 1 : ((rowHover.hovered || root.isSelected) ? 0.9 : 0.4)
+                        onClicked: {
+                            root.selectionRequested(root.taskIndex)
+                            root.pinRequested(root.taskIndex)
+                        }
+                    }
 
                     // Copy the row's title to the clipboard; icon flips to
                     // "inventory" for 2s as feedback (Notification.vue idiom).

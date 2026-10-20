@@ -258,6 +258,12 @@ FocusScope {
             opacity: 0.4
         }
 
+        // ── Daily Focus & Deadlines Banner ───────────────────────
+        DailyFocusBanner {
+            id: dailyFocusBanner
+            visible: root.activePage === "tasks"
+        }
+
         // ── Task list ────────────────────────────────────────────
         TaskList {
             id: taskList
