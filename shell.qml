@@ -13,12 +13,33 @@ import "modules/timer"
 import "modules/assistant"
 import QtQuick
 import Quickshell
+import Caelestia.Config
 import qs.services
+import qs.modules.areapicker
+import qs.modules.background
+import qs.modules.drawers
+import qs.modules.lock
+import qs.daemons
 
 ShellRoot {
     id: root
 
     settings.watchFiles: false
+
+    Component.onCompleted: {
+        // Force certain singletons to load on shell init instead of lazily
+        Notifs;
+        Players;
+        Brightness;
+        Weather.reload();
+
+        if (GlobalConfig.utilities.vpn.enabled)
+            VPN;
+    }
+
+    FontLoader {
+        source: Quickshell.shellPath("assets/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf")
+    }
 
     Binding {
         target: ShellState
@@ -26,9 +47,7 @@ ShellRoot {
         value: root
     }
 
-    GSFLoader {}
-    ServiceLoader {}
-
+    // Modules
     Background {}
     Drawers {}
     AreaPicker {}
@@ -38,8 +57,11 @@ ShellRoot {
         id: lock
     }
 
+    // Daemons
     Shortcuts {}
     BatteryMonitor {}
+    GameMode {}
+    IdleInhibit {}
     IdleMonitors {
         lock: lock
     }
