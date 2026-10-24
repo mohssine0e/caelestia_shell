@@ -14,6 +14,9 @@ ClipRect {
 
     required property var lock
 
+    readonly property bool hasMedia: Boolean(Players.active && (Players.active.isPlaying || Players.active.trackTitle))
+
+    visible: hasMedia
     implicitHeight: layout.implicitHeight + layout.anchors.margins * 2
     radius: Tokens.rounding.extraLarge
     color: Colours.tPalette.m3surfaceContainer

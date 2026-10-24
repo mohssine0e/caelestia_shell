@@ -2,11 +2,15 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Layouts
+import Quickshell
 import Quickshell.Wayland
 import Caelestia.Config
 import Caelestia.Multimedia
+import Caelestia.Services
 import Caelestia.State
 import qs.components
+import qs.components.controls
 import qs.services
 
 WlSessionLockSurface {
@@ -16,6 +20,8 @@ WlSessionLockSurface {
     required property Pam pam
 
     readonly property alias unlocking: unlockAnim.running
+    readonly property int cardWidth: Math.round(Math.min(480, (root.screen?.width ?? 1920) * 0.35))
+    readonly property int cardHeight: Math.round(Math.min(680, (root.screen?.height ?? 1080) * 0.7))
 
     contentItem.Config.screen: screen.name
     contentItem.Tokens.screen: screen.name
@@ -140,17 +146,17 @@ WlSessionLockSurface {
                 Anim {
                     target: lockBg
                     property: "radius"
-                    to: lockContent.Tokens.rounding.extraLarge * 1.5
+                    to: lockContent.Tokens.rounding.extraExtraLarge * 1.5
                 }
                 Anim {
                     target: lockContent
                     property: "implicitWidth"
-                    to: (root.screen?.height ?? 0) * lockContent.Tokens.sizes.lock.heightMult * lockContent.Tokens.sizes.lock.ratio
+                    to: root.cardWidth
                 }
                 Anim {
                     target: lockContent
                     property: "implicitHeight"
-                    to: (root.screen?.height ?? 0) * lockContent.Tokens.sizes.lock.heightMult
+                    to: root.cardHeight
                 }
             }
         }
@@ -215,12 +221,15 @@ WlSessionLockSurface {
             color: Colours.palette.m3surface
             radius: parent.radius
             opacity: Colours.transparency.enabled ? Colours.transparency.base : 1
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.25)
 
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true
-                blurMax: 15
-                shadowColor: Qt.alpha(Colours.palette.m3shadow, 0.7)
+                blurMax: 20
+                shadowVerticalOffset: 4
+                shadowColor: Qt.alpha(Colours.palette.m3shadow, 0.6)
             }
         }
 
@@ -237,12 +246,56 @@ WlSessionLockSurface {
             id: content
 
             anchors.centerIn: parent
-            width: (root.screen?.height ?? 0) * Tokens.sizes.lock.heightMult * Tokens.sizes.lock.ratio - Tokens.padding.extraLargeIncreased
-            height: (root.screen?.height ?? 0) * Tokens.sizes.lock.heightMult - Tokens.padding.extraLargeIncreased
+            width: root.cardWidth - Tokens.padding.large * 2
+            height: root.cardHeight - Tokens.padding.large * 2
 
             lock: root
             opacity: 0
             scale: 0
+        }
+    }
+
+    RowLayout {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Tokens.padding.extraLarge
+        spacing: Tokens.spacing.small
+        opacity: hoverCorner.hovered ? 1 : 0.45
+
+        Behavior on opacity {
+            Anim { type: Anim.DefaultEffects }
+        }
+
+        HoverHandler {
+            id: hoverCorner
+        }
+
+        IconButton {
+            icon: Config.session.icons.hibernate
+            font: Tokens.font.icon.small
+            implicitWidth: 38
+            implicitHeight: 38
+            radius: Tokens.rounding.full
+            inactiveColour: Colours.tPalette.m3surfaceContainerHigh
+            inactiveOnColour: Colours.palette.m3onSurfaceVariant
+            onClicked: {
+                if (!SessionManager.exec(Config.session.commands.hibernate))
+                    Quickshell.execDetached(Config.session.commands.hibernate);
+            }
+        }
+
+        IconButton {
+            icon: Config.session.icons.shutdown
+            font: Tokens.font.icon.small
+            implicitWidth: 38
+            implicitHeight: 38
+            radius: Tokens.rounding.full
+            inactiveColour: Colours.tPalette.m3surfaceContainerHigh
+            inactiveOnColour: Colours.palette.m3onSurfaceVariant
+            onClicked: {
+                if (!SessionManager.exec(Config.session.commands.shutdown))
+                    Quickshell.execDetached(Config.session.commands.shutdown);
+            }
         }
     }
 }

@@ -69,27 +69,8 @@ Item {
     }
 
     readonly property string stateMsg: {
-        if (Hypr.kbLayout !== Hypr.defaultKbLayout) {
-            if (Hypr.capsLock && Hypr.numLock)
-                // TRANSLATORS: %1 = the active keyboard layout name, e.g. "English (US)"
-                return Tr.tr("Caps lock and Num lock are ON.\nKeyboard layout: %1").arg(Hypr.kbLayoutFull);
-            if (Hypr.capsLock)
-                // TRANSLATORS: %1 = the active keyboard layout name, e.g. "English (US)"
-                return Tr.tr("Caps lock is ON. Keyboard layout: %1").arg(Hypr.kbLayoutFull);
-            if (Hypr.numLock)
-                // TRANSLATORS: %1 = the active keyboard layout name, e.g. "English (US)"
-                return Tr.tr("Num lock is ON. Keyboard layout: %1").arg(Hypr.kbLayoutFull);
-            // TRANSLATORS: %1 = the active keyboard layout name, e.g. "English (US)"
-            return Tr.tr("Keyboard layout: %1").arg(Hypr.kbLayoutFull);
-        }
-
-        if (Hypr.capsLock && Hypr.numLock)
-            return Tr.tr("Caps lock and Num lock are ON.");
-        if (Hypr.capsLock)
-            return Tr.tr("Caps lock is ON.");
         if (Hypr.numLock)
             return Tr.tr("Num lock is ON.");
-
         return "";
     }
 

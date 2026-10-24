@@ -2,8 +2,10 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import M3Shapes
 import Caelestia.Config
+import Caelestia.I18n
 import qs.components
 import qs.components.controls
 import qs.services
@@ -15,14 +17,72 @@ StyledRect {
     required property int centerWidth
     required property var lock
 
+    property string lastKnownLayout: "EN"
+    readonly property string layoutCode: {
+        const full = (Hypr.kbLayoutFull || "").toLowerCase();
+        const code = (Hypr.kbLayout || "").toLowerCase();
+        if (full.includes("english") || code === "us" || code === "en" || code === "gb")
+            return lastKnownLayout = "EN";
+        if (full.includes("arabic") || code === "ara" || code === "ar" || code === "ma")
+            return lastKnownLayout = "AR";
+        if (full.includes("french") || code === "fr")
+            return lastKnownLayout = "FR";
+        if (full.includes("spanish") || code === "es")
+            return lastKnownLayout = "ES";
+        if (full.includes("german") || code === "de")
+            return lastKnownLayout = "DE";
+        if (code && code !== "??" && code.length >= 2)
+            return lastKnownLayout = code.slice(0, 2).toUpperCase();
+        return lastKnownLayout;
+    }
+
+    property bool localCapsLock: Hypr.capsLock
+    readonly property bool isCapsLockOn: localCapsLock || Hypr.capsLock
+
+    Connections {
+        target: Hypr
+        function onCapsLockChanged(): void {
+            root.localCapsLock = Hypr.capsLock;
+        }
+    }
+
     implicitWidth: {
-        const w = centerWidth * 0.8;
-        return lock.pam.buffer ? w : Math.min(w, inputField.placeholderWidth + iconWrapper.implicitWidth + enterButton.implicitWidth + input.spacing * 2 + Tokens.padding.medium * 2);
+        const baseW = Math.round(centerWidth * 0.85);
+        const minW = inputField.placeholderWidth + iconWrapper.implicitWidth + enterButton.implicitWidth + kbLayoutBadge.implicitWidth + (isCapsLockOn ? 70 : 0) + input.spacing * 4 + Tokens.padding.medium * 2;
+        return Math.max(baseW, minW);
     }
     implicitHeight: input.implicitHeight + Tokens.padding.small
 
     color: Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.full
+    border.width: 1.5
+    border.color: shakeAnim.running ? Colours.palette.m3error : Qt.alpha(Colours.palette.m3outlineVariant, 0.15)
+
+    Behavior on border.color {
+        CAnim {}
+    }
+
+    transform: Translate {
+        id: shakeTranslate
+    }
+
+    SequentialAnimation {
+        id: shakeAnim
+
+        NumberAnimation { target: shakeTranslate; property: "x"; to: -10; duration: 45; easing.type: Easing.OutQuad }
+        NumberAnimation { target: shakeTranslate; property: "x"; to: 10; duration: 45; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: shakeTranslate; property: "x"; to: -7; duration: 45; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: shakeTranslate; property: "x"; to: 7; duration: 45; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: shakeTranslate; property: "x"; to: -3; duration: 45; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: shakeTranslate; property: "x"; to: 0; duration: 45; easing.type: Easing.OutQuad }
+    }
+
+    Connections {
+        target: root.lock.pam
+        function onFlashMsg(): void {
+            shakeAnim.restart();
+        }
+    }
 
     focus: true
     onActiveFocusChanged: {
@@ -33,6 +93,11 @@ StyledRect {
     Keys.onPressed: event => {
         if (root.lock.unlocking)
             return;
+
+        if (event.key === Qt.Key_CapsLock) {
+            root.localCapsLock = !root.localCapsLock;
+            Hypr.dispatch("global caelestia:refreshDevices");
+        }
 
         if (event.key === Qt.Key_Enter || event.key === Qt.Key_Return)
             inputField.placeholder.animate = false;
@@ -55,13 +120,38 @@ StyledRect {
 
         anchors.fill: parent
         anchors.margins: Tokens.padding.extraSmall
-        spacing: Tokens.spacing.medium
+        spacing: Tokens.spacing.small
 
         Item {
             id: iconWrapper
 
             Layout.fillHeight: true
             implicitWidth: height
+
+            StyledRect {
+                id: biometricPulse
+
+                anchors.centerIn: parent
+                implicitWidth: parent.height
+                implicitHeight: parent.height
+                radius: Tokens.rounding.full
+                color: Colours.palette.m3primary
+                visible: (root.lock.pam.fprint.active || root.lock.pam.howdy.active) && !root.lock.pam.passwd.active
+
+                SequentialAnimation on scale {
+                    running: biometricPulse.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0.9; to: 1.25; duration: 800; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: 1.25; to: 0.9; duration: 800; easing.type: Easing.InOutSine }
+                }
+
+                SequentialAnimation on opacity {
+                    running: biometricPulse.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0.28; to: 0.05; duration: 800; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: 0.05; to: 0.28; duration: 800; easing.type: Easing.InOutSine }
+                }
+            }
 
             AnimLoader {
                 anchors.centerIn: parent
@@ -128,6 +218,84 @@ StyledRect {
 
             centerScale: root.centerScale
             pam: root.lock.pam
+        }
+
+        StyledRect {
+            id: capsLockBadge
+
+            visible: root.isCapsLockOn
+            Layout.alignment: Qt.AlignVCenter
+            implicitHeight: Math.round(enterButton.implicitHeight * 0.85)
+            implicitWidth: visible ? Math.round(capsContent.implicitWidth + Tokens.padding.small * 2) : 0
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3errorContainer
+
+            opacity: visible ? 1 : 0
+            scale: visible ? 1 : 0.85
+
+            Behavior on opacity {
+                Anim { type: Anim.DefaultEffects }
+            }
+            Behavior on scale {
+                Anim { type: Anim.FastSpatial }
+            }
+            Behavior on implicitWidth {
+                Anim { type: Anim.FastSpatial }
+            }
+
+            RowLayout {
+                id: capsContent
+                anchors.centerIn: parent
+                spacing: Tokens.spacing.extraSmall
+
+                MaterialIcon {
+                    text: "keyboard_capslock"
+                    color: Colours.palette.m3onErrorContainer
+                    fontStyle: Tokens.font.icon.builders.small.scale(root.centerScale * 0.9).build()
+                }
+
+                StyledText {
+                    text: Tr.tr("CAPS")
+                    color: Colours.palette.m3onErrorContainer
+                    font: Tokens.font.label.builders.small.scale(root.centerScale * 0.9).weight(Font.Bold).build()
+                }
+            }
+        }
+
+        StyledRect {
+            id: kbLayoutBadge
+
+            Layout.alignment: Qt.AlignVCenter
+            implicitHeight: Math.round(enterButton.implicitHeight * 0.85)
+            implicitWidth: Math.max(implicitHeight, kbText.implicitWidth + Tokens.padding.small * 2)
+            radius: Tokens.rounding.full
+            color: kbMouse.containsMouse ? Colours.layer(Colours.palette.m3surfaceContainerHighest, 2) : Colours.tPalette.m3surfaceContainerHigh
+
+            Behavior on color {
+                CAnim {}
+            }
+
+            StyledText {
+                id: kbText
+                anchors.centerIn: parent
+                text: root.layoutCode
+                color: kbMouse.containsMouse ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                font: Tokens.font.label.builders.medium.scale(root.centerScale * 0.9).weight(Font.Bold).build()
+
+                Behavior on color {
+                    CAnim {}
+                }
+            }
+
+            MouseArea {
+                id: kbMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    Quickshell.execDetached(["hyprctl", "switchxkblayout", "all", "next"]);
+                }
+            }
         }
 
         Item {
