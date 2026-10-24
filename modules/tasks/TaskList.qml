@@ -341,25 +341,38 @@ FocusScope {
     }
 
     function updateFilteredModel() {
-        var pinnedIds = [];
-        var unpinnedIds = [];
+        var pinnedActiveIds = [];
+        var unpinnedActiveIds = [];
+        var pinnedDoneIds = [];
+        var unpinnedDoneIds = [];
+
         var allIds = dataManager.getFilteredTasks("", "");
         for (var i = 0; i < allIds.length; i++) {
             var tid = allIds[i];
             var task = list.taskMap[tid];
             if (list.matchesFilter(task, tid)) {
                 if (task && task.pinned) {
-                    pinnedIds.push(tid);
+                    if (task.done) {
+                        pinnedDoneIds.push(tid);
+                    } else {
+                        pinnedActiveIds.push(tid);
+                    }
                 } else {
-                    unpinnedIds.push(tid);
+                    if (task && task.done) {
+                        unpinnedDoneIds.push(tid);
+                    } else {
+                        unpinnedActiveIds.push(tid);
+                    }
                 }
             }
         }
-        var filteredIds = pinnedIds.concat(unpinnedIds);
+        var filteredIds = pinnedActiveIds.concat(unpinnedActiveIds, pinnedDoneIds, unpinnedDoneIds);
 
-        if (filteredModel.count === filteredIds.length) {
+        // Fast-path: check if model already matches target exactly
+        var targetCount = filteredIds.length;
+        if (filteredModel.count === targetCount) {
             var same = true;
-            for (var j = 0; j < filteredIds.length; j++) {
+            for (var j = 0; j < targetCount; j++) {
                 if (filteredModel.get(j).todoId !== filteredIds[j]) {
                     same = false;
                     break;
@@ -368,9 +381,45 @@ FocusScope {
             if (same) return;
         }
 
-        filteredModel.clear();
-        for (var k = 0; k < filteredIds.length; k++) {
-            filteredModel.append({ todoId: filteredIds[k] });
+        // Lightweight In-Place Reconciliation (re-uses delegates, 0 flicker, 0 full rebuilds)
+        var targetSet = {};
+        for (var t = 0; t < targetCount; t++) {
+            targetSet[filteredIds[t]] = true;
+        }
+        // 1. Remove obsolete items in reverse
+        for (var r = filteredModel.count - 1; r >= 0; r--) {
+            if (!targetSet[filteredModel.get(r).todoId]) {
+                filteredModel.remove(r);
+            }
+        }
+
+        // 2. In-place reorder & insert
+        for (var k = 0; k < targetCount; k++) {
+            var targetId = filteredIds[k];
+            if (k < filteredModel.count) {
+                var currentId = filteredModel.get(k).todoId;
+                if (currentId === targetId) continue;
+
+                var foundIdx = -1;
+                for (var m = k + 1; m < filteredModel.count; m++) {
+                    if (filteredModel.get(m).todoId === targetId) {
+                        foundIdx = m;
+                        break;
+                    }
+                }
+                if (foundIdx !== -1) {
+                    filteredModel.move(foundIdx, k, 1);
+                } else {
+                    filteredModel.insert(k, { todoId: targetId });
+                }
+            } else {
+                filteredModel.append({ todoId: targetId });
+            }
+        }
+
+        // 3. Trim any trailing items
+        while (filteredModel.count > targetCount) {
+            filteredModel.remove(filteredModel.count - 1);
         }
     }
 

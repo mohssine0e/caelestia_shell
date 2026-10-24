@@ -313,13 +313,36 @@ Item {
                     }
                 }
 
-                // ── Pinned Icon Indicator ──────────────────────
-                MaterialIcon {
-                    visible: root.isPinned && !root.isEditing
-                    text: "push_pin"
-                    fontStyle: Tokens.font.icon.small
-                    color: Colours.palette.m3primary
+                // ── Interactive Star Pin Button (Option 4) ─────
+                Item {
+                    visible: !root.isEditing && (root.isPinned || rowHover.hovered || root.isSelected)
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
                     Layout.alignment: Qt.AlignVCenter
+
+                    MaterialIcon {
+                        anchors.centerIn: parent
+                        text: "star"
+                        fill: root.isPinned ? 1 : 0
+                        fontStyle: Tokens.font.icon.small
+                        color: root.isPinned ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+                        opacity: root.isPinned ? 1.0 : (starHover.hovered ? 0.9 : 0.45)
+
+                        Behavior on color { enabled: root.animate; CAnim {} }
+                        Behavior on opacity { enabled: root.animate; CAnim {} }
+                    }
+
+                    HoverHandler { id: starHover }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.selectionRequested(root.taskIndex)
+                            root.pinRequested(root.taskIndex)
+                        }
+                    }
                 }
 
                 // ── Title ───────────────────────────────────────
@@ -543,19 +566,6 @@ Item {
                     spacing: 0
                     opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
                     Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
-
-                    // Pin toggle button
-                    IconButton {
-                        type: IconButton.Text
-                        font: Tokens.font.icon.small
-                        icon: "push_pin"
-                        color: root.isPinned ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                        opacity: root.isPinned ? 1 : ((rowHover.hovered || root.isSelected) ? 0.9 : 0.4)
-                        onClicked: {
-                            root.selectionRequested(root.taskIndex)
-                            root.pinRequested(root.taskIndex)
-                        }
-                    }
 
                     // Copy the row's title to the clipboard; icon flips to
                     // "inventory" for 2s as feedback (Notification.vue idiom).
