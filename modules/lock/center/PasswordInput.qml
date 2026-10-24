@@ -99,6 +99,59 @@ StyledRect {
             Hypr.dispatch("global caelestia:refreshDevices");
         }
 
+        // Direct media shortcut handling on lockscreen (SUPER+END, SUPER+SHIFT+END, media keys)
+        if (event.modifiers & Qt.MetaModifier) {
+            if (event.key === Qt.Key_End) {
+                if (Players.active?.canTogglePlaying)
+                    Players.active.togglePlaying();
+                else
+                    Quickshell.execDetached(["playerctl", "play-pause"]);
+                event.accepted = true;
+                return;
+            } else if (event.key === Qt.Key_Left) {
+                if (Players.active?.canGoPrevious)
+                    Players.active.previous();
+                else
+                    Quickshell.execDetached(["playerctl", "previous"]);
+                event.accepted = true;
+                return;
+            } else if (event.key === Qt.Key_Right) {
+                if (Players.active?.canGoNext)
+                    Players.active.next();
+                else
+                    Quickshell.execDetached(["playerctl", "next"]);
+                event.accepted = true;
+                return;
+            }
+        }
+
+        if (event.key === Qt.Key_MediaPlay || event.key === Qt.Key_MediaPause || event.key === Qt.Key_MediaTogglePlayPause) {
+            if (Players.active?.canTogglePlaying)
+                Players.active.togglePlaying();
+            else
+                Quickshell.execDetached(["playerctl", "play-pause"]);
+            event.accepted = true;
+            return;
+        } else if (event.key === Qt.Key_MediaNext) {
+            if (Players.active?.canGoNext)
+                Players.active.next();
+            else
+                Quickshell.execDetached(["playerctl", "next"]);
+            event.accepted = true;
+            return;
+        } else if (event.key === Qt.Key_MediaPrevious) {
+            if (Players.active?.canGoPrevious)
+                Players.active.previous();
+            else
+                Quickshell.execDetached(["playerctl", "previous"]);
+            event.accepted = true;
+            return;
+        } else if (event.key === Qt.Key_MediaStop) {
+            Quickshell.execDetached(["playerctl", "stop"]);
+            event.accepted = true;
+            return;
+        }
+
         if (event.key === Qt.Key_Enter || event.key === Qt.Key_Return)
             inputField.placeholder.animate = false;
 

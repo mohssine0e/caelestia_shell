@@ -16,7 +16,7 @@ Item {
     required property int centerWidth
     readonly property color bgColour: Colours.tPalette.m3surfaceContainerHighest
 
-    implicitWidth: Math.round(centerWidth * 0.28)
+    implicitWidth: Math.round(centerWidth * 0.31)
     implicitHeight: {
         CUtils.dependency(shape.height); // Force update when shape height changes
         return shape.pathBounds().height;

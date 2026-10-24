@@ -21,7 +21,7 @@ WlSessionLockSurface {
 
     readonly property alias unlocking: unlockAnim.running
     readonly property int cardWidth: Math.round(Math.min(480, (root.screen?.width ?? 1920) * 0.35))
-    readonly property int cardHeight: Math.round(Math.min(680, (root.screen?.height ?? 1080) * 0.7))
+    readonly property int cardHeight: Math.round(Math.min(750, (root.screen?.height ?? 1080) * 0.77))
 
     contentItem.Config.screen: screen.name
     contentItem.Tokens.screen: screen.name
