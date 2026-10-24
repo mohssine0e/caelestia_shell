@@ -15,29 +15,26 @@ StyledRect {
     id: root
 
     property bool isExpanded: false
+    property string activeNoteId: "today"
     property int activeGroupIndex: 0
     property var groups: []
     property bool addingGroup: false
+    property string editingGroupId: ""
+    property string deletingConfirmId: ""
+    property bool isSyncing: false
 
     readonly property string dataPath: Paths.home + "/daily_focus.json"
 
-    readonly property var currentGroup: {
-        if (root.groups.length === 0) return null
-        var idx = Math.max(0, Math.min(root.activeGroupIndex, root.groups.length - 1))
-        return root.groups[idx]
+    function findGroup(id) {
+        if (!root.groups) return null
+        for (var i = 0; i < root.groups.length; i++) {
+            if (root.groups[i].id === id) return root.groups[i]
+        }
+        return null
     }
 
+    readonly property var currentGroup: findGroup(root.activeNoteId) || (root.groups && root.groups.length > 0 ? root.groups[0] : null)
     readonly property string currentNoteText: currentGroup ? (currentGroup.note || "") : ""
-
-    // Single-line preview when collapsed (joins lines with •)
-    readonly property string singleLineSummary: {
-        var trimmed = root.currentNoteText.trim()
-        if (!trimmed) return qsTr("Click to jot down notes for this group...")
-        var lines = trimmed.split("\n").map(function(l) {
-            return l.replace(/^[\s•\-\*]+/, "").trim()
-        }).filter(function(l) { return l.length > 0 })
-        return lines.join("  •  ")
-    }
 
     Layout.fillWidth: true
     radius: Tokens.rounding.small
@@ -45,9 +42,10 @@ StyledRect {
     border.width: 1
     border.color: root.isExpanded ? Qt.alpha(Colours.palette.m3primary, 0.35)
                                   : Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
+    clip: true
 
     implicitHeight: root.isExpanded
-        ? Math.max(105, editorCol.implicitHeight + Tokens.padding.small * 2)
+        ? Math.max(110, mainCol.implicitHeight + Tokens.padding.small * 2)
         : 40
 
     Behavior on implicitHeight {
@@ -66,12 +64,10 @@ StyledRect {
             try {
                 var raw = JSON.parse(text())
                 root.isExpanded = !!raw.expanded
-                root.activeGroupIndex = typeof raw.activeGroup === "number" ? raw.activeGroup : 0
 
                 if (Array.isArray(raw.groups) && raw.groups.length > 0) {
                     root.groups = raw.groups
                 } else if (raw.note !== undefined) {
-                    // Backward compatibility: migrate single note
                     root.groups = [
                         { id: "today", title: "Today", note: raw.note || "" },
                         { id: "work", title: "Work", note: "" }
@@ -82,6 +78,15 @@ StyledRect {
                         { id: "work", title: "Work", note: "• Fix Docker volume\n• Prepare migration script" }
                     ]
                 }
+
+                if (raw.activeNoteId && root.findGroup(raw.activeNoteId)) {
+                    root.activeNoteId = raw.activeNoteId
+                } else {
+                    var idx = typeof raw.activeGroup === "number" ? Math.max(0, Math.min(raw.activeGroup, root.groups.length - 1)) : 0
+                    root.activeNoteId = root.groups[idx] ? root.groups[idx].id : "today"
+                }
+                root.activeGroupIndex = Math.max(0, root.groups.findIndex(g => g.id === root.activeNoteId))
+
                 syncEditorText()
             } catch (e) {
                 console.warn("[DailyFocusBanner] parse error:", e)
@@ -102,19 +107,63 @@ StyledRect {
             { id: "today", title: "Today", note: "Deploy staging before 3 PM\nReview auth PR\nStandup at 10 AM" },
             { id: "work", title: "Work", note: "• Fix Docker volume\n• Prepare migration script" }
         ]
+        root.activeNoteId = "today"
         root.activeGroupIndex = 0
         root.isExpanded = false
         syncEditorText()
     }
 
     function syncEditorText() {
-        if (scratchpadInput) {
-            scratchpadInput.text = root.currentNoteText
-        }
+        if (!scratchpadInput) return
+        var g = root.findGroup(root.activeNoteId)
+        var targetText = (g && g.note) ? g.note : ""
+        root.isSyncing = true
+        scratchpadInput.text = targetText
+        root.isSyncing = false
     }
 
-    onActiveGroupIndexChanged: {
-        syncEditorText()
+    function switchToNote(targetId) {
+        if (!targetId || targetId === root.activeNoteId) return
+
+        // 1. Commit whatever was in the editor to the old note before switching
+        if (scratchpadInput && root.activeNoteId) {
+            var oldGrp = root.findGroup(root.activeNoteId)
+            if (oldGrp && oldGrp.note !== scratchpadInput.text) {
+                oldGrp.note = scratchpadInput.text
+            }
+        }
+
+        // 2. Set new active ID
+        root.activeNoteId = targetId
+        var idx = root.groups.findIndex(g => g.id === targetId)
+        if (idx !== -1) root.activeGroupIndex = idx
+
+        root.editingGroupId = ""
+        root.deletingConfirmId = ""
+
+        // 3. Atomically load new note text into editor with sync guard
+        var newGrp = root.findGroup(targetId)
+        var newText = (newGrp && newGrp.note) ? newGrp.note : ""
+        if (scratchpadInput) {
+            root.isSyncing = true
+            scratchpadInput.text = newText
+            root.isSyncing = false
+        }
+
+        requestSave()
+    }
+
+    onIsExpandedChanged: {
+        if (root.isExpanded) {
+            syncEditorText()
+            Qt.callLater(() => {
+                if (scratchpadInput) scratchpadInput.forceActiveFocus()
+            })
+        } else {
+            root.editingGroupId = ""
+            root.deletingConfirmId = ""
+            root.addingGroup = false
+        }
         requestSave()
     }
 
@@ -124,6 +173,7 @@ StyledRect {
         onTriggered: {
             var payload = {
                 date: new Date().toISOString().slice(0, 10),
+                activeNoteId: root.activeNoteId,
                 activeGroup: root.activeGroupIndex,
                 expanded: root.isExpanded,
                 groups: root.groups
@@ -136,12 +186,11 @@ StyledRect {
         saveTimer.restart()
     }
 
-    function updateCurrentGroupNote(newText) {
-        if (!currentGroup) return
-        var idx = Math.max(0, Math.min(root.activeGroupIndex, root.groups.length - 1))
-        var copy = root.groups.slice()
-        copy[idx] = Object.assign({}, copy[idx], { note: newText })
-        root.groups = copy
+    function updateActiveNote(newText) {
+        var g = root.findGroup(root.activeNoteId)
+        if (!g) return
+        if (g.note === newText) return
+        g.note = newText
         requestSave()
     }
 
@@ -151,502 +200,420 @@ StyledRect {
             root.addingGroup = false
             return
         }
+        var newId = String(Date.now())
         var newGrp = {
-            id: String(Date.now()),
+            id: newId,
             title: t,
             note: ""
         }
         var copy = root.groups.slice()
         copy.push(newGrp)
         root.groups = copy
-        root.activeGroupIndex = copy.length - 1
+
         root.addingGroup = false
         root.isExpanded = true
-        requestSave()
+        root.switchToNote(newId)
+
         Qt.callLater(() => {
             if (scratchpadInput) scratchpadInput.forceActiveFocus()
         })
     }
 
-    function removeGroup(idx) {
-        if (root.groups.length <= 1) return // Keep at least one
-        var copy = []
-        for (var i = 0; i < root.groups.length; i++) {
-            if (i !== idx) copy.push(root.groups[i])
+    function renameGroup(id, newTitle) {
+        var t = (newTitle || "").trim()
+        if (!t || !id) {
+            root.editingGroupId = ""
+            return
         }
+        var g = root.findGroup(id)
+        if (g) {
+            g.title = t
+            // Trigger property update
+            root.groups = root.groups.slice()
+            requestSave()
+        }
+        root.editingGroupId = ""
+    }
+
+    function requestRemoveGroup(id) {
+        if (root.groups.length <= 1) return
+        var grp = root.findGroup(id)
+        if (!grp) return
+
+        // If the note is empty, delete immediately without prompt
+        if (!grp.note || grp.note.trim().length === 0) {
+            removeGroup(id)
+            return
+        }
+
+        // If it has content, require confirmation click
+        if (root.deletingConfirmId === id) {
+            root.deletingConfirmId = ""
+            removeGroup(id)
+        } else {
+            root.deletingConfirmId = id
+        }
+    }
+
+    function removeGroup(id) {
+        if (root.groups.length <= 1) return
+        var copy = root.groups.filter(g => g.id !== id)
         root.groups = copy
-        if (root.activeGroupIndex >= root.groups.length) {
-            root.activeGroupIndex = root.groups.length - 1
+
+        if (root.activeNoteId === id) {
+            var nextGrp = copy[0]
+            root.activeNoteId = nextGrp ? nextGrp.id : "today"
+            root.activeGroupIndex = 0
+            syncEditorText()
+        } else {
+            root.activeGroupIndex = Math.max(0, root.groups.findIndex(g => g.id === root.activeNoteId))
         }
-        syncEditorText()
+
+        root.deletingConfirmId = ""
+        root.editingGroupId = ""
         requestSave()
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // COLLAPSED VIEW (Group Pills + Note Summary on 1 Line)
-    // ═══════════════════════════════════════════════════════════════
-    RowLayout {
+    // ── Main Layout ──────────────────────────────────────────────
+    ColumnLayout {
+        id: mainCol
         anchors {
-            fill: parent
+            top: parent.top
+            left: parent.left
+            right: parent.right
+            margins: Tokens.padding.small
             leftMargin: Tokens.padding.medium
             rightMargin: Tokens.padding.small
         }
-        visible: !root.isExpanded
-        spacing: Tokens.spacing.small
+        spacing: 6
 
-        // ── Group Pills List ───────────────────────────────────────
+        // ── Single Persistent Header ─────────────────────────────
         RowLayout {
-            spacing: 4
-            Layout.alignment: Qt.AlignVCenter
+            id: headerRow
+            Layout.fillWidth: true
+            Layout.preferredHeight: 28
+            spacing: 8
 
+            // Pin Icon (Toggles expand/shrink on click)
             MaterialIcon {
                 text: "push_pin"
                 fontStyle: Tokens.font.icon.small
                 color: "#ffca1b"
                 fill: 1
                 Layout.alignment: Qt.AlignVCenter
-            }
 
-            Repeater {
-                model: root.groups
-
-                delegate: StyledRect {
-                    id: pillCard
-                    required property var modelData
-                    required property int index
-                    readonly property bool isActive: root.activeGroupIndex === index
-
-                    implicitHeight: 26
-                    implicitWidth: pillRow.implicitWidth + 16
-                    radius: Tokens.rounding.full
-                    color: isActive ? Qt.alpha(Colours.palette.m3primary, 0.22)
-                                    : pillHover.hovered ? Colours.tPalette.m3surfaceContainerHigh
-                                    : Colours.tPalette.m3surfaceContainer
-
-                    border.width: 1
-                    border.color: isActive ? Colours.palette.m3primary
-                                           : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-
-                    Behavior on color { CAnim {} }
-
-                    RowLayout {
-                        id: pillRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        StyledText {
-                            text: pillCard.modelData.title || qsTr("Untitled")
-                            font: Tokens.font.label.medium
-                            color: pillCard.isActive ? Colours.palette.m3primary
-                                                     : Colours.palette.m3onSurface
-                        }
-                    }
-
-                    HoverHandler { id: pillHover }
-
-                    TapHandler {
-                        onTapped: {
-                            root.activeGroupIndex = pillCard.index
-                        }
-                    }
-                }
-            }
-
-            // Quick Add Pill (+ New)
-            StyledRect {
-                visible: !root.addingGroup
-                implicitHeight: 26
-                implicitWidth: addPillRow.implicitWidth + 16
-                radius: Tokens.rounding.full
-                color: addHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainer
-                border.width: 1
-                border.color: addHover.hovered ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-
-                Behavior on color { CAnim {} }
-                Behavior on border.color { CAnim {} }
-
-                RowLayout {
-                    id: addPillRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: "add"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3primary
-                    }
-
-                    StyledText {
-                        text: qsTr("New")
-                        font: Tokens.font.label.medium
-                        color: Colours.palette.m3primary
-                    }
-                }
-
-                HoverHandler { id: addHover }
-
-                TapHandler {
-                    onTapped: {
-                        root.addingGroup = true
-                        Qt.callLater(() => newGroupTitleInput.forceActiveFocus())
-                    }
-                }
-            }
-
-            // Inline input when adding new group
-            StyledRect {
-                id: newGroupInputPill
-                visible: root.addingGroup
-                implicitHeight: 26
-                implicitWidth: 155
-                radius: Tokens.rounding.full
-                color: Colours.tPalette.m3surfaceContainerHigh
-                border.width: 1.5
-                border.color: Colours.palette.m3primary
-
-                RowLayout {
+                MouseArea {
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 6
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.isExpanded = !root.isExpanded
+                }
+            }
+
+            // Horizontally Scrollable Pills Area
+            Flickable {
+                id: pillsFlick
+                Layout.preferredHeight: 28
+                Layout.fillWidth: true
+                Layout.maximumWidth: pillsRow.implicitWidth
+                contentWidth: pillsRow.implicitWidth
+                contentHeight: 28
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                clip: true
+                Layout.alignment: Qt.AlignVCenter
+
+                WheelHandler {
+                    target: pillsFlick
+                    orientation: Qt.Horizontal
+                    property: "contentX"
+                }
+
+                WheelHandler {
+                    target: pillsFlick
+                    orientation: Qt.Vertical
+                    onWheel: event => {
+                        pillsFlick.contentX = Math.max(0, Math.min(pillsFlick.contentWidth - pillsFlick.width, pillsFlick.contentX - event.angleDelta.y))
+                    }
+                }
+
+                RowLayout {
+                    id: pillsRow
+                    height: 28
                     spacing: 4
 
-                    TextInput {
-                        id: newGroupTitleInput
-                        Layout.fillWidth: true
-                        font: Tokens.font.label.medium
-                        color: Colours.palette.m3onSurface
-                        selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
-                        selectedTextColor: Colours.palette.m3onSurface
-                        verticalAlignment: TextInput.AlignVCenter
-                        clip: true
+                    Repeater {
+                        model: root.groups
 
-                        StyledText {
-                            anchors.fill: parent
-                            visible: !newGroupTitleInput.text && !newGroupTitleInput.activeFocus
-                            text: qsTr("Group name...")
-                            font: newGroupTitleInput.font
-                            color: Colours.palette.m3outline
-                            opacity: 0.6
-                            verticalAlignment: Text.AlignVCenter
-                        }
+                        delegate: StyledRect {
+                            id: pillCard
+                            required property var modelData
+                            required property int index
+                            readonly property bool isActive: root.activeNoteId === pillCard.modelData.id
+                            readonly property bool isEditing: root.editingGroupId === pillCard.modelData.id
+                            readonly property bool isConfirmingDelete: root.deletingConfirmId === pillCard.modelData.id
+                            readonly property bool hasNoteContent: !!(pillCard.modelData.note && pillCard.modelData.note.trim().length > 0)
+                            readonly property bool canDelete: root.groups.length > 1 && pillCard.modelData.id !== "today"
 
-                        onAccepted: {
-                            if (text.trim().length > 0) {
-                                root.addGroup(text.trim())
-                                text = ""
-                            } else {
-                                root.addingGroup = false
-                            }
-                        }
+                            implicitHeight: 26
+                            implicitWidth: pillInnerRow.implicitWidth + (isEditing ? 16 : (isConfirmingDelete ? 22 : (canDelete && (pillHover.hovered || isActive) ? 24 : 16)))
+                            radius: Tokens.rounding.full
+                            color: isConfirmingDelete ? Qt.alpha(Colours.palette.m3error, 0.22)
+                                 : isActive ? Qt.alpha(Colours.palette.m3primary, 0.22)
+                                 : pillHover.hovered ? Colours.tPalette.m3surfaceContainerHigh
+                                 : Colours.tPalette.m3surfaceContainer
 
-                        Keys.onEscapePressed: {
-                            root.addingGroup = false
-                            text = ""
-                        }
-                    }
+                            border.width: 1
+                            border.color: isConfirmingDelete ? Colours.palette.m3error
+                                        : isActive ? Colours.palette.m3primary
+                                        : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-                    // Confirm
-                    MaterialIcon {
-                        text: "check"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3primary
-                        visible: newGroupTitleInput.text.trim().length > 0
-                        Layout.alignment: Qt.AlignVCenter
+                            Behavior on color { CAnim {} }
+                            Behavior on border.color { CAnim {} }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (newGroupTitleInput.text.trim().length > 0) {
-                                    root.addGroup(newGroupTitleInput.text.trim())
-                                    newGroupTitleInput.text = ""
+                            RowLayout {
+                                id: pillInnerRow
+                                anchors.centerIn: parent
+                                spacing: 5
+
+                                // Content indicator dot (shows when note contains text)
+                                StyledRect {
+                                    visible: pillCard.hasNoteContent && !pillCard.isEditing && !pillCard.isConfirmingDelete
+                                    implicitWidth: 5
+                                    implicitHeight: 5
+                                    radius: Tokens.rounding.full
+                                    color: pillCard.isActive ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3onSurface, 0.5)
+                                    Layout.alignment: Qt.AlignVCenter
                                 }
-                            }
-                        }
-                    }
 
-                    // Cancel
-                    MaterialIcon {
-                        text: "close"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3outline
-                        Layout.alignment: Qt.AlignVCenter
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.addingGroup = false
-                                newGroupTitleInput.text = ""
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Faint vertical divider
-        StyledRect {
-            Layout.preferredHeight: 16
-            implicitWidth: 1
-            color: Colours.palette.m3outlineVariant
-            opacity: 0.3
-            Layout.alignment: Qt.AlignVCenter
-        }
-
-        // ── Single-Line Note Preview ───────────────────────────────
-        StyledText {
-            Layout.fillWidth: true
-            text: root.singleLineSummary
-            font: Tokens.font.body.medium
-            color: root.currentNoteText.trim().length > 0
-                ? Colours.palette.m3onSurface
-                : Colours.palette.m3outline
-            opacity: root.currentNoteText.trim().length > 0 ? 1 : 0.6
-            elide: Text.ElideRight
-            maximumLineCount: 1
-            Layout.alignment: Qt.AlignVCenter
-
-            TapHandler {
-                onTapped: {
-                    root.isExpanded = true
-                    root.requestSave()
-                    Qt.callLater(() => scratchpadInput.forceActiveFocus())
-                }
-            }
-        }
-
-        // Chevron expand button
-        IconButton {
-            type: ButtonBase.Text
-            icon: "keyboard_arrow_down"
-            Layout.alignment: Qt.AlignVCenter
-            onClicked: {
-                root.isExpanded = true
-                root.requestSave()
-                Qt.callLater(() => scratchpadInput.forceActiveFocus())
-            }
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // EXPANDED VIEW (Group Switcher on Top + Seamless Scratchpad)
-    // ═══════════════════════════════════════════════════════════════
-    ColumnLayout {
-        id: editorCol
-        anchors {
-            fill: parent
-            margins: Tokens.padding.small
-            leftMargin: Tokens.padding.medium
-            rightMargin: Tokens.padding.medium
-        }
-        visible: root.isExpanded
-        spacing: 4
-
-        // ── Header: Group Switcher + Chevron ───────────────────────
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 6
-
-            MaterialIcon {
-                text: "push_pin"
-                fontStyle: Tokens.font.icon.small
-                color: "#ffca1b"
-                fill: 1
-                Layout.alignment: Qt.AlignVCenter
-            }
-
-            // Group pills inside expanded mode
-            RowLayout {
-                spacing: 4
-                Layout.alignment: Qt.AlignVCenter
-
-                Repeater {
-                    model: root.groups
-
-                    delegate: StyledRect {
-                        id: expPillCard
-                        required property var modelData
-                        required property int index
-                        readonly property bool isActive: root.activeGroupIndex === index
-
-                        implicitHeight: 26
-                        implicitWidth: expPillRow.implicitWidth + (expPillCard.modelData.id !== "today" && root.groups.length > 1 ? 24 : 16)
-                        radius: Tokens.rounding.full
-                        color: isActive ? Qt.alpha(Colours.palette.m3primary, 0.22)
-                                        : expPillHover.hovered ? Colours.tPalette.m3surfaceContainerHigh
-                                        : Colours.tPalette.m3surfaceContainer
-
-                        border.width: 1
-                        border.color: isActive ? Colours.palette.m3primary
-                                               : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-
-                        Behavior on color { CAnim {} }
-
-                        RowLayout {
-                            id: expPillRow
-                            anchors.centerIn: parent
-                            spacing: 4
-
-                            StyledText {
-                                text: expPillCard.modelData.title || qsTr("Untitled")
-                                font: Tokens.font.label.medium
-                                color: expPillCard.isActive ? Colours.palette.m3primary
-                                                            : Colours.palette.m3onSurface
-                            }
-
-                            // Delete group button (shows for non-default groups when hovered or active)
-                            MaterialIcon {
-                                visible: root.groups.length > 1 && expPillCard.modelData.id !== "today" && (expPillHover.hovered || expPillCard.isActive)
-                                text: "close"
-                                fontStyle: Tokens.font.icon.small
-                                color: Colours.palette.m3outline
-                                opacity: 0.7
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.removeGroup(expPillCard.index)
+                                // Note title text
+                                StyledText {
+                                    visible: !pillCard.isEditing && !pillCard.isConfirmingDelete
+                                    text: pillCard.modelData.title || qsTr("Untitled")
+                                    font: Tokens.font.label.medium
+                                    color: pillCard.isActive ? Colours.palette.m3primary : Colours.palette.m3onSurface
+                                    Layout.alignment: Qt.AlignVCenter
                                 }
-                            }
-                        }
 
-                        HoverHandler { id: expPillHover }
+                                // Delete confirmation warning label
+                                StyledText {
+                                    visible: pillCard.isConfirmingDelete
+                                    text: qsTr("Delete?")
+                                    font: Tokens.font.label.medium
+                                    color: Colours.palette.m3error
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
 
-                        TapHandler {
-                            onTapped: {
-                                root.activeGroupIndex = expPillCard.index
-                            }
-                        }
-                    }
-                }
+                                // Inline rename field
+                                TextInput {
+                                    id: renameInput
+                                    visible: pillCard.isEditing
+                                    text: pillCard.modelData.title || ""
+                                    font: Tokens.font.label.medium
+                                    color: Colours.palette.m3onSurface
+                                    selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                                    selectedTextColor: Colours.palette.m3onSurface
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    Layout.preferredWidth: Math.max(65, contentWidth + 10)
 
-                // Add button (+ New) in expanded mode
-                StyledRect {
-                    visible: !root.addingGroup
-                    implicitHeight: 26
-                    implicitWidth: expAddPillRow.implicitWidth + 16
-                    radius: Tokens.rounding.full
-                    color: expAddHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainer
-                    border.width: 1
-                    border.color: expAddHover.hovered ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                                    onAccepted: {
+                                        root.renameGroup(pillCard.modelData.id, text)
+                                    }
 
-                    Behavior on color { CAnim {} }
-                    Behavior on border.color { CAnim {} }
+                                    Keys.onEscapePressed: {
+                                        root.editingGroupId = ""
+                                    }
+                                }
 
-                    RowLayout {
-                        id: expAddPillRow
-                        anchors.centerIn: parent
-                        spacing: 4
+                                // Rename confirm checkmark
+                                MaterialIcon {
+                                    visible: pillCard.isEditing
+                                    text: "check"
+                                    fontStyle: Tokens.font.icon.small
+                                    color: Colours.palette.m3primary
+                                    Layout.alignment: Qt.AlignVCenter
 
-                        MaterialIcon {
-                            text: "add"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3primary
-                        }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.renameGroup(pillCard.modelData.id, renameInput.text)
+                                    }
+                                }
 
-                        StyledText {
-                            text: qsTr("New")
-                            font: Tokens.font.label.medium
-                            color: Colours.palette.m3primary
-                        }
-                    }
+                                // Delete button
+                                MaterialIcon {
+                                    visible: pillCard.canDelete && !pillCard.isEditing && (pillHover.hovered || pillCard.isActive || pillCard.isConfirmingDelete)
+                                    text: pillCard.isConfirmingDelete ? "delete_forever" : "close"
+                                    fontStyle: Tokens.font.icon.small
+                                    color: pillCard.isConfirmingDelete ? Colours.palette.m3error : Colours.palette.m3outline
+                                    opacity: pillCard.isConfirmingDelete ? 1.0 : 0.7
+                                    Layout.alignment: Qt.AlignVCenter
 
-                    HoverHandler { id: expAddHover }
-
-                    TapHandler {
-                        onTapped: {
-                            root.addingGroup = true
-                            Qt.callLater(() => expNewGroupTitleInput.forceActiveFocus())
-                        }
-                    }
-                }
-
-                // Inline input when adding new group in expanded mode
-                StyledRect {
-                    id: expNewGroupInputPill
-                    visible: root.addingGroup
-                    implicitHeight: 26
-                    implicitWidth: 155
-                    radius: Tokens.rounding.full
-                    color: Colours.tPalette.m3surfaceContainerHigh
-                    border.width: 1.5
-                    border.color: Colours.palette.m3primary
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 6
-                        spacing: 4
-
-                        TextInput {
-                            id: expNewGroupTitleInput
-                            Layout.fillWidth: true
-                            font: Tokens.font.label.medium
-                            color: Colours.palette.m3onSurface
-                            selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
-                            selectedTextColor: Colours.palette.m3onSurface
-                            verticalAlignment: TextInput.AlignVCenter
-                            clip: true
-
-                            StyledText {
-                                anchors.fill: parent
-                                visible: !expNewGroupTitleInput.text && !expNewGroupTitleInput.activeFocus
-                                text: qsTr("Group name...")
-                                font: expNewGroupTitleInput.font
-                                color: Colours.palette.m3outline
-                                opacity: 0.6
-                                verticalAlignment: Text.AlignVCenter
-                            }
-
-                            onAccepted: {
-                                if (text.trim().length > 0) {
-                                    root.addGroup(text.trim())
-                                    text = ""
-                                } else {
-                                    root.addingGroup = false
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.requestRemoveGroup(pillCard.modelData.id)
+                                    }
                                 }
                             }
 
-                            Keys.onEscapePressed: {
-                                root.addingGroup = false
-                                text = ""
-                            }
-                        }
+                            HoverHandler { id: pillHover }
 
-                        // Confirm
-                        MaterialIcon {
-                            text: "check"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3primary
-                            visible: expNewGroupTitleInput.text.trim().length > 0
-                            Layout.alignment: Qt.AlignVCenter
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (expNewGroupTitleInput.text.trim().length > 0) {
-                                        root.addGroup(expNewGroupTitleInput.text.trim())
-                                        expNewGroupTitleInput.text = ""
+                            TapHandler {
+                                onTapped: {
+                                    if (pillCard.isEditing) return
+                                    if (pillCard.isConfirmingDelete) {
+                                        root.deletingConfirmId = ""
+                                        return
+                                    }
+                                    if (root.activeNoteId === pillCard.modelData.id) {
+                                        // Clicking active group toggles expand/shrink
+                                        root.isExpanded = !root.isExpanded
+                                    } else {
+                                        root.switchToNote(pillCard.modelData.id)
+                                    }
+                                }
+                                onDoubleTapped: {
+                                    if (!pillCard.isEditing) {
+                                        root.editingGroupId = pillCard.modelData.id
+                                        Qt.callLater(() => {
+                                            renameInput.forceActiveFocus()
+                                            renameInput.selectAll()
+                                        })
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // Cancel
-                        MaterialIcon {
-                            text: "close"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3outline
-                            Layout.alignment: Qt.AlignVCenter
+                    // Quick Add Pill (+ New)
+                    StyledRect {
+                        visible: !root.addingGroup
+                        implicitHeight: 26
+                        implicitWidth: addPillRow.implicitWidth + 16
+                        radius: Tokens.rounding.full
+                        color: addHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainer
+                        border.width: 1
+                        border.color: addHover.hovered ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
+                        Behavior on color { CAnim {} }
+                        Behavior on border.color { CAnim {} }
+
+                        RowLayout {
+                            id: addPillRow
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            MaterialIcon {
+                                text: "add"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3primary
+                            }
+
+                            StyledText {
+                                text: qsTr("New")
+                                font: Tokens.font.label.medium
+                                color: Colours.palette.m3primary
+                            }
+                        }
+
+                        HoverHandler { id: addHover }
+
+                        TapHandler {
+                            onTapped: {
+                                root.addingGroup = true
+                                root.editingGroupId = ""
+                                root.deletingConfirmId = ""
+                                Qt.callLater(() => newGroupTitleInput.forceActiveFocus())
+                            }
+                        }
+                    }
+
+                    // Inline input when adding new group
+                    StyledRect {
+                        id: newGroupInputPill
+                        visible: root.addingGroup
+                        implicitHeight: 26
+                        implicitWidth: 160
+                        radius: Tokens.rounding.full
+                        color: Colours.tPalette.m3surfaceContainerHigh
+                        border.width: 1.5
+                        border.color: Colours.palette.m3primary
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 6
+                            spacing: 4
+
+                            TextInput {
+                                id: newGroupTitleInput
+                                Layout.fillWidth: true
+                                font: Tokens.font.label.medium
+                                color: Colours.palette.m3onSurface
+                                selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                                selectedTextColor: Colours.palette.m3onSurface
+                                verticalAlignment: TextInput.AlignVCenter
+                                clip: true
+
+                                StyledText {
+                                    anchors.fill: parent
+                                    visible: !newGroupTitleInput.text && !newGroupTitleInput.activeFocus
+                                    text: qsTr("Note name...")
+                                    font: newGroupTitleInput.font
+                                    color: Colours.palette.m3outline
+                                    opacity: 0.6
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                onAccepted: {
+                                    if (text.trim().length > 0) {
+                                        root.addGroup(text.trim())
+                                        text = ""
+                                    } else {
+                                        root.addingGroup = false
+                                    }
+                                }
+
+                                Keys.onEscapePressed: {
                                     root.addingGroup = false
-                                    expNewGroupTitleInput.text = ""
+                                    text = ""
+                                }
+                            }
+
+                            // Confirm
+                            MaterialIcon {
+                                text: "check"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3primary
+                                visible: newGroupTitleInput.text.trim().length > 0
+                                Layout.alignment: Qt.AlignVCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (newGroupTitleInput.text.trim().length > 0) {
+                                            root.addGroup(newGroupTitleInput.text.trim())
+                                            newGroupTitleInput.text = ""
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Cancel
+                            MaterialIcon {
+                                text: "close"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3outline
+                                Layout.alignment: Qt.AlignVCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.addingGroup = false
+                                        newGroupTitleInput.text = ""
+                                    }
                                 }
                             }
                         }
@@ -654,36 +621,79 @@ StyledRect {
                 }
             }
 
-            Item { Layout.fillWidth: true }
+            // Clickable header spacer (Toggles expand/shrink on click!)
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-            IconButton {
-                type: ButtonBase.Text
-                icon: "keyboard_arrow_up"
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.editingGroupId = ""
+                        root.deletingConfirmId = ""
+                        root.isExpanded = !root.isExpanded
+                    }
+                }
+            }
+
+            // Chevron toggle button (Smoothly rotates 180° when expanded)
+            StyledRect {
+                implicitWidth: 26
+                implicitHeight: 26
+                radius: Tokens.rounding.full
+                color: chevronHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : "transparent"
                 Layout.alignment: Qt.AlignVCenter
-                onClicked: {
-                    root.isExpanded = false
-                    root.requestSave()
+
+                Behavior on color { CAnim {} }
+
+                MaterialIcon {
+                    anchors.centerIn: parent
+                    text: "keyboard_arrow_down"
+                    fontStyle: Tokens.font.icon.small
+                    color: chevronHover.hovered ? Colours.palette.m3primary : Colours.palette.m3outline
+                    rotation: root.isExpanded ? 180 : 0
+
+                    Behavior on rotation {
+                        Anim { type: Anim.FastSpatial }
+                    }
+                    Behavior on color { CAnim {} }
+                }
+
+                HoverHandler { id: chevronHover }
+
+                TapHandler {
+                    onTapped: {
+                        root.editingGroupId = ""
+                        root.deletingConfirmId = ""
+                        root.isExpanded = !root.isExpanded
+                    }
                 }
             }
         }
 
-        // Faint Separator
+        // Faint horizontal separator line (visible only when expanded)
         StyledRect {
+            id: sep
             Layout.fillWidth: true
             implicitHeight: 1
             color: Colours.palette.m3outlineVariant
-            opacity: 0.2
+            opacity: root.isExpanded ? 0.25 : 0
+            visible: root.isExpanded
+
+            Behavior on opacity { CAnim {} }
         }
 
-        // ── Active Group Multi-Line Scratchpad ─────────────────────
+        // ── Active Group Multi-Line Scratchpad (Expanded Only) ───
         Flickable {
             id: flick
             Layout.fillWidth: true
-            implicitHeight: Math.min(320, Math.max(65, scratchpadInput.contentHeight + 12))
+            implicitHeight: Math.min(320, Math.max(70, scratchpadInput.contentHeight + 16))
             contentWidth: width
-            contentHeight: Math.max(implicitHeight, scratchpadInput.contentHeight + 12)
+            contentHeight: Math.max(implicitHeight, scratchpadInput.contentHeight + 16)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            visible: root.isExpanded
 
             function ensureVisible(r) {
                 if (contentY >= r.y)
@@ -703,10 +713,14 @@ StyledRect {
                 selectByMouse: true
                 renderType: TextEdit.NativeRendering
 
+                Component.onCompleted: {
+                    root.syncEditorText()
+                }
+
                 StyledText {
                     anchors.fill: parent
                     visible: !scratchpadInput.text && !scratchpadInput.activeFocus
-                    text: qsTr("• Write notes for %1 here...").arg(root.currentGroup ? root.currentGroup.title : "this group")
+                    text: qsTr("• Write notes for %1 here...").arg(root.currentGroup ? root.currentGroup.title : "this note")
                     font: scratchpadInput.font
                     color: Colours.palette.m3outline
                     opacity: 0.5
@@ -717,7 +731,8 @@ StyledRect {
                 }
 
                 onTextEdited: {
-                    root.updateCurrentGroupNote(text)
+                    if (root.isSyncing) return
+                    root.updateActiveNote(text)
                 }
 
                 Keys.onEscapePressed: {
