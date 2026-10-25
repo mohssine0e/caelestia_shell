@@ -27,6 +27,7 @@ Scope {
     property string lockMessage
     property int state
     property string buffer
+    property bool pendingShutdown: false
 
     signal flashMsg
 
@@ -95,8 +96,14 @@ Scope {
         }
 
         onCompleted: res => {
-            if (res === PamResult.Success)
+            if (res === PamResult.Success) {
+                if (root.pendingShutdown) {
+                    if (!SessionManager.exec(Config.session.commands.shutdown))
+                        Quickshell.execDetached(Config.session.commands.shutdown);
+                    return;
+                }
                 return root.lock.unlock();
+            }
 
             root.clearTransientState();
 

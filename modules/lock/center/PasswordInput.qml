@@ -94,32 +94,30 @@ StyledRect {
         if (root.lock.unlocking)
             return;
 
+        if (event.key === Qt.Key_Escape) {
+            if (root.lock.pam.pendingShutdown) {
+                root.lock.pam.pendingShutdown = false;
+                event.accepted = true;
+                return;
+            }
+        }
+
         if (event.key === Qt.Key_CapsLock) {
             root.localCapsLock = !root.localCapsLock;
             Hypr.dispatch("global caelestia:refreshDevices");
         }
 
-        // Direct media shortcut handling on lockscreen (SUPER+END, SUPER+SHIFT+END, media keys)
+        // Direct media shortcut handling on lockscreen (SUPER+END for play/pause, SUPER+SHIFT+END for stop - only these two)
         if (event.modifiers & Qt.MetaModifier) {
             if (event.key === Qt.Key_End) {
-                if (Players.active?.canTogglePlaying)
-                    Players.active.togglePlaying();
-                else
-                    Quickshell.execDetached(["playerctl", "play-pause"]);
-                event.accepted = true;
-                return;
-            } else if (event.key === Qt.Key_Left) {
-                if (Players.active?.canGoPrevious)
-                    Players.active.previous();
-                else
-                    Quickshell.execDetached(["playerctl", "previous"]);
-                event.accepted = true;
-                return;
-            } else if (event.key === Qt.Key_Right) {
-                if (Players.active?.canGoNext)
-                    Players.active.next();
-                else
-                    Quickshell.execDetached(["playerctl", "next"]);
+                if (event.modifiers & Qt.ShiftModifier) {
+                    Quickshell.execDetached(["playerctl", "stop"]);
+                } else {
+                    if (Players.active?.canTogglePlaying)
+                        Players.active.togglePlaying();
+                    else
+                        Quickshell.execDetached(["playerctl", "play-pause"]);
+                }
                 event.accepted = true;
                 return;
             }
@@ -363,8 +361,10 @@ StyledRect {
             MaterialShape {
                 anchors.fill: parent
 
-                color: root.lock.pam.buffer ? Colours.palette.m3primary : Colours.layer(Colours.palette.m3surfaceContainerHigh, 2)
-                shape: root.lock.pam.buffer ? MaterialShape.Arrow : MaterialShape.Circle
+                color: root.lock.pam.pendingShutdown
+                    ? (root.lock.pam.buffer ? Colours.palette.m3error : Colours.palette.m3errorContainer)
+                    : (root.lock.pam.buffer ? Colours.palette.m3primary : Colours.layer(Colours.palette.m3surfaceContainerHigh, 2))
+                shape: root.lock.pam.pendingShutdown ? MaterialShape.Cookie4Sided : (root.lock.pam.buffer ? MaterialShape.Arrow : MaterialShape.Circle)
                 scale: !root.lock.pam.buffer ? 1 : mouse.pressed ? 0.6 : mouse.containsMouse ? 0.8 : 0.7
                 rotation: 90
 
@@ -392,8 +392,8 @@ StyledRect {
                 id: enterIcon
 
                 anchors.centerIn: parent
-                text: "arrow_forward"
-                color: Colours.palette.m3onSurfaceVariant
+                text: root.lock.pam.pendingShutdown ? "power_settings_new" : "arrow_forward"
+                color: root.lock.pam.pendingShutdown ? Colours.palette.m3onErrorContainer : Colours.palette.m3onSurfaceVariant
                 fontStyle: Tokens.font.icon.builders.medium.scale(root.centerScale * 1.2).build()
                 opacity: root.lock.pam.buffer ? 0 : 1
 

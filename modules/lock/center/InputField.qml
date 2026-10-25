@@ -55,6 +55,8 @@ Item {
                 return Tr.tr("Scanning face...");
             if (root.pam.state === Pam.MaxTries)
                 return Tr.tr("Max tries reached");
+            if (root.pam.pendingShutdown)
+                return Tr.tr("Password to shut down");
             return Tr.tr("Enter your password");
         }
         font: placeholder.font
@@ -69,7 +71,7 @@ Item {
         text: nonAnimPlaceholder.text
 
         animate: true
-        color: root.pam.passwd.active ? Colours.palette.m3secondary : Colours.palette.m3outline
+        color: root.pam.pendingShutdown ? Colours.palette.m3error : (root.pam.passwd.active ? Colours.palette.m3secondary : Colours.palette.m3outline)
         font: Tokens.font.body.builders.medium.scale(root.centerScale).width(110).build()
 
         opacity: root.buffer ? 0 : 1

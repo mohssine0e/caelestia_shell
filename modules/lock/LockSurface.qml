@@ -260,7 +260,7 @@ WlSessionLockSurface {
         anchors.bottom: parent.bottom
         anchors.margins: Tokens.padding.extraLarge
         spacing: Tokens.spacing.small
-        opacity: hoverCorner.hovered ? 1 : 0.45
+        opacity: root.pam.pendingShutdown ? 1.0 : (hoverCorner.hovered ? 1.0 : 0.45)
 
         Behavior on opacity {
             Anim { type: Anim.DefaultEffects }
@@ -270,31 +270,41 @@ WlSessionLockSurface {
             id: hoverCorner
         }
 
-        IconButton {
-            icon: Config.session.icons.hibernate
-            font: Tokens.font.icon.small
-            implicitWidth: 38
-            implicitHeight: 38
+        StyledRect {
+            id: shutdownBtn
+            implicitWidth: 42
+            implicitHeight: 42
             radius: Tokens.rounding.full
-            inactiveColour: Colours.tPalette.m3surfaceContainerHigh
-            inactiveOnColour: Colours.palette.m3onSurfaceVariant
-            onClicked: {
-                if (!SessionManager.exec(Config.session.commands.hibernate))
-                    Quickshell.execDetached(Config.session.commands.hibernate);
-            }
-        }
+            color: root.pam.pendingShutdown 
+                ? Colours.palette.m3error 
+                : (shutMouse.containsMouse ? Colours.layer(Colours.tPalette.m3surfaceContainerHigh, 2) : Colours.tPalette.m3surfaceContainerHigh)
+            border.color: root.pam.pendingShutdown ? Colours.palette.m3error : Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
+            border.width: root.pam.pendingShutdown ? 2 : 1
 
-        IconButton {
-            icon: Config.session.icons.shutdown
-            font: Tokens.font.icon.small
-            implicitWidth: 38
-            implicitHeight: 38
-            radius: Tokens.rounding.full
-            inactiveColour: Colours.tPalette.m3surfaceContainerHigh
-            inactiveOnColour: Colours.palette.m3onSurfaceVariant
-            onClicked: {
-                if (!SessionManager.exec(Config.session.commands.shutdown))
-                    Quickshell.execDetached(Config.session.commands.shutdown);
+            scale: shutMouse.pressed ? 0.92 : (shutMouse.containsMouse ? 1.08 : 1.0)
+
+            Behavior on scale {
+                Anim { type: Anim.FastSpatial }
+            }
+            Behavior on color {
+                Anim { type: Anim.FastEffects }
+            }
+
+            MaterialIcon {
+                anchors.centerIn: parent
+                text: Config.session.icons.shutdown
+                color: root.pam.pendingShutdown ? Colours.palette.m3onError : Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.builders.small.scale(1.1).build()
+            }
+
+            MouseArea {
+                id: shutMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.pam.pendingShutdown = !root.pam.pendingShutdown;
+                }
             }
         }
     }
