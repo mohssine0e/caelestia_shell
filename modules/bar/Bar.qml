@@ -89,13 +89,34 @@ ColumnLayout {
     function handleWheel(y: real, angleDelta: point): void {
         const ch = childAt(width / 2, y) as EntryWrapper;
         if (ch?.entryId === "workspaces" && Config.bar.scrollActions.workspaces) {
-            // Workspace scroll
+            // Workspace scroll (strictly clamped between 1 and 9)
             const mon = Hypr.monitorFor(screen);
             const specialWs = mon?.lastIpcObject.specialWorkspace.name;
-            if (specialWs?.length > 0)
+            if (specialWs?.length > 0) {
                 Hypr.dispatch(Hypr.usingLua ? `hl.dsp.workspace.toggle_special("${specialWs.slice(8)}")` : `togglespecialworkspace ${specialWs.slice(8)}`);
-            else if (angleDelta.y < 0 || mon.activeWorkspace?.id > 1)
-                Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "r${angleDelta.y > 0 ? "-" : "+"}1" })` : `workspace r${angleDelta.y > 0 ? "-" : "+"}1`);
+            } else if (!Config.bar.workspaces.showUnoccupied) {
+                const ignoredTags = GlobalConfig.bar.workspaces.ignoredTags;
+                const occ = Hypr.workspaces.values
+                    .filter(w => w.id > 0 && w.id <= 9 && (w.id === mon?.activeWorkspace?.id || w.toplevels.values.some(t => !Hypr.isToplevelIgnored(t, ignoredTags))))
+                    .map(w => w.id)
+                    .sort((a, b) => a - b);
+                const currentId = mon?.activeWorkspace?.id ?? 1;
+                const idx = occ.indexOf(currentId);
+                if (angleDelta.y < 0 && idx !== -1 && idx < occ.length - 1) {
+                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "${occ[idx + 1]}" })` : `workspace ${occ[idx + 1]}`);
+                } else if (angleDelta.y > 0 && idx > 0) {
+                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "${occ[idx - 1]}" })` : `workspace ${occ[idx - 1]}`);
+                }
+            } else {
+                const currentId = mon?.activeWorkspace?.id ?? 1;
+                const maxWs = 9;
+                if (angleDelta.y < 0 && currentId < maxWs) {
+                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "${currentId + 1}" })` : `workspace ${currentId + 1}`);
+                } else if (angleDelta.y > 0 && currentId > 1) {
+                    const prevId = Math.min(maxWs, currentId - 1);
+                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "${prevId}" })` : `workspace ${prevId}`);
+                }
+            }
         } else if (y < screen.height / 2 && Config.bar.scrollActions.volume) {
             // Volume scroll on top half
             if (angleDelta.y > 0)

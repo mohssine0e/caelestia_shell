@@ -67,6 +67,7 @@ StyledRect {
 
     Colouriser {
         id: colouriser
+        visible: false
 
         source: root.mask
         sourceColor: Colours.palette.m3onSurface

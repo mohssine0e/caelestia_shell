@@ -30,7 +30,7 @@ ClipRect {
 
         const allMonitors = !Config.bar.workspaces.perMonitor;
         const ignoredTags = GlobalConfig.bar.workspaces.ignoredTags;
-        const workspaces = Hypr.workspaces.values.filter(w => w.id > 0 && (allMonitors || w.monitor === root.monitor) && (w.id === activeWsId || w.toplevels.values.some(t => !Hypr.isToplevelIgnored(t, ignoredTags))));
+        const workspaces = Hypr.workspaces.values.filter(w => w.id > 0 && (allMonitors || w.monitor === root.monitor) && (w.id === activeWsId || w.toplevels.values.some(t => !Hypr.isToplevelIgnored(t, ignoredTags)))).sort((a, b) => a.id - b.id);
         const currentIdx = workspaces.findIndex(w => w.id === activeWsId);
         if (currentIdx < 0)
             return [];
@@ -106,6 +106,7 @@ ClipRect {
 
         LazyListView {
             id: workspaces
+            z: 1
 
             anchors.left: parent.left
             anchors.right: parent.right
@@ -156,6 +157,7 @@ ClipRect {
 
         Loader {
             asynchronous: true
+            z: 0
             anchors.left: workspaces.left
             anchors.right: workspaces.right
             active: Config.bar.workspaces.activeIndicator

@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Widgets
 import Quickshell.Hyprland
 import M3Shapes
 import Caelestia.Components
@@ -138,8 +139,9 @@ Item {
                     return String(wsName).toLowerCase();
                 return wsName;
             }
-            color: root.fgColour
+            color: root.focused ? Colours.palette.m3onPrimary : root.fgColour
             verticalAlignment: Qt.AlignVCenter
+            horizontalAlignment: Text.AlignHCenter
             font.family: Tokens.font.workspaces
         }
     }
@@ -220,16 +222,42 @@ Item {
                     }
                 }
 
-                delegate: MaterialIcon {
+                delegate: Item {
                     id: win
 
                     required property var modelData
                     required property int index // Needed, LazyListView will fail to set it if it doesn't exist
 
-                    grade: 0
-                    horizontalAlignment: Text.AlignHCenter
-                    text: Icons.getAppCategoryIcon(modelData.lastIpcObject.class, "terminal")
-                    color: root.onOtherMonitor ? root.offMonitorColour : Colours.palette.m3onSurfaceVariant
+                    implicitWidth: Tokens.sizes.bar.innerWidth
+                    implicitHeight: 22
+
+                    readonly property string appIconPath: {
+                        const cls = win.modelData?.lastIpcObject?.class || win.modelData?.lastIpcObject?.initialClass || "";
+                        let path = Icons.getAppIcon(cls, "");
+                        if (!path && cls)
+                            path = Quickshell.iconPath(cls, "");
+                        if (!path && cls)
+                            path = Quickshell.iconPath(cls.toLowerCase(), "");
+                        return path ?? "";
+                    }
+
+                    IconImage {
+                        id: appIcon
+                        anchors.centerIn: parent
+                        implicitSize: 18
+                        asynchronous: true
+                        source: win.appIconPath
+                        visible: win.appIconPath !== "" && status !== Image.Error
+                    }
+
+                    MaterialIcon {
+                        anchors.centerIn: parent
+                        fontStyle: Tokens.font.icon.small
+                        grade: 0
+                        text: Icons.getAppCategoryIcon(win.modelData?.lastIpcObject?.class ?? "", "terminal")
+                        color: root.onOtherMonitor ? root.offMonitorColour : Colours.palette.m3onSurfaceVariant
+                        visible: !appIcon.visible
+                    }
 
                     opacity: LazyListView.adding || LazyListView.removing ? 0 : 1
 
