@@ -3,12 +3,14 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Quickshell.Io
 import M3Shapes
 import Caelestia.Config
 import qs.components
 import qs.components.controls
 import qs.components.effects
 import qs.services
+import qs.utils
 
 CustomMouseArea {
     id: root
@@ -30,6 +32,79 @@ CustomMouseArea {
             screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth - 1, 1);
         else if (event.angleDelta.y < 0)
             screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth + 1, 1);
+    }
+
+    property var gcalEvents: ({})
+    property bool gcalConfigured: false
+    property string selectedDateKey: ""
+
+    readonly property string effectiveDateKey: selectedDateKey !== "" ? selectedDateKey : dateToKey(new Date())
+    readonly property var currentDayEvents: gcalEvents[effectiveDateKey] || []
+
+    readonly property var nextUpcomingEvent: {
+        const todayStr = root.dateToKey(new Date());
+        const keys = Object.keys(root.gcalEvents).filter(k => k >= todayStr).sort();
+        if (keys.length > 0) {
+            const nextDate = keys[0];
+            const evs = root.gcalEvents[nextDate];
+            if (evs && evs.length > 0) {
+                return { dateKey: nextDate, event: evs[0] };
+            }
+        }
+        return null;
+    }
+
+    function dateToKey(d: var): string {
+        if (!d) return "";
+        const yr = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, "0");
+        const dy = String(d.getDate()).padStart(2, "0");
+        return `${yr}-${mo}-${dy}`;
+    }
+
+    function getEventsFor(d: var): var {
+        const k = dateToKey(d);
+        return root.gcalEvents[k] || [];
+    }
+
+    FileView {
+        id: gcalStorage
+        path: Paths.home + "/.cache/caelestia/gcal.json"
+        preload: true
+        watchChanges: true
+        onLoaded: {
+            try {
+                const data = JSON.parse(text());
+                root.gcalEvents = data.events || {};
+                root.gcalConfigured = data.configured ?? false;
+                console.log("[Calendar] FileView loaded " + Object.keys(root.gcalEvents).length + " dates");
+            } catch (e) {
+                console.log("[Calendar] FileView parse error:", e);
+                root.gcalEvents = {};
+                root.gcalConfigured = false;
+            }
+        }
+        onFileChanged: reload()
+    }
+
+    Component.onCompleted: {
+        try {
+            const txt = gcalStorage.text();
+            if (txt) {
+                const data = JSON.parse(txt);
+                root.gcalEvents = data.events || {};
+                root.gcalConfigured = data.configured ?? false;
+                console.log("[Calendar] Component.onCompleted loaded " + Object.keys(root.gcalEvents).length + " dates");
+            }
+        } catch (e) {
+            console.log("[Calendar] Component.onCompleted error:", e);
+        }
+    }
+
+    Process {
+        id: syncProc
+        command: ["python3", Paths.home + "/.config/caelestia/scripts/sync-gcal.py", "--notify"]
+        onExited: gcalStorage.reload()
     }
 
     anchors.left: parent.left
@@ -147,6 +222,25 @@ CustomMouseArea {
             }
 
             IconButton {
+                id: syncBtn
+                isRound: true
+                icon: "sync"
+                type: IconButton.Text
+                font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                padding: Tokens.padding.small
+                enabled: !syncProc.running
+                onClicked: syncProc.running = true
+
+                NumberAnimation on rotation {
+                    running: syncProc.running
+                    loops: Animation.Infinite
+                    from: 0
+                    to: 360
+                    duration: 1000
+                }
+            }
+
+            IconButton {
                 isRound: true
                 icon: "chevron_right"
                 type: IconButton.Text
@@ -198,16 +292,48 @@ CustomMouseArea {
                     required property var model
 
                     implicitWidth: implicitHeight
-                    implicitHeight: text.implicitHeight + Tokens.padding.small
+                    implicitHeight: text.implicitHeight + Tokens.padding.small + 4
+
+                    readonly property string dayKey: root.dateToKey(dayItem.model.date)
+                    readonly property var events: root.gcalEvents[dayKey] || []
+                    readonly property bool hasEvents: events.length > 0
+                    readonly property bool isSelected: root.selectedDateKey === dayKey
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: Math.min(parent.width, parent.height) - 4
+                        height: width
+                        radius: width / 2
+                        color: Colours.palette.m3primaryContainer
+                        opacity: dayItem.isSelected && !dayItem.model.today ? 0.7 : 0
+                        Behavior on opacity {
+                            Anim { type: Anim.FastEffects }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (root.selectedDateKey === dayItem.dayKey) {
+                                root.selectedDateKey = "";
+                            } else {
+                                root.selectedDateKey = dayItem.dayKey;
+                            }
+                        }
+                    }
 
                     StyledText {
                         id: text
 
                         anchors.centerIn: parent
+                        anchors.verticalCenterOffset: -2
 
                         horizontalAlignment: Text.AlignHCenter
                         text: grid.locale.toString(dayItem.model.day)
                         color: {
+                            if (dayItem.isSelected && !dayItem.model.today)
+                                return Colours.palette.m3onPrimaryContainer;
                             const dayOfWeek = dayItem.model.date.getDay();
                             if (dayOfWeek === 0 || dayOfWeek === 6)
                                 return Colours.palette.m3tertiary;
@@ -216,6 +342,18 @@ CustomMouseArea {
                         }
                         opacity: dayItem.model.today || dayItem.model.month === grid.month ? 1 : 0.4
                         font: Tokens.font.body.small
+                    }
+
+                    Rectangle {
+                        id: dot
+                        anchors.top: text.bottom
+                        anchors.topMargin: 1
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 4
+                        height: 4
+                        radius: 2
+                        color: dayItem.model.today ? Colours.palette.m3onPrimary : Colours.palette.m3tertiary
+                        visible: dayItem.hasEvents
                     }
                 }
             }
@@ -252,6 +390,193 @@ CustomMouseArea {
                     source: grid
                     sourceColor: Colours.palette.m3onSurface
                     colorizationColor: Colours.palette.m3onPrimary
+                }
+            }
+        }
+
+        // Event List / Agenda for selected day, today, or upcoming
+        ColumnLayout {
+            id: agendaSection
+
+            Layout.fillWidth: true
+            spacing: Tokens.spacing.extraSmall
+            visible: root.selectedDateKey !== "" || root.currentDayEvents.length > 0 || (root.gcalConfigured && root.nextUpcomingEvent !== null)
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: Colours.palette.m3outlineVariant
+                opacity: 0.35
+                Layout.topMargin: Tokens.spacing.extraSmall
+                Layout.bottomMargin: Tokens.spacing.extraSmall / 2
+            }
+
+            // Day Agenda Header (when a date is selected or today has events)
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Tokens.spacing.small
+                visible: root.selectedDateKey !== "" || root.currentDayEvents.length > 0
+
+                StyledText {
+                    text: {
+                        const targetKey = root.effectiveDateKey;
+                        const parts = targetKey.split("-");
+                        if (parts.length < 3) return "";
+                        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                        const today = new Date();
+                        const isToday = d.getDate() === today.getDate() &&
+                                        d.getMonth() === today.getMonth() &&
+                                        d.getFullYear() === today.getFullYear();
+                        const dateStr = d.toLocaleDateString(Qt.locale(), "ddd, MMM d");
+                        return isToday ? ("Today • " + dateStr) : dateStr;
+                    }
+                    font: Tokens.font.title.small
+                    color: Colours.palette.m3onSurface
+                    Layout.fillWidth: true
+                }
+
+                IconButton {
+                    icon: "close"
+                    isRound: true
+                    type: IconButton.Text
+                    font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                    padding: Tokens.padding.extraSmall
+                    visible: root.selectedDateKey !== ""
+                    onClicked: root.selectedDateKey = ""
+                }
+            }
+
+            // Events for the selected day or today
+            Repeater {
+                model: (root.selectedDateKey !== "" || root.currentDayEvents.length > 0) ? root.currentDayEvents : []
+
+                delegate: RowLayout {
+                    id: eventItem
+                    required property var modelData
+
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+
+                    Rectangle {
+                        width: 3
+                        Layout.preferredHeight: contentCol.implicitHeight
+                        radius: 1.5
+                        color: Colours.palette.m3tertiary
+                    }
+
+                    ColumnLayout {
+                        id: contentCol
+                        Layout.fillWidth: true
+                        spacing: 1
+
+                        StyledText {
+                            text: eventItem.modelData.title || "Untitled Event"
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurface
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+
+                        StyledText {
+                            text: {
+                                let t = eventItem.modelData.time || "";
+                                if (eventItem.modelData.location) {
+                                    t = t ? (t + " • " + eventItem.modelData.location) : eventItem.modelData.location;
+                                }
+                                return t;
+                            }
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                            elide: Text.ElideRight
+                            visible: text !== ""
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
+            // Empty state for explicitly selected day with 0 events
+            StyledText {
+                visible: root.currentDayEvents.length === 0 && root.selectedDateKey !== ""
+                text: !root.gcalConfigured ? "Google Calendar not linked yet\nPaste your private iCal link into ~/.config/caelestia/calendar_url.txt" : "No events scheduled"
+                horizontalAlignment: Text.AlignHCenter
+                font: Tokens.font.body.small
+                color: Colours.palette.m3outline
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: Tokens.padding.extraSmall
+                Layout.bottomMargin: Tokens.padding.extraSmall
+            }
+
+            // Next Upcoming Event block (when today has no events & no date selected)
+            ColumnLayout {
+                id: upcomingBlock
+                Layout.fillWidth: true
+                spacing: Tokens.spacing.extraSmall
+                visible: root.selectedDateKey === "" && root.currentDayEvents.length === 0 && root.nextUpcomingEvent !== null
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+
+                    StyledText {
+                        text: "Upcoming"
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                        Layout.fillWidth: true
+                    }
+
+                    StyledText {
+                        text: {
+                            if (!root.nextUpcomingEvent) return "";
+                            const parts = root.nextUpcomingEvent.dateKey.split("-");
+                            const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                            return d.toLocaleDateString(Qt.locale(), "MMM d, yyyy");
+                        }
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3primary
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+
+                    Rectangle {
+                        width: 3
+                        Layout.preferredHeight: upcomingContentCol.implicitHeight
+                        radius: 1.5
+                        color: Colours.palette.m3tertiary
+                    }
+
+                    ColumnLayout {
+                        id: upcomingContentCol
+                        Layout.fillWidth: true
+                        spacing: 1
+
+                        StyledText {
+                            text: root.nextUpcomingEvent ? (root.nextUpcomingEvent.event.title || "Untitled Event") : ""
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurface
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+
+                        StyledText {
+                            text: {
+                                if (!root.nextUpcomingEvent) return "";
+                                let t = root.nextUpcomingEvent.event.time || "";
+                                if (root.nextUpcomingEvent.event.location) {
+                                    t = t ? (t + " • " + root.nextUpcomingEvent.event.location) : root.nextUpcomingEvent.event.location;
+                                }
+                                return t;
+                            }
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                            elide: Text.ElideRight
+                            visible: text !== ""
+                            Layout.fillWidth: true
+                        }
+                    }
                 }
             }
         }
