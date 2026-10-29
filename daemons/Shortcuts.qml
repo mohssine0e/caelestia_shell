@@ -180,8 +180,24 @@ Scope {
             Assistant.trigger();
         }
 
+        function setView(view: string): void {
+            const st = ShellState.forActive() ?? ShellState.states[0];
+            if (st && !st.assistant) st.assistant = true;
+            Assistant.requestedView = view;
+        }
+
         function toggle(): void {
             Assistant.toggle();
+        }
+
+        function startGauntlet(cardId: string): void {
+            const st = ShellState.forActive() ?? ShellState.states[0];
+            if (st && !st.assistant) st.assistant = true;
+            if (cardId && cardId.length > 0) {
+                Memory.startChallenge(cardId);
+            } else {
+                Memory.startDailyGauntlet();
+            }
         }
 
         target: "assistant"

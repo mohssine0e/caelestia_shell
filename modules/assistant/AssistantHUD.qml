@@ -15,14 +15,28 @@ FocusScope {
     id: root
 
     property var windowRef: null
-    property string currentView: "assistant" // "assistant", "history", "profile", "memory"
+    property string currentView: Assistant.requestedView.length > 0 ? Assistant.requestedView : "assistant"
+    onCurrentViewChanged: {
+        if (Assistant.requestedView !== currentView) Assistant.requestedView = currentView
+        root.forceActiveFocus()
+    }
     property bool askBoundToSelection: false
+    property string activeSelectedText: ""
 
     Connections {
         target: Assistant
         function onSelectedTextChanged() {
             if (!Assistant.selectedText || Assistant.selectedText.trim().length === 0) {
                 root.askBoundToSelection = false
+            }
+        }
+    }
+
+    Connections {
+        target: Memory
+        function onActiveChallengeChanged() {
+            if (Memory.activeChallenge !== null) {
+                root.currentView = "memory"
             }
         }
     }
@@ -37,9 +51,7 @@ FocusScope {
         Assistant.isWindowActive = isHudActive
     }
 
-    onCurrentViewChanged: {
-        root.forceActiveFocus()
-    }
+
 
     focus: true
     width: {
@@ -91,8 +103,8 @@ FocusScope {
             event.accepted = true
             return
         }
-        if (contentText.activeFocus && contentText.selectedText.length > 0) {
-            contentText.deselect()
+        if (root.activeSelectedText.length > 0) {
+            root.activeSelectedText = ""
             event.accepted = true
             return
         }
@@ -101,6 +113,12 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
+        if (event.key === Qt.Key_L && (event.modifiers & Qt.ControlModifier)) {
+            Assistant.clearThread(true)
+            event.accepted = true
+            return
+        }
+
         if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") {
             event.accepted = false
             return
@@ -135,9 +153,9 @@ FocusScope {
         }
 
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
-            if (contentText.selectedText && contentText.selectedText.length > 0) {
-                Quickshell.clipboardText = contentText.selectedText
-                Assistant.lastSeenClipboard = contentText.selectedText.trim()
+            if (root.activeSelectedText.length > 0) {
+                Quickshell.clipboardText = root.activeSelectedText
+                Assistant.lastSeenClipboard = root.activeSelectedText.trim()
                 event.accepted = true
                 return
             }
@@ -322,6 +340,16 @@ FocusScope {
                             radius: Tokens.rounding.full
                             color: Colours.palette.m3primary
                         }
+                    }
+
+                    IconButton {
+                        visible: Assistant.hasThread
+                        type: IconButton.Text
+                        icon: "add_comment"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: Assistant.clearThread(true)
                     }
 
                     IconButton {
@@ -594,12 +622,10 @@ FocusScope {
                 id: resultContainer
                 Layout.fillWidth: true
                 implicitHeight: {
-                    if (Assistant.isLoading || Assistant.isStreaming) return 360
+                    if (Assistant.isLoading && Assistant.messages.length === 0) return 360
                     if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 240
-                    if (Assistant.resultText.length === 0) return 180
-                    // Dynamically fit content size, capped between 200px and 540px for a taller, comfortable reading area
-                    const contentH = Math.max(contentText.contentHeight, contentText.implicitHeight) + Tokens.padding.medium * 2
-                    return Math.max(200, Math.min(540, contentH))
+                    if (Assistant.messages.length === 0) return 180
+                    return 460
                 }
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLowest
@@ -615,7 +641,7 @@ FocusScope {
                 ColumnLayout {
                     anchors.centerIn: parent
                     width: parent.width - Tokens.padding.large * 2
-                    visible: Assistant.isLoading
+                    visible: Assistant.isLoading && Assistant.messages.length === 0
                     spacing: Tokens.spacing.medium
 
                     RowLayout {
@@ -876,7 +902,7 @@ FocusScope {
                 ColumnLayout {
                     anchors.centerIn: parent
                     width: parent.width - Tokens.padding.large * 2
-                    visible: !Assistant.isLoading && Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.resultText.length === 0
+                    visible: !Assistant.isLoading && Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.messages.length === 0
                     spacing: Tokens.spacing.medium
 
                     RowLayout {
@@ -941,57 +967,286 @@ FocusScope {
                     }
                 }
 
-                // 4D. Result Markdown Output (Selectable & Copyable)
-                Flickable {
-                    id: flick
+                // 4D. Scrollable Multi-Turn Conversation Stream
+                Item {
+                    id: chatStreamContainer
                     anchors.fill: parent
-                    anchors.margins: Tokens.padding.medium
-                    visible: !Assistant.isLoading && Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.resultText.length > 0
-                    contentHeight: contentText.contentHeight
-                    clip: true
+                    anchors.margins: Tokens.padding.small
+                    visible: Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.messages.length > 0
 
-                    onContentHeightChanged: {
-                        if (Assistant.isStreaming) {
-                            flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+                    ListView {
+                        id: chatList
+                        anchors.fill: parent
+                        clip: true
+                        spacing: 12
+                        model: Assistant.messages
+
+                        property bool userScrolledUp: false
+
+                        onContentYChanged: {
+                            if (!moving && !dragging) return
+                            const atBottom = (contentY >= contentHeight - height - 30)
+                            userScrolledUp = !atBottom
+                        }
+
+                        Connections {
+                            target: Assistant
+                            function onResultTextChanged() {
+                                if (!chatList.userScrolledUp) {
+                                    Qt.callLater(() => chatList.positionViewAtEnd())
+                                }
+                            }
+                            function onMessagesChanged() {
+                                if (!chatList.userScrolledUp) {
+                                    Qt.callLater(() => chatList.positionViewAtEnd())
+                                }
+                            }
+                        }
+
+                        StyledScrollBar.vertical: StyledScrollBar {
+                            flickable: chatList
+                        }
+
+                        delegate: Item {
+                            id: msgDelegate
+                            required property var modelData
+                            required property int index
+
+                            width: chatList.width
+                            implicitHeight: msgCol.implicitHeight
+
+                            ColumnLayout {
+                                id: msgCol
+                                width: parent.width
+                                spacing: 4
+
+                                // 1. Topic Shift Divider
+                                RowLayout {
+                                    visible: modelData.type === "topic_divider"
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: Colours.palette.m3outlineVariant
+                                    }
+
+                                    StyledRect {
+                                        implicitHeight: 22
+                                        implicitWidth: topicDivText.implicitWidth + 18
+                                        radius: Tokens.rounding.full
+                                        color: Colours.palette.m3surfaceContainerHigh
+
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 4
+
+                                            MaterialIcon {
+                                                text: "auto_awesome"
+                                                fontStyle: Tokens.font.icon.small
+                                                color: Colours.palette.m3primary
+                                            }
+
+                                            StyledText {
+                                                id: topicDivText
+                                                text: modelData.text || qsTr("New Context")
+                                                font: Tokens.font.label.small
+                                                color: Colours.palette.m3onSurfaceVariant
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: Colours.palette.m3outlineVariant
+                                    }
+                                }
+
+                                // 2. User Question Bubble
+                                RowLayout {
+                                    visible: modelData.role === "user"
+                                    Layout.fillWidth: true
+
+                                    Item { Layout.fillWidth: true }
+
+                                    StyledRect {
+                                        Layout.maximumWidth: Math.min(parent.width * 0.88, 520)
+                                        implicitWidth: userMsgCol.implicitWidth + 16
+                                        implicitHeight: userMsgCol.implicitHeight + 12
+                                        radius: Tokens.rounding.medium
+                                        color: Colours.palette.m3primaryContainer
+
+                                        ColumnLayout {
+                                            id: userMsgCol
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 4
+
+                                            RowLayout {
+                                                visible: modelData.action && modelData.action !== "ask"
+                                                spacing: 4
+
+                                                MaterialIcon {
+                                                    text: "label"
+                                                    fontStyle: Tokens.font.icon.small
+                                                    color: Colours.palette.m3onPrimaryContainer
+                                                }
+
+                                                StyledText {
+                                                    text: String(modelData.action).toUpperCase()
+                                                    font: Tokens.font.label.small
+                                                    color: Colours.palette.m3onPrimaryContainer
+                                                }
+                                            }
+
+                                            StyledText {
+                                                Layout.fillWidth: true
+                                                text: modelData.text || ""
+                                                font: Tokens.font.body.medium
+                                                color: Colours.palette.m3onPrimaryContainer
+                                                wrapMode: Text.Wrap
+                                            }
+
+                                            StyledText {
+                                                Layout.alignment: Qt.AlignRight
+                                                text: modelData.timestamp || ""
+                                                font: Tokens.font.label.small
+                                                color: Qt.alpha(Colours.palette.m3onPrimaryContainer, 0.6)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. Assistant Answer Card
+                                StyledRect {
+                                    visible: modelData.role === "assistant"
+                                    Layout.fillWidth: true
+                                    implicitHeight: assistantMsgCol.implicitHeight + 16
+                                    radius: Tokens.rounding.medium
+                                    color: Colours.palette.m3surfaceContainerLow
+                                    border.width: 1
+                                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+                                    ColumnLayout {
+                                        id: assistantMsgCol
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 6
+
+                                        TextEdit {
+                                            id: msgTextEdit
+                                            Layout.fillWidth: true
+                                            text: modelData.text || ""
+                                            readOnly: true
+                                            selectByMouse: true
+                                            selectByKeyboard: true
+                                            cursorVisible: false
+                                            textFormat: (modelData.isStreaming && Assistant.isStreaming) ? TextEdit.PlainText : TextEdit.MarkdownText
+                                            wrapMode: TextEdit.Wrap
+                                            font: Tokens.font.body.builders.small.size(11).build()
+                                            color: Colours.palette.m3onSurface
+                                            selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                                            selectedTextColor: Colours.palette.m3onSurface
+                                            renderType: TextEdit.NativeRendering
+
+                                            onSelectedTextChanged: {
+                                                if (selectedText && selectedText.trim().length > 0) {
+                                                    root.activeSelectedText = selectedText.trim()
+                                                    Assistant.lastSeenClipboard = selectedText.trim()
+                                                }
+                                            }
+                                        }
+
+                                        // Streaming Shimmer Indicator when waiting for first token
+                                        RowLayout {
+                                            visible: modelData.isStreaming && (!modelData.text || modelData.text.length === 0)
+                                            spacing: 6
+
+                                            MaterialIcon {
+                                                text: "progress_activity"
+                                                fontStyle: Tokens.font.icon.small
+                                                color: Colours.palette.m3primary
+
+                                                RotationAnimation on rotation {
+                                                    from: 0
+                                                    to: 360
+                                                    duration: 1000
+                                                    loops: Animation.Infinite
+                                                    running: modelData.isStreaming
+                                                }
+                                            }
+
+                                            StyledText {
+                                                text: qsTr("Thinking...")
+                                                font: Tokens.font.body.small
+                                                color: Colours.palette.m3outline
+                                            }
+                                        }
+
+                                        // Per-Message Action Toolbar
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            visible: !modelData.isStreaming && modelData.text && modelData.text.length > 0
+
+                                            StyledText {
+                                                text: modelData.timestamp || ""
+                                                font: Tokens.font.label.small
+                                                color: Colours.palette.m3outline
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+
+                                            MessageActionBar {
+                                                text: modelData.text
+                                                action: modelData.action || "ask"
+                                                sourceText: Assistant.selectedText || Assistant.activePrompt
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    StyledScrollBar.vertical: StyledScrollBar {
-                        flickable: flick
-                    }
+                    // Floating "↓ Latest" button
+                    StyledRect {
+                        visible: chatList.userScrolledUp && Assistant.messages.length > 1
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 10
+                        implicitWidth: jumpRow.implicitWidth + 14
+                        implicitHeight: 26
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3primary
+                        z: 10
 
-                    TextEdit {
-                        id: contentText
-                        width: flick.width - Tokens.padding.small
-                        text: Assistant.resultText
-                        readOnly: true
-                        selectByMouse: true
-                        selectByKeyboard: true
-                        mouseSelectionMode: TextEdit.SelectCharacters
-                        cursorVisible: false
-                        textFormat: Assistant.isStreaming ? TextEdit.PlainText : TextEdit.MarkdownText
-                        wrapMode: TextEdit.Wrap
-                        font: Tokens.font.body.builders.small.size(11).build()
-                        color: Colours.palette.m3onSurface
-                        selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
-                        selectedTextColor: Colours.palette.m3onSurface
-                        renderType: TextEdit.NativeRendering
+                        RowLayout {
+                            id: jumpRow
+                            anchors.centerIn: parent
+                            spacing: 4
 
-                        // Show Arabic way (RTL) ONLY when translating and result is Arabic; all other text is strictly LTR
-                        readonly property bool isArabicResult: {
-                            if (Assistant.activeAction !== "translate" || !text) return false
-                            const arabicMatches = text.match(/[\u0600-\u06FF]/g)
-                            const latinMatches = text.match(/[A-Za-z]/g)
-                            const arabicCount = arabicMatches ? arabicMatches.length : 0
-                            const latinCount = latinMatches ? latinMatches.length : 0
-                            return arabicCount > latinCount
+                            MaterialIcon {
+                                text: "arrow_downward"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3onPrimary
+                            }
+
+                            StyledText {
+                                text: qsTr("Latest")
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3onPrimary
+                            }
                         }
 
-                        horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
-
-                        onSelectedTextChanged: {
-                            if (selectedText && selectedText.trim().length > 0) {
-                                Assistant.lastSeenClipboard = selectedText.trim()
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                chatList.userScrolledUp = false
+                                chatList.positionViewAtEnd()
                             }
                         }
                     }
@@ -1183,12 +1438,12 @@ FocusScope {
                     font: Tokens.font.icon.small
                     implicitWidth: 36
                     implicitHeight: 36
-                    enabled: Assistant.resultText.length > 0 || (contentText.selectedText && contentText.selectedText.length > 0)
+                    enabled: Assistant.resultText.length > 0 || root.activeSelectedText.length > 0
                     opacity: enabled ? 1.0 : 0.4
                     onClicked: {
-                        if (contentText.selectedText && contentText.selectedText.length > 0) {
-                            Quickshell.clipboardText = contentText.selectedText
-                            Assistant.lastSeenClipboard = contentText.selectedText.trim()
+                        if (root.activeSelectedText.length > 0) {
+                            Quickshell.clipboardText = root.activeSelectedText
+                            Assistant.lastSeenClipboard = root.activeSelectedText.trim()
                         } else if (Assistant.resultText.length > 0) {
                             Quickshell.clipboardText = Assistant.resultText
                             Assistant.lastSeenClipboard = Assistant.resultText.trim()

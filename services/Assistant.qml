@@ -26,11 +26,13 @@ Singleton {
     property int truncatedAt: 12000
     property bool isWindowActive: false
     property bool _forceNextSelection: false
+    property string requestedView: ""
 
     // Multi-turn Thread & Mode
-    property var thread: []              // {role, content} pairs
+    property var thread: []              // {role, content} pairs for LLM context
+    property var messages: []            // Scrollable session conversation feed: [{id, role, text, timestamp, action, isStreaming}]
     property string inputMode: "auto"    // "auto" | "followup" | "standalone"
-    readonly property bool hasThread: thread.length > 0
+    readonly property bool hasThread: thread.length > 0 || messages.length > 0
 
     // History & Raw Log (File 1)
     property var history: []
@@ -303,11 +305,54 @@ Singleton {
         root.thread = updated
     }
 
-    function clearThread() {
+    function isTopicShift(newQuestion, threadList, anchor) {
+        if (!threadList || threadList.length === 0) return false
+        const q = String(newQuestion || "").trim().toLowerCase()
+        const words = q.match(/[a-z0-9_\-\.]+/g) || []
+        if (words.length <= 4) return false
+
+        const followupWords = [
+            "it", "this", "that", "these", "those", "they", "them", "why", "how",
+            "what", "which", "instead", "more", "example", "examples", "explain",
+            "expand", "clarify", "difference", "vs", "versus", "better", "worse",
+            "and", "but", "so", "can", "could", "would", "should", "does", "is", "are"
+        ]
+
+        const earlyWords = words.slice(0, 3)
+        for (let i = 0; i < earlyWords.length; i++) {
+            if (["it", "this", "that", "these", "those", "they", "them"].indexOf(earlyWords[i]) !== -1) {
+                return false
+            }
+        }
+
+        let threadText = anchor || ""
+        for (let i = 0; i < threadList.length; i++) {
+            threadText += " " + (threadList[i].content || "")
+        }
+        const threadTokens = new Set((threadText.toLowerCase().match(/[a-z0-9_\-\.]{3,}/g) || []))
+
+        const contentTokens = words.filter(w => w.length >= 3 && followupWords.indexOf(w) === -1)
+        if (contentTokens.length < 3) return false
+
+        let overlap = 0
+        for (let i = 0; i < contentTokens.length; i++) {
+            if (threadTokens.has(contentTokens[i])) overlap++
+        }
+
+        const ratio = overlap / contentTokens.length
+        return ratio < 0.12 && contentTokens.length >= 3
+    }
+
+    function clearThread(resetMessages) {
         root.thread = []
         root.inputMode = "auto"
         root.currentThreadId = ""
         root.topicAnchor = ""
+        if (resetMessages !== false) {
+            root.messages = []
+            root.rawResultText = ""
+            root.resultText = ""
+        }
     }
 
     function resolveMode(question) {
@@ -315,6 +360,9 @@ Singleton {
             return root.inputMode
         }
         if (!root.thread || root.thread.length === 0) {
+            return "standalone"
+        }
+        if (root.isTopicShift(question, root.thread, root.topicAnchor)) {
             return "standalone"
         }
         return "followup"
@@ -400,7 +448,18 @@ Singleton {
                 if (!line) return
                 try {
                     const msg = JSON.parse(line)
-                    if (msg.type === "start") {
+                    if (msg.type === "topic_shift") {
+                        root.thread = []
+                        root.currentThreadId = "t_" + Date.now().toString(36)
+                        root.topicAnchor = msg.topic || ""
+                        const msgs = (root.messages || []).slice()
+                        msgs.push({
+                            id: "shift_" + Date.now(),
+                            type: "topic_divider",
+                            text: qsTr("New Context: %1").arg(msg.topic ? msg.topic.slice(0, 45) : qsTr("Topic Shift"))
+                        })
+                        root.messages = msgs
+                    } else if (msg.type === "start") {
                         root.providerUsed = msg.provider || ""
                         if (msg.truncated !== undefined) {
                             root.isTruncated = !!msg.truncated
@@ -416,6 +475,14 @@ Singleton {
                         root.isStreaming = true
                         root.rawResultText += msg.text
                         root.resultText = root.rawResultText
+                        if (root.messages && root.messages.length > 0) {
+                            const msgs = root.messages.slice()
+                            const last = msgs[msgs.length - 1]
+                            if (last && last.role === "assistant") {
+                                last.text = root.rawResultText
+                                root.messages = msgs
+                            }
+                        }
                     } else if (msg.type === "done") {
                         root.isLoading = false
                         root.isStreaming = false
@@ -436,6 +503,15 @@ Singleton {
 
                         // Final markdown cleaning done once when finished
                         root.resultText = root.cleanMarkdown(root.rawResultText)
+                        if (root.messages && root.messages.length > 0) {
+                            const msgs = root.messages.slice()
+                            const last = msgs[msgs.length - 1]
+                            if (last && last.role === "assistant") {
+                                last.text = root.resultText
+                                last.isStreaming = false
+                                root.messages = msgs
+                            }
+                        }
 
                         // Cache completed response
                         const cacheKey = root.getCacheKey(root.activeAction, root.selectedText, "")
@@ -461,6 +537,15 @@ Singleton {
                         root.errorType = msg.error_type || "generic"
                         if (msg.error_type === "auth") {
                             root.hasApiKey = false
+                        }
+                        if (root.messages && root.messages.length > 0) {
+                            const msgs = root.messages.slice()
+                            const last = msgs[msgs.length - 1]
+                            if (last && last.role === "assistant" && (!last.text || last.text.length === 0)) {
+                                last.text = "⚠️ " + (msg.message || "An error occurred.")
+                                last.isStreaming = false
+                                root.messages = msgs
+                            }
                         }
                     }
                 } catch (e) {
@@ -865,13 +950,22 @@ Singleton {
 
         let mode = "standalone"
         if (action === "ask") {
+            const shift = (root.thread.length > 0 && root.isTopicShift(customPrompt, root.thread, root.topicAnchor))
             mode = root.resolveMode(customPrompt)
             if (mode === "standalone") {
-                root.clearThread()
-            }
-
-            // Establish topic anchor for conversational ask inquiries
-            if (!root.topicAnchor || root.thread.length === 0) {
+                root.clearThread(false)
+                root.currentThreadId = "t_" + Date.now().toString(36)
+                root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
+                if (shift) {
+                    const msgs = (root.messages || []).slice()
+                    msgs.push({
+                        id: "shift_" + Date.now(),
+                        type: "topic_divider",
+                        text: qsTr("New Context")
+                    })
+                    root.messages = msgs
+                }
+            } else if (!root.topicAnchor || root.thread.length === 0) {
                 if (root.selectedText && root.selectedText.trim().length > 0) {
                     const raw = root.selectedText.trim().replace(/\s+/g, " ")
                     root.topicAnchor = raw.slice(0, 350)
@@ -879,6 +973,15 @@ Singleton {
                     root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
                 }
             }
+        }
+
+        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const userMsg = {
+            id: "u_" + Date.now(),
+            role: "user",
+            action: action,
+            text: customPrompt || root.selectedText,
+            timestamp: nowStr
         }
 
         // Check in-memory cache for instant replay
@@ -894,11 +997,37 @@ Singleton {
             root.errorMessage = ""
             root.errorType = ""
             root.isLoading = false
+
+            const assistantMsg = {
+                id: "a_" + Date.now(),
+                role: "assistant",
+                action: action,
+                text: cached.resultText,
+                isStreaming: false,
+                timestamp: nowStr
+            }
+            const msgsList = (root.messages || []).slice()
+            msgsList.push(userMsg)
+            msgsList.push(assistantMsg)
+            root.messages = msgsList
             return
         }
 
         // Cancel previous request if still running
         root.cancelCurrentRequest()
+
+        const assistantMsg = {
+            id: "a_" + Date.now(),
+            role: "assistant",
+            action: action,
+            text: "",
+            isStreaming: true,
+            timestamp: nowStr
+        }
+        const msgsList = (root.messages || []).slice()
+        msgsList.push(userMsg)
+        msgsList.push(assistantMsg)
+        root.messages = msgsList
 
         root.isLoading = true
         root.errorMessage = ""

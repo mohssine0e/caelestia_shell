@@ -345,6 +345,33 @@ def get_active_workspace_context():
     except Exception:
         return ""
 
+FOLLOWUP_TRIGGERS = {
+    "it", "this", "that", "these", "those", "they", "them", "why", "how", "what", "which",
+    "instead", "more", "example", "examples", "explain", "expand", "clarify",
+    "difference", "versus", "vs", "better", "worse", "and", "but", "so",
+    "can", "could", "would", "should", "does", "do", "is", "are"
+}
+
+def is_topic_shift(new_question, thread, topic_anchor=""):
+    if not thread or len(thread) == 0:
+        return False
+    words = re.findall(r'[a-zA-Z0-9_\-\.]+', (new_question or "").lower())
+    if len(words) <= 4:
+        return False
+    early_words = set(words[:3])
+    if any(w in {"it", "this", "that", "these", "those", "they", "them"} for w in early_words):
+        return False
+    thread_text = topic_anchor or ""
+    for t in thread:
+        thread_text += " " + (t.get("content", "") if isinstance(t, dict) else str(t))
+    thread_tokens = set(re.findall(r'[a-zA-Z0-9_\-\.]{3,}', thread_text.lower()))
+    content_tokens = [w for w in words if len(w) >= 3 and w not in FOLLOWUP_TRIGGERS]
+    if len(content_tokens) < 3:
+        return False
+    overlap = sum(1 for w in content_tokens if w in thread_tokens)
+    ratio = overlap / len(content_tokens)
+    return ratio < 0.12 and len(content_tokens) >= 3
+
 STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
     "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
@@ -911,6 +938,13 @@ def main():
         is_truncated = True
     else:
         text_to_process = text
+
+    if action == "ask" and len(thread) > 0 and mode != "standalone":
+        if is_topic_shift(custom_prompt, thread, topic_anchor):
+            mode = "standalone"
+            thread = []
+            topic_anchor = ""
+            print(json.dumps({"type": "topic_shift", "topic": (custom_prompt or "")[:60]}), flush=True)
 
     is_followup = (action == "ask" and mode == "followup" and len(thread) > 0)
     user_payload = text_to_process
