@@ -1402,6 +1402,69 @@ def remove_trap(card_id, trap_text):
     atomic_save_memory(cards)
     emit({"success": True, "personal_traps": card["personal_traps"]})
 
+def quick_card(source_text, answer_text, action_type="explain"):
+    """Rapidly extracts a high-yield memory flashcard from a Q&A interaction."""
+    system_instruction = (
+        "You are an expert developer memory synthesis engine. "
+        "From the given context and assistant explanation, create a concise, high-yield flashcard for long-term developer mastery. "
+        "Return a JSON object with:\n"
+        "- topic: Short crisp title (3-6 words, e.g. 'ConcurrentHashMap computeIfAbsent')\n"
+        "- category: Technology or domain (e.g. java, python, qml, linux, spring, architecture, english)\n"
+        "- summary: 1 clear sentence summarizing the core technical takeaway\n"
+        "- lines: Array of 2-3 actionable, high-density principles or code rules\n"
+        "- tags: Array of 3-5 lowercase search tags\n"
+        "- trial_question: A tough, realistic interview/debugging question testing this exact concept\n"
+        "- trial_criteria: Array of 2-3 key points a correct answer MUST mention\n"
+    )
+    user_payload = f"SOURCE / CONTEXT:\n{source_text[:2000]}\n\nASSISTANT ANSWER:\n{answer_text[:4000]}"
+    try:
+        raw_res = call_llm(system_instruction, user_payload, expect_json=True, temperature=0.2)
+        data = parse_json_safely(raw_res)
+        if not data or not isinstance(data, dict):
+            emit({"success": False, "error": "Failed to parse AI response into card schema"})
+            return
+
+        card_id = "card_" + re.sub(r"[^a-z0-9_]+", "_", data.get("topic", "flashcard").lower()).strip("_")[:40]
+        now_iso = datetime.now().isoformat()
+
+        new_card = {
+            "id": card_id,
+            "topic": data.get("topic", "Extracted Flashcard"),
+            "category": data.get("category", "general"),
+            "status": "learning",
+            "mastery_score": 0.0,
+            "summary": data.get("summary", ""),
+            "lines": data.get("lines", []),
+            "tags": data.get("tags", []),
+            "personal_traps": [],
+            "trials": [],
+            "trial_question": data.get("trial_question", ""),
+            "trial_criteria": data.get("trial_criteria", []),
+            "created": now_iso,
+            "updated": now_iso,
+            "next_review": now_iso
+        }
+
+        cards = load_memory(auto_demote=False)
+        existing_idx = next((i for i, c in enumerate(cards) if c.get("id") == card_id or c.get("topic", "").lower() == new_card["topic"].lower()), -1)
+        if existing_idx >= 0:
+            existing_lines = cards[existing_idx].get("lines", [])
+            merged_lines = list(dict.fromkeys(existing_lines + new_card["lines"]))
+            cards[existing_idx].update({
+                "summary": new_card["summary"],
+                "lines": merged_lines,
+                "updated": now_iso
+            })
+            saved_card = cards[existing_idx]
+        else:
+            cards.insert(0, new_card)
+            saved_card = new_card
+
+        atomic_save_memory(cards)
+        emit({"success": True, "card": saved_card, "message": f"Saved flash card: '{saved_card['topic']}'"})
+    except Exception as e:
+        emit({"success": False, "error": str(e)})
+
 # ---------------------------------------------------------
 # Main CLI Dispatcher
 # ---------------------------------------------------------
@@ -1409,7 +1472,7 @@ def main():
     if len(sys.argv) < 2:
         emit({
             "error": "USAGE",
-            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|suggest_profile|enrich|merge|daily_challenge|sync_graph|remove_trap> [args...]"
+            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|suggest_profile|enrich|merge|daily_challenge|sync_graph|remove_trap|quick_card> [args...]"
         })
         sys.exit(1)
 
@@ -1417,6 +1480,11 @@ def main():
 
     if cmd == "distill":
         distill()
+    elif cmd == "quick_card":
+        src = sys.argv[2] if len(sys.argv) > 2 else ""
+        ans = sys.argv[3] if len(sys.argv) > 3 else ""
+        act = sys.argv[4] if len(sys.argv) > 4 else "explain"
+        quick_card(src, ans, act)
     elif cmd == "get_context":
         query = sys.argv[2] if len(sys.argv) > 2 else ""
         get_context(query)

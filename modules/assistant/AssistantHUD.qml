@@ -149,6 +149,14 @@ FocusScope {
             }
         }
 
+        if (event.key === Qt.Key_S && (event.modifiers & Qt.AltModifier)) {
+            if (Assistant.resultText.length > 0 && !Assistant.isGenerating && !Memory.isCreatingQuickCard) {
+                Memory.createCardFromAssistant(Assistant.selectedText || Assistant.activePrompt, Assistant.resultText, Assistant.activeAction)
+                event.accepted = true
+                return
+            }
+        }
+
         if (event.key === Qt.Key_Slash) {
             if (root.currentView === "memory") {
                 memoryView.focusSearch()
@@ -1142,6 +1150,29 @@ FocusScope {
                     enabled: Assistant.resultText.length > 0
                     opacity: enabled ? 1.0 : 0.4
                     onClicked: Assistant.speakText(Assistant.resultText)
+                }
+
+                IconButton {
+                    id: saveCardBtn
+                    type: IconButton.Tonal
+                    property bool saved: false
+                    icon: saved ? "bookmark_added" : (Memory.isCreatingQuickCard ? "hourglass_top" : "bookmark_add")
+                    font: Tokens.font.icon.small
+                    implicitWidth: 36
+                    implicitHeight: 36
+                    enabled: Assistant.resultText.length > 0 && !Assistant.isGenerating && !Memory.isCreatingQuickCard
+                    opacity: enabled ? 1.0 : 0.4
+                    onClicked: {
+                        Memory.createCardFromAssistant(Assistant.selectedText || Assistant.activePrompt, Assistant.resultText, Assistant.activeAction)
+                        saved = true
+                        resetCardTimer.restart()
+                    }
+
+                    Timer {
+                        id: resetCardTimer
+                        interval: 2500
+                        onTriggered: saveCardBtn.saved = false
+                    }
                 }
 
                 IconButton {

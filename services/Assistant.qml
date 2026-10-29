@@ -565,7 +565,7 @@ Singleton {
 
     // ── Trigger HUD & grab current selection ──────────────────────
     function trigger() {
-        const st = ShellState.forActive()
+        const st = ShellState.forActive() ?? ShellState.states[0]
         if (st) {
             st.assistant = true
         }
@@ -578,7 +578,7 @@ Singleton {
     }
 
     function toggle() {
-        const st = ShellState.forActive()
+        const st = ShellState.forActive() ?? ShellState.states[0]
         if (st) {
             if (st.assistant) {
                 st.assistant = false

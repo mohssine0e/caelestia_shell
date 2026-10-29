@@ -103,10 +103,15 @@ def save_config(gemini_key, groq_key, provider=None, max_chars=None):
     return {"success": True}
 
 GEMINI_CANDIDATE_MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest"
+]
+
+GROQ_CANDIDATE_MODELS = [
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
 ]
 
 def stream_gemini(api_key, system_instruction, user_text, contents=None):
@@ -169,40 +174,59 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
 
 def stream_groq(api_key, system_instruction, user_text, messages=None):
     url = "https://api.groq.com/openai/v1/chat/completions"
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": messages if messages else [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_text}
-        ],
-        "temperature": 0.4,
-        "max_tokens": 8192,
-        "stream": True
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        },
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        for line in resp:
-            line_str = line.decode("utf-8", errors="replace").strip()
-            if line_str.startswith("data:"):
-                raw = line_str[5:].strip()
-                if raw == "[DONE]":
-                    break
-                try:
-                    d = json.loads(raw)
-                    delta = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                    if delta:
-                        emit({"type": "chunk", "text": delta})
-                except Exception:
-                    continue
-    return True
+    last_err = None
+    for model_name in GROQ_CANDIDATE_MODELS:
+        payload = {
+            "model": model_name,
+            "messages": messages if messages else [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_text}
+            ],
+            "temperature": 0.4,
+            "max_tokens": 8192,
+            "stream": True
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "Mozilla/5.0"
+            },
+            method="POST"
+        )
+        emitted_any = False
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                for line in resp:
+                    line_str = line.decode("utf-8", errors="replace").strip()
+                    if line_str.startswith("data:"):
+                        raw = line_str[5:].strip()
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            d = json.loads(raw)
+                            delta = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if delta:
+                                emit({"type": "chunk", "text": delta})
+                                emitted_any = True
+                        except Exception:
+                            continue
+            return True
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (404, 429, 500, 502, 503, 504) and not emitted_any:
+                continue
+            raise e
+        except Exception as e:
+            last_err = e
+            if not emitted_any:
+                continue
+            break
+    if last_err:
+        raise last_err
+    return False
 
 def classify_error(err_str, http_code=None):
     if http_code in (400, 401, 403):

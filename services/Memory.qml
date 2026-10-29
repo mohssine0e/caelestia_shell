@@ -169,55 +169,112 @@ Singleton {
         root.save()
     }
 
-    // ── Instant Zero-Latency Keyword Matching (0ms) ──────────────
+    // ── Instant Zero-Latency Multi-Card Retrieval (0ms BM25 Ranker) ──────────────
     function getPromptInjection(query) {
         if (!root.cards || root.cards.length === 0 || !query || query.trim().length < 3) {
             root.lastInjectedCardIds = []
             return ""
         }
-        const qWords = query.toLowerCase().match(/[a-z0-9_]{3,}/g) || []
+        const stopWords = new Set(["the", "and", "for", "with", "that", "this", "from", "how", "what", "can", "you", "does", "have", "into", "your", "code", "text", "make"])
+        const rawWords = query.toLowerCase().match(/[a-z0-9_]{3,}/g) || []
+        const qWords = rawWords.filter(w => !stopWords.has(w))
         if (qWords.length === 0) {
             root.lastInjectedCardIds = []
             return ""
         }
 
-        let bestCard = null
-        let bestScore = 0
-
+        const scored = []
         for (let i = 0; i < root.cards.length; i++) {
             const card = root.cards[i]
             if (!card) continue
             const topic = (card.topic || "").toLowerCase()
             const tags = (card.tags || []).join(" ").toLowerCase()
-            const lines = (card.lines || []).slice(0, 3).join(" ").toLowerCase()
-            const combined = topic + " " + tags + " " + lines
+            const summary = (card.summary || "").toLowerCase()
+            const lines = (card.lines || []).join(" ").toLowerCase()
 
-            let shared = 0
+            let score = 0
             for (let w = 0; w < qWords.length; w++) {
-                if (combined.indexOf(qWords[w]) !== -1) shared++
+                const word = qWords[w]
+                if (topic.indexOf(word) !== -1) score += 4
+                else if (tags.indexOf(word) !== -1) score += 3
+                else if (summary.indexOf(word) !== -1) score += 2
+                else if (lines.indexOf(word) !== -1) score += 1
             }
-            const score = shared / qWords.length
-            if (score > bestScore && score >= 0.4) {
-                bestScore = score
-                bestCard = card
+
+            if (score >= 2) {
+                scored.push({ card, score })
             }
         }
 
-        if (!bestCard) {
+        if (scored.length === 0) {
             root.lastInjectedCardIds = []
             return ""
         }
 
-        root.lastInjectedCardIds = [String(bestCard.id)]
+        scored.sort((a, b) => b.score - a.score)
+        const topCards = scored.slice(0, 3).map(s => s.card)
+        root.lastInjectedCardIds = topCards.map(c => String(c.id))
 
-        const status = (bestCard.status || "learning").toUpperCase()
-        const topic = bestCard.topic || ""
-        const summary = (bestCard.lines && bestCard.lines.length > 0) ? bestCard.lines[0] : ""
+        let context = "[ACTIVE DEVELOPER MEMORY & MASTERED CARDS - Align your response with these exact project idioms & rules]:\n"
+        for (let i = 0; i < topCards.length; i++) {
+            const c = topCards[i]
+            const st = (c.status || "learning").toUpperCase()
+            context += `• [${st}] ${c.topic}:\n`
+            if (c.summary) context += `  - Core: ${c.summary}\n`
+            if (c.lines && c.lines.length > 0) {
+                for (let j = 0; j < Math.min(2, c.lines.length); j++) {
+                    context += `  - Rule: ${c.lines[j]}\n`
+                }
+            }
+            if (c.personal_traps && c.personal_traps.length > 0) {
+                context += `  - Known trap: ${c.personal_traps[0]}\n`
+            }
+        }
+        return context
+    }
 
-        if (status === "MASTERED") {
-            return "[Mastery Grounding: User has MASTERED '" + topic + "'. Principle: '" + summary + "'. Skip introductory basics; provide concise, advanced code.]"
-        } else {
-            return "[Learning Grounding: User is LEARNING '" + topic + "'. Active concept: '" + summary + "'. Provide clear intuitive breakdown.]"
+    // ── Quick Flash Card Creation from Assistant Interaction ──────
+    property bool isCreatingQuickCard: false
+    property string quickCardMessage: ""
+    property string _quickCardBuffer: ""
+
+    function createCardFromAssistant(sourceText, answerText, actionType) {
+        if (!sourceText || !answerText || quickCardProc.running) return
+        root.isCreatingQuickCard = true
+        root.quickCardMessage = ""
+        root._quickCardBuffer = ""
+        quickCardProc.command = [
+            "python3", root.enginePath, "quick_card",
+            String(sourceText).slice(0, 2000),
+            String(answerText).slice(0, 4000),
+            String(actionType || "explain")
+        ]
+        quickCardProc.running = true
+    }
+
+    Process {
+        id: quickCardProc
+        stdout: SplitParser {
+            onRead: data => {
+                root._quickCardBuffer += data
+            }
+        }
+        onExited: exitCode => {
+            root.isCreatingQuickCard = false
+            const fullText = root._quickCardBuffer.trim()
+            root._quickCardBuffer = ""
+            if (!fullText) return
+            try {
+                const res = JSON.parse(fullText)
+                if (res.success) {
+                    root.reload()
+                    Toaster.toast("Flash Card Created", res.card.topic, "psychology")
+                } else {
+                    Toaster.toast("Card Creation Failed", res.error || "Unknown error", "error")
+                }
+            } catch (e) {
+                console.log("[Memory] Quick card parse error:", e)
+            }
         }
     }
 
