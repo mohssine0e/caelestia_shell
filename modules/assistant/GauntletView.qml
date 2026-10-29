@@ -390,7 +390,7 @@ Item {
                                             wrapMode: TextEdit.Wrap
                                             selectByMouse: true
                                             onTextChanged: {
-                                                if (root.activeQuestion) {
+                                                if (root.activeQuestion && text !== root.getAnswer(root.activeQuestion.id)) {
                                                     root.setAnswer(root.activeQuestion.id, text)
                                                 }
                                             }

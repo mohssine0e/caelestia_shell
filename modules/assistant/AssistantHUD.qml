@@ -15,7 +15,17 @@ FocusScope {
     id: root
 
     property var windowRef: null
-    property string currentView: Assistant.requestedView.length > 0 ? Assistant.requestedView : "assistant"
+    property string currentView: "assistant"
+
+    Connections {
+        target: Assistant
+        function onRequestedViewChanged() {
+            if (Assistant.requestedView.length > 0 && root.currentView !== Assistant.requestedView) {
+                root.currentView = Assistant.requestedView
+            }
+        }
+    }
+
     onCurrentViewChanged: {
         if (Assistant.requestedView !== currentView) Assistant.requestedView = currentView
         root.forceActiveFocus()

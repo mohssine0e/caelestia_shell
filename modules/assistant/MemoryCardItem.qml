@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import Quickshell
 import Caelestia
 import Caelestia.Config
 import qs.services
@@ -74,6 +75,10 @@ Item {
                     readonly property bool expanded: (cardId.length > 0 && cardItem.expandedCardId === cardId) || isEditing
                     readonly property bool isReviewDue: {
                         if (!cardData) return false
+                        if (cardData.next_review) {
+                            const nt = Date.parse(cardData.next_review)
+                            if (!isNaN(nt) && nt > 0) return Date.now() >= nt
+                        }
                         const lr = cardData.last_reviewed || cardData.updated || cardData.created
                         if (!lr) return false
                         const t = Date.parse(lr)

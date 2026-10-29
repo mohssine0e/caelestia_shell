@@ -125,6 +125,14 @@ def load_memory(auto_demote=True):
                         card["last_reviewed"] = card.get("updated") or card.get("created") or ""
                     if "personal_traps" not in card or not isinstance(card["personal_traps"], list):
                         card["personal_traps"] = []
+                    if "traps" not in card:
+                        card["traps"] = card.get("personal_traps", [])
+                    if "invariants" not in card:
+                        card["invariants"] = card.get("lines", [])
+                    if "category" not in card:
+                        card["category"] = "general"
+                    if "tier" not in card:
+                        card["tier"] = "hub" if card.get("sections") else "concept"
                     if "relations" not in card or not isinstance(card["relations"], list):
                         card["relations"] = []
 
@@ -851,6 +859,37 @@ def grade(card_id, user_answer_raw):
             else:
                 card["last_fail_feedback"] = resp_data.get("blindspots") or resp_data.get("explanation", "")
 
+        # SM-2 Spaced Repetition Scheduling
+        streak = 0
+        for tr in reversed(card.get("trials", [])):
+            if tr.get("verdict") == "pass" or float(tr.get("score") or 0) >= 0.7:
+                streak += 1
+            else:
+                break
+
+        if streak == 0:
+            interval_days = 1
+        elif streak == 1:
+            interval_days = 3
+        elif streak == 2:
+            interval_days = 7
+        elif streak == 3:
+            interval_days = 14
+        else:
+            interval_days = min(60, int(14 * (2.0 ** (streak - 3))))
+
+        next_review_date = datetime.now(timezone.utc) + timedelta(days=interval_days)
+        card["next_review"] = next_review_date.isoformat()
+        card["srs"] = {
+            "score": round(score, 2),
+            "streak": streak,
+            "interval_days": interval_days,
+            "next_review": next_review_date.isoformat(),
+            "status": card["status"]
+        }
+        card["invariants"] = card.get("lines", [])
+        card["traps"] = card.get("personal_traps", [])
+
         # Clear the active trial
         card.pop("active_trial", None)
         atomic_save_memory(cards)
@@ -1270,26 +1309,24 @@ def daily_challenge():
     FOURTEEN_DAYS = 14 * 86400
 
     def card_priority(c):
-        score = 100
-        # Priority 1: Unresolved blindspots
+        # Priority 1: Unresolved blindspots / personal traps
         if c.get("status") != "mastered" and c.get("last_fail_feedback"):
-            score = 10
-        # Priority 2: Unmastered concepts
-        elif c.get("status") != "mastered":
-            score = 20
-        else:
-            # Priority 3: Mastered cards due for review (> 14 days)
-            lr_str = c.get("last_reviewed") or c.get("updated") or c.get("created") or ""
+            return 10
+        # Priority 2: Due for review based on SM-2 next_review
+        nr_str = c.get("next_review")
+        if nr_str:
             try:
-                lr_dt = datetime.fromisoformat(lr_str.replace("Z", "+00:00"))
-                age = now_epoch - lr_dt.timestamp()
-                if age > FOURTEEN_DAYS:
-                    score = 30 - min(10, int(age / (30 * 86400) * 10))
-                else:
-                    score = 50 + int(age / 86400)
+                nr_dt = datetime.fromisoformat(nr_str.replace("Z", "+00:00"))
+                overdue_seconds = now_epoch - nr_dt.timestamp()
+                if overdue_seconds > 0:
+                    return 15 - min(5, int(overdue_seconds / 86400))
             except Exception:
-                score = 60
-        return score
+                pass
+        # Priority 3: Unmastered concepts
+        if c.get("status") != "mastered":
+            return 25
+        # Priority 4: Mastered cards
+        return 50
 
     sorted_candidates = sorted(cards, key=card_priority)
     chosen_card = sorted_candidates[0]

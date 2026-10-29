@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Caelestia
 import Caelestia.Config
+import qs.services
 
 TextEdit {
     readOnly: true

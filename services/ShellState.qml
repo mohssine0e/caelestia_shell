@@ -25,7 +25,7 @@ Singleton {
         for (const s of states.instances)
             if (Hypr.monitorFor(s.modelData) === mon)
                 return s;
-        return null;
+        return states.instances.length > 0 ? states.instances[0] : null;
     }
 
     function componentsFor(screen: ShellScreen): Components {
@@ -40,7 +40,7 @@ Singleton {
         for (const c of components.instances)
             if (Hypr.monitorFor(c.modelData) === mon)
                 return c;
-        return null;
+        return components.instances.length > 0 ? components.instances[0] : null;
     }
 
     Variants {

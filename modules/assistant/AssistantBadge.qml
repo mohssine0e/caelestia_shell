@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import Caelestia
 import Caelestia.Config
+import qs.services
 import qs.components
 
 StyledRect {
