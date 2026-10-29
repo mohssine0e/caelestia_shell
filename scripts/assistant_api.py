@@ -7,6 +7,7 @@ import time
 import urllib.request
 import urllib.parse
 import urllib.error
+import subprocess
 
 CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
 
@@ -301,6 +302,48 @@ def get_profile_prompt_prefix():
     if not parts:
         return ""
     return f"[Developer Profile Context: {' | '.join(parts)}]\n"
+
+def get_active_workspace_context():
+    try:
+        raw_clients = subprocess.check_output(["hyprctl", "-j", "clients"], text=True, stderr=subprocess.DEVNULL)
+        clients = json.loads(raw_clients)
+        candidates = [c for c in clients if c.get("class") != "org.quickshell" and "Assistant" not in c.get("title", "")]
+        candidates.sort(key=lambda x: x.get("focusHistoryID", 999))
+        if not candidates:
+            return ""
+
+        win = candidates[0]
+        title = win.get("title", "").strip()
+        cls = win.get("class", "").strip()
+        pid = win.get("pid")
+
+        parts = []
+        if cls:
+            parts.append(f"Editor/App: {cls}")
+        if title:
+            parts.append(f"Active Window/File: {title}")
+
+        if pid:
+            try:
+                cwd = os.path.realpath(f"/proc/{pid}/cwd")
+                if os.path.exists(cwd):
+                    parts.append(f"Project Path: {cwd}")
+                    git_dir = os.path.join(cwd, ".git")
+                    if os.path.exists(git_dir):
+                        branch = subprocess.check_output(
+                            ["git", "-C", cwd, "branch", "--show-current"],
+                            text=True, stderr=subprocess.DEVNULL
+                        ).strip()
+                        if branch:
+                            parts.append(f"Git Branch: {branch}")
+            except Exception:
+                pass
+
+        if parts:
+            return f"[CURRENT DEVELOPER WORKSPACE: {' | '.join(parts)}]\n(Tailor your answer directly to this project, file, and technology.)\n"
+        return ""
+    except Exception:
+        return ""
 
 STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
@@ -908,6 +951,10 @@ def main():
     profile_prefix = get_profile_prompt_prefix()
     if profile_prefix:
         system_instruction = f"{profile_prefix}\n{system_instruction}"
+
+    workspace_context = get_active_workspace_context()
+    if workspace_context:
+        system_instruction = f"{workspace_context}\n{system_instruction}"
 
     if extra_context:
         system_instruction = f"{extra_context}\n{system_instruction}"

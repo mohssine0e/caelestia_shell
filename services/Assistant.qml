@@ -34,6 +34,7 @@ Singleton {
 
     // History & Raw Log (File 1)
     property var history: []
+    property int unDistilledCount: 0
     property bool isOrganizing: false
     property string activePrompt: ""
     property var recalledContext: null
@@ -671,6 +672,12 @@ Singleton {
         }
         root.history = list
         root.saveHistory()
+
+        root.unDistilledCount++
+        if (root.unDistilledCount >= 5 && !Memory.isDistilling) {
+            root.unDistilledCount = 0
+            Qt.callLater(() => Memory.distill())
+        }
     }
 
     function deleteHistoryItem(id) {

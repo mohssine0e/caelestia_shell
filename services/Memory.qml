@@ -52,6 +52,46 @@ Singleton {
         return c
     }
     readonly property int learningCount: totalCount - masteredCount
+    readonly property int dueCount: {
+        if (!cards || cards.length === 0) return 0
+        const now = Date.now()
+        let cnt = 0
+        for (let i = 0; i < cards.length; i++) {
+            const c = cards[i]
+            if (!c) continue
+            if (c.status === "review_due" || c.status === "fading") {
+                cnt++
+            } else if (c.next_review) {
+                const t = Date.parse(c.next_review)
+                if (!isNaN(t) && t <= now) cnt++
+            }
+        }
+        return cnt
+    }
+
+    function startDueChallenge() {
+        const now = Date.now()
+        let targetId = ""
+        for (let i = 0; i < cards.length; i++) {
+            const c = cards[i]
+            if (!c) continue
+            if (c.status === "review_due" || c.status === "fading") {
+                targetId = c.id
+                break
+            } else if (c.next_review) {
+                const t = Date.parse(c.next_review)
+                if (!isNaN(t) && t <= now) {
+                    targetId = c.id
+                    break
+                }
+            }
+        }
+        if (targetId) {
+            root.startChallenge(targetId)
+        } else {
+            root.startDailyGauntlet()
+        }
+    }
 
     // ── Persistent Storage & Debounced I/O ───────────────────────
     Timer {
