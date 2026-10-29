@@ -14,6 +14,7 @@ PersistentProperties {
     property bool tasks
     property bool timer
     property bool assistant
+    property bool project
 
     // Timer mini (pill HUD) state — persisted
     property real timerX: 0

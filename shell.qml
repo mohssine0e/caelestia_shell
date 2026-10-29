@@ -12,6 +12,7 @@ import "modules/areapicker"
 import "modules/lock"
 import "modules/timer"
 import "modules/assistant"
+import "modules/project"
 import QtQuick
 import Quickshell
 import Caelestia.Config
@@ -54,6 +55,7 @@ ShellRoot {
     AreaPicker {}
     TimerFloating {}
     AssistantFloating {}
+    ProjectMenu {}
     Lock {
         id: lock
     }
