@@ -56,7 +56,7 @@ Singleton {
         // Wake display if blanked/DPMS off
         Hypr.dispatch(Hypr.usingLua ? "hl.dsp.dpms({ action = 'enable' })" : "dpms on");
 
-        const sound = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga";
+        const sound = "/usr/share/sounds/gnome/default/alarms/glass-bell.oga";
         Quickshell.execDetached(["pw-play", sound]);
     }
 

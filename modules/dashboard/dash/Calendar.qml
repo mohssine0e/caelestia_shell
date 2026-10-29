@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import M3Shapes
 import Caelestia.Config
@@ -37,6 +38,8 @@ CustomMouseArea {
     property var gcalEvents: ({})
     property bool gcalConfigured: false
     property string selectedDateKey: ""
+    property bool isAddingEvent: false
+    onIsAddingEventChanged: root.screenState.dashboardNeedsFocus = root.isAddingEvent
 
     readonly property string effectiveDateKey: selectedDateKey !== "" ? selectedDateKey : dateToKey(new Date())
     readonly property var currentDayEvents: gcalEvents[effectiveDateKey] || []
@@ -65,6 +68,51 @@ CustomMouseArea {
     function getEventsFor(d: var): var {
         const k = dateToKey(d);
         return root.gcalEvents[k] || [];
+    }
+
+    function commitAddEvent(titleRaw: string, timeRaw: string): void {
+        let title = (titleRaw || "").trim();
+        let time = (timeRaw || "").trim();
+        if (!title) return;
+
+        // Smart extract time from title if time field is empty
+        if (!time) {
+            const timeMatch = title.match(/\b((?:[01]?\d|2[0-3]):[0-5]\d|[1-9]\s*(?:am|pm)|1[0-2]\s*(?:am|pm))\b/i);
+            if (timeMatch) {
+                time = timeMatch[1].trim();
+                title = title.replace(timeMatch[0], "").trim().replace(/\s+at\s*$/i, "").trim();
+            } else {
+                time = "All day";
+            }
+        }
+
+        const isAllDay = time.toLowerCase() === "all day" || time.toLowerCase() === "allday";
+        const targetKey = root.selectedDateKey || root.effectiveDateKey;
+
+        // 1. Instant local reactive UI update
+        const newEv = {
+            title: title,
+            time: time,
+            all_day: isAllDay,
+            location: ""
+        };
+        const currentList = root.gcalEvents[targetKey] || [];
+        const updatedList = currentList.concat([newEv]);
+        let copy = Object.assign({}, root.gcalEvents);
+        copy[targetKey] = updatedList;
+        root.gcalEvents = copy;
+
+        // 2. Persist to ~/.config/caelestia/local_events.json & ~/.cache/caelestia/gcal.json
+        const payload = JSON.stringify({
+            date: targetKey,
+            title: title,
+            time: time
+        });
+        Quickshell.execDetached(["python3", Paths.home + "/.config/caelestia/scripts/sync-gcal.py", "--add-local", payload]);
+
+        // 3. Reset state & notify
+        root.isAddingEvent = false;
+        Toaster.toast("Event Added", `${title} • ${time}`, "event_available");
     }
 
     FileView {
@@ -315,6 +363,7 @@ CustomMouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            root.isAddingEvent = false;
                             if (root.selectedDateKey === dayItem.dayKey) {
                                 root.selectedDateKey = "";
                             } else {
@@ -436,13 +485,95 @@ CustomMouseArea {
                 }
 
                 IconButton {
+                    icon: root.isAddingEvent ? "remove" : "add"
+                    isRound: true
+                    type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
+                    font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                    padding: Tokens.padding.extraSmall
+                    visible: root.selectedDateKey !== "" || root.currentDayEvents.length === 0
+                    onClicked: {
+                        root.isAddingEvent = !root.isAddingEvent;
+                    }
+                }
+
+                IconButton {
                     icon: "close"
                     isRound: true
                     type: IconButton.Text
                     font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
                     padding: Tokens.padding.extraSmall
                     visible: root.selectedDateKey !== ""
-                    onClicked: root.selectedDateKey = ""
+                    onClicked: {
+                        root.selectedDateKey = "";
+                        root.isAddingEvent = false;
+                    }
+                }
+            }
+
+            // Inline Quick-Add Mini-Input
+            Rectangle {
+                id: quickAddBox
+                Layout.fillWidth: true
+                visible: root.isAddingEvent
+                radius: Tokens.rounding.small
+                color: Colours.palette.m3surfaceContainer
+                border.width: 1
+                border.color: Colours.palette.m3outlineVariant
+                implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
+
+                onVisibleChanged: {
+                    if (visible) {
+                        eventTitleInput.text = "";
+                        eventTimeInput.text = "";
+                        Qt.callLater(() => eventTitleInput.forceActiveFocus());
+                    }
+                }
+
+                RowLayout {
+                    id: quickAddLayout
+                    anchors.fill: parent
+                    anchors.margins: Tokens.padding.small
+                    spacing: Tokens.spacing.small
+
+                    StyledTextField {
+                        id: eventTitleInput
+                        Layout.fillWidth: true
+                        placeholderText: "Event title..."
+                        placeholderFloats: false
+                        verticalPadding: Tokens.padding.extraSmall
+                        font: Tokens.font.body.small
+                        onAccepted: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                        Keys.onEscapePressed: root.isAddingEvent = false
+                    }
+
+                    StyledTextField {
+                        id: eventTimeInput
+                        Layout.preferredWidth: 80
+                        placeholderText: "14:00"
+                        placeholderFloats: false
+                        verticalPadding: Tokens.padding.extraSmall
+                        font: Tokens.font.body.small
+                        onAccepted: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                        Keys.onEscapePressed: root.isAddingEvent = false
+                    }
+
+                    IconButton {
+                        icon: "check"
+                        isRound: true
+                        type: IconButton.Filled
+                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                        padding: Tokens.padding.extraSmall / 2
+                        onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                    }
+
+                    IconButton {
+                        icon: "close"
+                        isRound: true
+                        type: IconButton.Text
+                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                        padding: Tokens.padding.extraSmall / 2
+                        onClicked: root.isAddingEvent = false
+                    }
                 }
             }
 
@@ -497,7 +628,7 @@ CustomMouseArea {
 
             // Empty state for explicitly selected day with 0 events
             StyledText {
-                visible: root.currentDayEvents.length === 0 && root.selectedDateKey !== ""
+                visible: root.currentDayEvents.length === 0 && root.selectedDateKey !== "" && !root.isAddingEvent
                 text: !root.gcalConfigured ? "Google Calendar not linked yet\nPaste your private iCal link into ~/.config/caelestia/calendar_url.txt" : "No events scheduled"
                 horizontalAlignment: Text.AlignHCenter
                 font: Tokens.font.body.small
