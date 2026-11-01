@@ -74,6 +74,20 @@ FocusScope {
 
     signal closeRequested()
 
+    function getRecommendedAction(text) {
+        if (!text || text.trim().length === 0) return "explain"
+        const clean = text.trim()
+        if (/[\u0600-\u06FF]/.test(clean)) return "translate"
+        if (/(?:error:|exception|fatal:|traceback|failed with exit code|syntaxerror|nullpointerexception|undefined is not a function|cannot read properties)/i.test(clean)) {
+            return "fix"
+        }
+        const words = clean.split(/\s+/)
+        if (words.length <= 3 && !/[{}();=<>]/.test(clean)) {
+            return "translate"
+        }
+        return "explain"
+    }
+
     Component.onCompleted: {
         Assistant.isWindowActive = root.isHudActive
         Qt.callLater(() => root.forceActiveFocus())
@@ -154,6 +168,16 @@ FocusScope {
         }
 
         const hasSelection = Assistant.selectedText && Assistant.selectedText.trim().length > 0
+
+        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !customQuestionInput.activeFocus) {
+            if (hasSelection) {
+                root.askBoundToSelection = false
+                const autoAction = root.getRecommendedAction(Assistant.selectedText)
+                Assistant.runAction(autoAction)
+                event.accepted = true
+                return
+            }
+        }
         if (event.key === Qt.Key_6 && hasSelection) {
             root.askBoundToSelection = true
             Assistant.activeAction = "ask"
@@ -600,13 +624,18 @@ FocusScope {
                 }
 
                 model: {
-                    const items = [
+                    const isError = root.getRecommendedAction(Assistant.selectedText) === "fix"
+                    const items = []
+                    if (isError) {
+                        items.push({ icon: "build", text: qsTr("Fix & Debug"), value: "fix" })
+                    }
+                    items.push(
                         { icon: "translate", text: qsTr("Translate"), value: "translate" },
                         { icon: "lightbulb",  text: qsTr("Explain"),   value: "explain" },
                         { icon: "notes",      text: qsTr("TL;DR"),     value: "tldr" },
                         { icon: "sync",       text: qsTr("Rephrase"),  value: "rephrase" },
                         { icon: "format_list_bulleted", text: qsTr("Examples"), value: "examples" }
-                    ]
+                    )
                     if (Assistant.selectedText && Assistant.selectedText.trim().length > 0) {
                         items.push({ icon: "chat", text: qsTr("Ask"), value: "ask" })
                     }

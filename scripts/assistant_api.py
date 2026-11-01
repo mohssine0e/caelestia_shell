@@ -31,6 +31,14 @@ PROMPTS = {
         "Do NOT write Arabic sentences; write in pure English. If an advanced or difficult English word is used, "
         "you may add its concise Arabic translation in parentheses (e.g., 'elucidate (يوضّح)')."
     ),
+    "fix": (
+        "You are an expert software engineer and debugger. Analyze the following error, stack trace, or buggy snippet. "
+        "Lead immediately with the solution:\n"
+        "1. Direct Fix (minimal, production-ready code or command snippet first)\n"
+        "2. Exact Root Cause (1 crisp sentence)\n"
+        "3. Prevention Invariants (2 bullet points on how to prevent this in the future)\n"
+        "No conversational filler or polite preamble."
+    ),
     "tldr": (
         "Summarize the following text concisely in pure English. Provide key takeaways in 2-4 brief bullet points. "
         "Write purely in English, adding a brief Arabic translation in parentheses only for difficult vocabulary."
