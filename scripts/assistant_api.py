@@ -8,8 +8,15 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import subprocess
+from datetime import datetime, timezone
 
-CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
+from assistant_common import (
+    CONFIG_PATH, HISTORY_PATH, MEMORY_PATH, PROFILE_PATH, LEARNER_PROFILE_PATH,
+    GEMINI_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS, STOP_WORDS,
+    CODE_TOKEN_PATTERN, WORD_PATTERN,
+    emit, load_config, load_profile, save_profile,
+    extract_keywords, extract_code_tokens, normalize_concept_key
+)
 
 PROMPTS = {
     "translate": (
@@ -41,33 +48,6 @@ PROMPTS = {
         "Write purely in English, placing a concise Arabic gloss in parentheses only for difficult or advanced English terms."
     )
 }
-
-def emit(obj):
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
-
-def load_config():
-    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini", "max_chars": 12000}
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    cfg.update(data)
-                    # Normalize alternative key names from config schema
-                    if "gemini_api_key" in data and not cfg.get("gemini_key"):
-                        cfg["gemini_key"] = data["gemini_api_key"]
-                    if "groq_api_key" in data and not cfg.get("groq_key"):
-                        cfg["groq_key"] = data["groq_api_key"]
-                    if "preferred_provider" in data:
-                        cfg["primary"] = data["preferred_provider"]
-        except Exception:
-            pass
-    if os.environ.get("GEMINI_API_KEY"):
-        cfg["gemini_key"] = os.environ.get("GEMINI_API_KEY")
-    if os.environ.get("GROQ_API_KEY"):
-        cfg["groq_key"] = os.environ.get("GROQ_API_KEY")
-    return cfg
 
 def get_provider_ceiling(primary, gemini_key, groq_key):
     prov = (primary or "").strip().lower()
@@ -282,6 +262,28 @@ def save_profile(profile_data):
         json.dump(profile_data, f, indent=2)
     return {"success": True}
 
+LEARNER_PROFILE_PATH = os.path.expanduser("~/.config/caelestia/learner_profile.json")
+
+def get_learner_profile_injection():
+    if not os.path.exists(LEARNER_PROFILE_PATH):
+        return ""
+    try:
+        with open(LEARNER_PROFILE_PATH, "r", encoding="utf-8") as f:
+            prof = json.load(f)
+        active_ctx = prof.get("active_context") or "unknown workspace"
+        weakest = ", ".join(prof.get("weakest_domains", [])) or "none identified yet"
+        blindspots_list = prof.get("blindspots", [])
+        blindspots = "; ".join(blindspots_list[:4]) if blindspots_list else "none recorded"
+        return (
+            f"USER PROFILE: The user is currently working on [{active_ctx}]. "
+            f"Their weakest areas are [{weakest}]. "
+            f"They frequently fail on [{blindspots}]. "
+            f"Tailor your answers to their level. "
+            f"If they ask about a known blindspot, explicitly point it out.\n"
+        )
+    except Exception:
+        return ""
+
 def get_profile_prompt_prefix():
     profile = load_profile()
     parts = []
@@ -372,47 +374,36 @@ def is_topic_shift(new_question, thread, topic_anchor=""):
     ratio = overlap / len(content_tokens)
     return ratio < 0.12 and len(content_tokens) >= 3
 
-STOP_WORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
-    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
-    "can", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing",
-    "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't",
-    "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers",
-    "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in",
-    "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't",
-    "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought",
-    "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll",
-    "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their",
-    "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll",
-    "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very",
-    "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's",
-    "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
-    "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your",
-    "yours", "yourself", "yourselves"
-}
-
-CODE_TOKEN_PATTERN = re.compile(
-    r'(?:'
-    r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+'
-    r'|[a-zA-Z0-9]+_[a-zA-Z0-9_]+'
-    r'|[a-z]+[A-Z][a-zA-Z0-9]*'
-    r'|[A-Z][a-z]+[A-Z][a-zA-Z0-9]*'
-    r'|--[a-zA-Z0-9_-]+'
-    r'|[A-Z]{2,}(?:_[A-Z0-9]+)*'
-    r')'
-)
-
-def extract_keywords(text):
-    if not text:
-        return set()
-    words = re.findall(r'[a-zA-Z0-9_]+', text.lower())
-    return {w for w in words if len(w) >= 3 and w not in STOP_WORDS}
-
-def extract_code_tokens(text):
-    if not text:
-        return set()
-    matches = CODE_TOKEN_PATTERN.findall(text)
-    return {m for m in matches if len(m) >= 3}
+def touch_matching_knowledge_cards(query):
+    """Chat-to-Card Exposure: update last_touched date when user asks a question matching KnowledgeNode."""
+    if not query or len(str(query).strip()) < 3:
+        return
+    words = [w.lower() for w in re.findall(r"[a-zA-Z0-9_]{3,}", str(query)) if w.lower() not in STOP_WORDS]
+    if not words:
+        return
+    try:
+        if not os.path.exists(MEMORY_PATH):
+            return
+        with open(MEMORY_PATH, "r", encoding="utf-8") as f:
+            cards = json.load(f)
+        if not isinstance(cards, list):
+            return
+        touched = False
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for c in cards:
+            if isinstance(c, dict) and c.get("type") == "knowledge":
+                title_words = (c.get("title") or c.get("topic") or "").lower()
+                tags_str = " ".join(c.get("tags") or []).lower()
+                if any(w in title_words or w in tags_str for w in words):
+                    c["last_touched"] = now_iso
+                    touched = True
+        if touched:
+            tmp = MEMORY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cards, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, MEMORY_PATH)
+    except Exception:
+        pass
 
 def find_relevant_history(current_text, current_prompt):
     if not os.path.exists(HISTORY_PATH):
@@ -638,207 +629,6 @@ def organize_history():
     except Exception as e:
         emit({"type": "error", "message": f"Failed to parse organization tags: {e}"})
 
-DISTILL_SYSTEM_PROMPT = (
-    "You are an expert AI memory curator. You maintain a curated, structured long-term memory file (assistant_memory.json) "
-    "projected from raw interaction logs (assistant_history.json).\n\n"
-    "You will receive a JSON payload with:\n"
-    "- new_raw: Newly recorded raw interaction logs since last distill.\n"
-    "- current_memory: The current curated cards in memory.\n"
-    "- user_interests: (Optional) user developer profile and preferences.\n\n"
-    "Your task is to integrate new_raw into current_memory and output the COMPLETE updated array of cards following these strict rules:\n\n"
-    "### WHAT TO KEEP (Add or merge into cards):\n"
-    "- Definitions (word -> meaning, terminology, concepts)\n"
-    "- Concepts (what is X, how does Y work, architecture, mechanisms)\n"
-    "- Code patterns, syntax, APIs, commands, configuration rules\n"
-    "- Errors -> fixes and debugging solutions\n"
-    "- Grammar / linguistic rules, translations of complex vocabulary\n"
-    "- Anything the user starred (starred: true) -> ALWAYS keep, verbatim as source-of-truth\n"
-    "- Anything tagged with a real topic\n\n"
-    "### WHAT TO SKIP (Do NOT add to memory):\n"
-    "- Greetings, thanks, conversational filler, pleasantries\n"
-    "- One-off transient facts ('what time is it', 'capital of Iceland', weather)\n"
-    "- Basic math calculations, simple unit conversions\n"
-    "- Test queries ('hi', 'test', 'abc', keyboard mash)\n"
-    "- Very short answers (<5 words) unless specifically starred\n\n"
-    "### MERGE AND STRUCTURING RULES:\n"
-    "- Two lines with the same meaning -> merge into a single concise line.\n"
-    "- One line is a more detailed version of another -> keep the detailed one.\n"
-    "- Two lines are related but distinct -> keep both.\n"
-    "- Follow-up questions attach to their parent card as new bullet lines (never as a new card).\n"
-    "- If a follow-up introduces a distinct new topic -> create a new card and add cross-links in the related array.\n"
-    "- Cards can have any number of lines. If a card exceeds ~15 lines, split by sub-topic.\n"
-    "- Every line must trace to a source item id in sources. No hallucinations. Do not add facts absent from raw inputs.\n"
-    "- File 2 is a projection of File 1, never a superset. File 1 can always regenerate File 2.\n"
-    "- Total cards cap: 200 cards max.\n\n"
-    "### CARD SCHEMA (JSON Array of Objects):\n"
-    "[\n"
-    "  {\n"
-    "    \"id\": \"m_<topic_slug>_<short>\",\n"
-    "    \"topic\": \"Topic Title\",\n"
-    "    \"lines\": [\"bullet point 1\", \"bullet point 2\"],\n"
-    "    \"tags\": [\"topic\", \"subtopic\"],\n"
-    "    \"sources\": [\"h_...\"],\n"
-    "    \"related\": [\"m_...\"],\n"
-    "    \"created\": \"<ISO8601>\",\n"
-    "    \"updated\": \"<ISO8601>\",\n"
-    "    \"reviewed\": 0\n"
-    "  }\n"
-    "]\n\n"
-    "Return ONLY valid JSON (a JSON array of card objects). Return ONLY valid JSON, no markdown fences, no explanation."
-)
-
-def distill_memory():
-    raw_entries = []
-    if os.path.exists(HISTORY_PATH):
-        try:
-            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    raw_entries = data
-        except Exception:
-            raw_entries = []
-
-    current_memory = []
-    memory_exists = os.path.exists(MEMORY_PATH)
-    if memory_exists:
-        try:
-            with open(MEMORY_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    current_memory = data
-        except Exception:
-            current_memory = []
-
-    existing_sources = set()
-    for card in current_memory:
-        if isinstance(card, dict) and "sources" in card:
-            for s in card.get("sources", []):
-                if s:
-                    existing_sources.add(str(s))
-
-    new_raw = []
-    for entry in raw_entries:
-        if isinstance(entry, dict):
-            eid = str(entry.get("id", ""))
-            if eid and eid not in existing_sources:
-                new_raw.append(entry)
-
-    if not new_raw and memory_exists:
-        emit({"success": True, "content": "Nothing new to distill."})
-        return
-
-    config = load_config()
-    gemini_key = config.get("gemini_key", "").strip()
-    groq_key = config.get("groq_key", "").strip()
-    primary = config.get("primary", "gemini").lower()
-
-    providers = []
-    if primary == "groq":
-        if groq_key: providers.append(("groq", groq_key))
-        if gemini_key: providers.append(("gemini", gemini_key))
-    else:
-        if gemini_key: providers.append(("gemini", gemini_key))
-        if groq_key: providers.append(("groq", groq_key))
-
-    if not providers:
-        emit({"error": "AUTH_ERROR", "message": "No API key configured for distillation."})
-        return
-
-    profile = load_profile()
-    payload_dict = {
-        "new_raw": new_raw,
-        "current_memory": current_memory
-    }
-    if profile:
-        payload_dict["user_interests"] = profile
-
-    user_payload = json.dumps(payload_dict, ensure_ascii=False)
-
-    response_text = ""
-    for prov_name, key in providers:
-        try:
-            if prov_name == "gemini":
-                for model_name in GEMINI_CANDIDATE_MODELS:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
-                    req_data = json.dumps({
-                        "contents": [{"parts": [{"text": f"{DISTILL_SYSTEM_PROMPT}\n\nData:\n{user_payload}"}]}],
-                        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
-                    }).encode("utf-8")
-                    req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"}, method="POST")
-                    try:
-                        with urllib.request.urlopen(req, timeout=30) as resp:
-                            resp_json = json.loads(resp.read().decode("utf-8"))
-                            candidates = resp_json.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    response_text = parts[0].get("text", "")
-                                    break
-                    except Exception:
-                        continue
-            elif prov_name == "groq":
-                url = "https://api.groq.com/openai/v1/chat/completions"
-                req_data = json.dumps({
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [
-                        {"role": "system", "content": DISTILL_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_payload}
-                    ],
-                    "temperature": 0.2
-                }).encode("utf-8")
-                req = urllib.request.Request(url, data=req_data, headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {key}"
-                }, method="POST")
-                try:
-                    with urllib.request.urlopen(req, timeout=30) as resp:
-                        resp_json = json.loads(resp.read().decode("utf-8"))
-                        response_text = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
-                except Exception:
-                    continue
-
-            if response_text:
-                break
-        except Exception:
-            continue
-
-    if not response_text:
-        emit({"error": "DISTILL_FAILED", "message": "Failed to generate memory distillation from providers."})
-        return
-
-    clean_text = response_text.strip()
-    if clean_text.startswith("```"):
-        if "\n" in clean_text:
-            clean_text = clean_text.split("\n", 1)[1]
-        if clean_text.endswith("```"):
-            clean_text = clean_text.rsplit("```", 1)[0]
-        clean_text = clean_text.strip()
-
-    try:
-        cards = json.loads(clean_text)
-        if isinstance(cards, dict) and "cards" in cards and isinstance(cards["cards"], list):
-            cards = cards["cards"]
-        if not isinstance(cards, list):
-            raise ValueError("Parsed JSON is not an array")
-    except Exception:
-        emit({"error": "DISTILL_PARSE_FAILED", "raw": response_text})
-        return
-
-    if len(cards) > 200:
-        cards = cards[:200]
-
-    os.makedirs(os.path.dirname(MEMORY_PATH), exist_ok=True)
-    try:
-        with open(MEMORY_PATH, "w", encoding="utf-8") as f:
-            json.dump(cards, f, indent=2, ensure_ascii=False)
-        try:
-            os.chmod(MEMORY_PATH, 0o600)
-        except Exception:
-            pass
-        emit({"success": True, "count": len(cards), "content": f"Successfully distilled {len(cards)} memory cards."})
-    except Exception as e:
-        emit({"error": "DISTILL_WRITE_FAILED", "message": f"Failed to write memory file: {e}"})
-
 def main():
     if len(sys.argv) < 2:
         emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
@@ -867,9 +657,6 @@ def main():
         organize_history()
         sys.exit(0)
 
-    if cmd == "distill" or (cmd == "--action" and len(sys.argv) > 2 and sys.argv[2] == "distill"):
-        distill_memory()
-        sys.exit(0)
 
     action = cmd
     mode = "auto"
@@ -946,6 +733,11 @@ def main():
             topic_anchor = ""
             print(json.dumps({"type": "topic_shift", "topic": (custom_prompt or "")[:60]}), flush=True)
 
+    # Trim thread to last 6 message pairs (12 turns) to prevent token bloat
+    MAX_THREAD_TURNS = 12
+    if len(thread) > MAX_THREAD_TURNS:
+        thread = thread[-MAX_THREAD_TURNS:]
+
     is_followup = (action == "ask" and mode == "followup" and len(thread) > 0)
     user_payload = text_to_process
 
@@ -981,6 +773,13 @@ def main():
     else:
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
         user_payload = text_to_process
+
+    if action == "ask":
+        touch_matching_knowledge_cards(custom_prompt or text_to_process)
+
+    learner_injection = get_learner_profile_injection()
+    if learner_injection:
+        system_instruction = f"{learner_injection}\n{system_instruction}"
 
     profile_prefix = get_profile_prompt_prefix()
     if profile_prefix:

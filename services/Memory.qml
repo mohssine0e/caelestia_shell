@@ -12,7 +12,10 @@ Singleton {
     // ── State ────────────────────────────────────────────────────
     property var cards: []
     readonly property string memoryPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory.json"
+    readonly property string learnerProfilePath: Quickshell.env("HOME") + "/.config/caelestia/learner_profile.json"
     readonly property string enginePath: Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/memory_engine.py"
+
+    property var learnerProfile: null
 
     property bool isDistilling: false
     property string distillMessage: ""
@@ -35,10 +38,6 @@ Singleton {
 
     property var lastInjectedCardIds: []
 
-    property bool isSyncingGraph: false
-    property string syncGraphMessage: ""
-    property string syncGraphError: ""
-
     property bool _isSaving: false
 
     // Statistics
@@ -58,11 +57,10 @@ Singleton {
         let cnt = 0
         for (let i = 0; i < cards.length; i++) {
             const c = cards[i]
-            if (!c) continue
-            if (c.status === "review_due" || c.status === "fading") {
-                cnt++
-            } else if (c.next_review) {
-                const t = Date.parse(c.next_review)
+            if (!c || c.type !== "knowledge") continue
+            const nr = (c.srs_data && c.srs_data.next_review) || c.next_review
+            if (nr) {
+                const t = Date.parse(nr)
                 if (!isNaN(t) && t <= now) cnt++
             }
         }
@@ -74,12 +72,10 @@ Singleton {
         let targetId = ""
         for (let i = 0; i < cards.length; i++) {
             const c = cards[i]
-            if (!c) continue
-            if (c.status === "review_due" || c.status === "fading") {
-                targetId = c.id
-                break
-            } else if (c.next_review) {
-                const t = Date.parse(c.next_review)
+            if (!c || c.type !== "knowledge") continue
+            const nr = (c.srs_data && c.srs_data.next_review) || c.next_review
+            if (nr) {
+                const t = Date.parse(nr)
                 if (!isNaN(t) && t <= now) {
                     targetId = c.id
                     break
@@ -138,8 +134,25 @@ Singleton {
         }
     }
 
+    FileView {
+        id: learnerProfileStorage
+        printErrors: false
+        path: root.learnerProfilePath
+        onLoaded: {
+            try {
+                root.learnerProfile = JSON.parse(text())
+            } catch (e) {
+                root.learnerProfile = null
+            }
+        }
+        onLoadFailed: {
+            root.learnerProfile = null
+        }
+    }
+
     function reload() {
         if (memoryStorage) memoryStorage.reload()
+        if (learnerProfileStorage) learnerProfileStorage.reload()
     }
 
     // Debounced disk save (300ms) to eliminate file I/O churn
@@ -166,8 +179,17 @@ Singleton {
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(id)) {
                 list[i].lines = updatedLines
+                if (list[i].type === "knowledge") {
+                    list[i].invariants = updatedLines
+                } else if (list[i].type === "fact") {
+                    list[i].back = updatedLines.join("\n")
+                }
                 if (updatedTopic !== undefined && updatedTopic.trim().length > 0) {
                     list[i].topic = updatedTopic.trim()
+                    list[i].title = updatedTopic.trim()
+                    if (list[i].type === "fact") {
+                        list[i].front = updatedTopic.trim()
+                    }
                 }
                 list[i].updated = new Date().toISOString()
                 list[i]._ts = Date.now()
@@ -198,8 +220,9 @@ Singleton {
         const list = root.cards.slice()
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(cardId)) {
-                const traps = list[i].personal_traps || []
+                const traps = list[i].personal_traps || list[i].user_traps || []
                 list[i].personal_traps = traps.filter(t => t.trim() !== trapText.trim())
+                list[i].user_traps = list[i].personal_traps
                 list[i].updated = new Date().toISOString()
                 list[i]._ts = Date.now()
                 break
@@ -254,6 +277,17 @@ Singleton {
         scored.sort((a, b) => b.score - a.score)
         const topCards = scored.slice(0, 3).map(s => s.card)
         root.lastInjectedCardIds = topCards.map(c => String(c.id))
+
+        // Chat-to-Card Exposure: update last_touched for matched KnowledgeNodes in background
+        let touched = false
+        const nowIso = new Date().toISOString()
+        for (let i = 0; i < topCards.length; i++) {
+            if (topCards[i] && (topCards[i].type === "knowledge" || (!topCards[i].type && topCards[i].tier !== "primitive"))) {
+                topCards[i].last_touched = nowIso
+                touched = true
+            }
+        }
+        if (touched) root.save()
 
         let context = "[ACTIVE DEVELOPER MEMORY & MASTERED CARDS - Align your response with these exact project idioms & rules]:\n"
         for (let i = 0; i < topCards.length; i++) {
@@ -592,51 +626,6 @@ Singleton {
         root.challengeError = ""
         root.gradeError = ""
         root.dailyGauntletError = ""
-    }
-
-    // ── Knowledge Graph Synchronization ──────────────────────────
-    property string _syncGraphBuffer: ""
-
-    function syncGraph() {
-        if (syncGraphProc.running || root.isSyncingGraph) return
-        root.isSyncingGraph = true
-        root.syncGraphError = ""
-        root.syncGraphMessage = ""
-        root._syncGraphBuffer = ""
-        syncGraphProc.command = ["python3", root.enginePath, "sync_graph"]
-        syncGraphProc.running = true
-    }
-
-    Process {
-        id: syncGraphProc
-        stdout: SplitParser {
-            onRead: data => {
-                root._syncGraphBuffer += data
-            }
-        }
-        onExited: exitCode => {
-            root.isSyncingGraph = false
-            const fullText = root._syncGraphBuffer.trim()
-            root._syncGraphBuffer = ""
-            if (!fullText) {
-                if (exitCode !== 0 && !root.syncGraphError) {
-                    root.syncGraphError = "Knowledge graph sync exited with code " + exitCode
-                }
-                return
-            }
-            try {
-                const res = JSON.parse(fullText)
-                if (res.success) {
-                    root.syncGraphMessage = res.message || "Knowledge graph synchronized."
-                    root.reload()
-                } else {
-                    root.syncGraphError = res.error || "Failed to sync knowledge graph."
-                }
-            } catch (e) {
-                root.syncGraphError = "Failed to parse graph JSON: " + e.message
-            }
-            root.reload()
-        }
     }
 }
 

@@ -18,6 +18,7 @@ FocusScope {
     signal closeRequested()
 
     property var windowRef: null
+    property string typeFilter: "all" // "all" | "knowledge" | "fact" | "context"
     property string searchQuery: ""
     property string debouncedSearchQuery: ""
     property string statusFilter: "all" // "all" | "learning" | "mastered"
@@ -26,6 +27,33 @@ FocusScope {
     property string editingTopic: ""
     property string editingLinesText: ""
     property string expandedCardId: ""
+
+    readonly property int knowledgeCount: {
+        const list = Memory.cards || []
+        let cnt = 0
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && (list[i].type === "knowledge" || (!list[i].type && list[i].tier !== "primitive"))) cnt++
+        }
+        return cnt
+    }
+
+    readonly property int factCount: {
+        const list = Memory.cards || []
+        let cnt = 0
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && list[i].type === "fact") cnt++
+        }
+        return cnt
+    }
+
+    readonly property int contextCount: {
+        const list = Memory.cards || []
+        let cnt = 0
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && list[i].type === "context") cnt++
+        }
+        return cnt
+    }
 
     Timer {
         id: searchDebounceTimer
@@ -132,8 +160,10 @@ FocusScope {
         if (!card) return
         root.expandedCardId = String(card.id || "")
         root.editingCardId = String(card.id || "")
-        root.editingTopic = card.topic || ""
-        root.editingLinesText = (card.lines || []).join("\n")
+        root.editingTopic = card.title || card.topic || card.front || ""
+        root.editingLinesText = card.type === "fact"
+            ? (card.back || (card.lines || []).join("\n"))
+            : ((card.invariants && card.invariants.length > 0) ? card.invariants : (card.lines || [])).join("\n")
     }
 
     function cancelEditing() {
@@ -187,11 +217,12 @@ FocusScope {
 
     readonly property var filteredCards: {
         const all = Memory.cards || []
+        const tf = root.typeFilter
         const sf = root.statusFilter
         const sc = root.selectedConcept ? root.selectedConcept.toLowerCase() : ""
         const q = (root.debouncedSearchQuery || "").trim().toLowerCase()
 
-        if (sf === "all" && sc.length === 0 && q.length === 0) {
+        if (tf === "all" && sf === "all" && sc.length === 0 && q.length === 0) {
             return all.slice().sort((a, b) => (b._ts || 0) - (a._ts || 0))
         }
 
@@ -200,11 +231,23 @@ FocusScope {
             const card = all[i]
             if (!card) continue
 
-            // 1. Status Filter
-            if (sf === "mastered" && card.status !== "mastered") continue
-            if (sf === "learning" && card.status === "mastered") continue
+            // 1. Type Filter [All] [Deep Knowledge] [Flash Facts] [Context]
+            if (tf !== "all") {
+                const ctype = card.type || "knowledge"
+                if (tf === "knowledge" && ctype !== "knowledge") continue
+                if (tf === "fact" && ctype !== "fact") continue
+                if (tf === "context" && ctype !== "context") continue
+            }
 
-            // 2. Concept Filter
+            // 2. Status Filter
+            if (card.type !== "context") {
+                if (sf === "mastered" && card.status !== "mastered") continue
+                if (sf === "learning" && card.status === "mastered") continue
+            } else if (sf !== "all") {
+                continue
+            }
+
+            // 3. Concept Filter
             if (sc.length > 0) {
                 const tags = card.tags || []
                 let matchConcept = false
@@ -217,10 +260,12 @@ FocusScope {
                 if (!matchConcept) continue
             }
 
-            // 3. Search Query
+            // 4. Search Query
             if (q.length > 0) {
-                const topic = (card.topic || "").toLowerCase()
-                if (!topic.includes(q)) {
+                const topic = (card.title || card.topic || card.front || card.project_path || "").toLowerCase()
+                const back = (card.back || "").toLowerCase()
+                const mental = (card.mental_model || card.summary || "").toLowerCase()
+                if (!topic.includes(q) && !back.includes(q) && !mental.includes(q)) {
                     const tags = card.tags || []
                     let match = false
                     for (let j = 0; j < tags.length; j++) {
@@ -230,7 +275,7 @@ FocusScope {
                         }
                     }
                     if (!match) {
-                        const lines = card.lines || []
+                        const lines = card.invariants || card.lines || []
                         for (let j = 0; j < lines.length; j++) {
                             if (String(lines[j]).toLowerCase().includes(q)) {
                                 match = true
@@ -364,43 +409,6 @@ FocusScope {
                     }
                 }
 
-                // Knowledge Graph Sync Action
-                RowLayout {
-                    spacing: 4
-                    visible: Memory.isSyncingGraph && !root.isInChallengeMode
-
-                    MaterialIcon {
-                        text: "progress_activity"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3secondary
-
-                        RotationAnimation on rotation {
-                            from: 0
-                            to: 360
-                            duration: 1100
-                            loops: Animation.Infinite
-                            running: Memory.isSyncingGraph
-                        }
-                    }
-
-                    StyledText {
-                        text: qsTr("Mapping…")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3secondary
-                    }
-                }
-
-                IconButton {
-                    visible: !Memory.isSyncingGraph && !Memory.isDistilling && !root.isInChallengeMode
-                    icon: "hub"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    type: IconButton.Tonal
-                    enabled: Memory.totalCount >= 2
-                    onClicked: Memory.syncGraph()
-                }
-
                 // Distill Actions
                 RowLayout {
                     spacing: 4
@@ -421,7 +429,7 @@ FocusScope {
                     }
 
                     StyledText {
-                        text: qsTr("Distilling…")
+                        text: qsTr("Extracting…")
                         font: Tokens.font.label.small
                         color: Colours.palette.m3primary
                     }
@@ -429,7 +437,7 @@ FocusScope {
 
                 IconTextButton {
                     visible: !Memory.isDistilling && !root.isInChallengeMode
-                    text: qsTr("Distill")
+                    text: qsTr("Extract Cards")
                     icon: "auto_awesome"
                     type: IconTextButton.Tonal
                     implicitHeight: 28
@@ -469,21 +477,6 @@ FocusScope {
             tone: Colours.palette.m3tertiary
         }
 
-        NotificationBanner {
-            visible: Memory.syncGraphMessage.length > 0 && !root.isInChallengeMode
-            icon: "hub"
-            text: Memory.syncGraphMessage
-            tone: Colours.palette.m3secondary
-        }
-
-        NotificationBanner {
-            visible: Memory.syncGraphError.length > 0 && !root.isInChallengeMode
-            icon: "error"
-            text: Memory.syncGraphError
-            tone: Colours.palette.m3error
-            textColor: Colours.palette.m3error
-        }
-
         // ═════════════════════════════════════════════════════════
         // VIEW 1: CHALLENGE / GAUNTLET MODE (Extracted to GauntletView)
         // ═════════════════════════════════════════════════════════
@@ -504,6 +497,67 @@ FocusScope {
             Layout.fillWidth: true
             spacing: 8
             visible: !root.isInChallengeMode
+
+            // Row 0: Type Selector Pills [All] [Deep Knowledge] [Flash Facts] [Context]
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Repeater {
+                    model: [
+                        { id: "all", label: qsTr("All"), count: Memory.totalCount, icon: "apps" },
+                        { id: "knowledge", label: qsTr("Deep Knowledge"), count: root.knowledgeCount, icon: "psychology" },
+                        { id: "fact", label: qsTr("Flash Facts"), count: root.factCount, icon: "bolt" },
+                        { id: "context", label: qsTr("Context"), count: root.contextCount, icon: "folder_special" }
+                    ]
+
+                    delegate: StyledRect {
+                        required property var modelData
+
+                        readonly property bool isSelected: root.typeFilter === modelData.id
+                        readonly property bool isHovered: pillMouse.containsMouse
+
+                        implicitHeight: 28
+                        implicitWidth: pillRow.implicitWidth + 16
+                        radius: Tokens.rounding.full
+                        color: isSelected 
+                            ? Colours.palette.m3primary 
+                            : (isHovered ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
+                        border.width: 1
+                        border.color: isSelected ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+
+                        MouseArea {
+                            id: pillMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.typeFilter = modelData.id
+                            }
+                        }
+
+                        RowLayout {
+                            id: pillRow
+                            anchors.centerIn: parent
+                            spacing: 5
+
+                            MaterialIcon {
+                                text: modelData.icon
+                                fontStyle: Tokens.font.icon.small
+                                color: isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                            }
+
+                            StyledText {
+                                text: qsTr("%1 (%2)").arg(modelData.label).arg(modelData.count)
+                                font: Tokens.font.label.small
+                                color: isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                            }
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
 
             // Row 1: Search Bar & Segmented Status Capsule
             RowLayout {

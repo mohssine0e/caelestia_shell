@@ -752,6 +752,113 @@ FocusScope {
                     }
                 }
 
+                // Learner Model & Blindspots Section
+                StyledRect {
+                    Layout.fillWidth: true
+                    visible: Memory.learnerProfile !== null
+                    implicitHeight: learnerCol.implicitHeight + 20
+                    radius: Tokens.rounding.small
+                    color: Qt.alpha(Colours.palette.m3surfaceContainerHigh, 0.6)
+                    border.width: 1
+                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+                    ColumnLayout {
+                        id: learnerCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 10
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            MaterialIcon {
+                                text: "psychology"
+                                fontStyle: Tokens.font.icon.small
+                                color: Colours.palette.m3tertiary
+                            }
+
+                            StyledText {
+                                text: qsTr("LEARNER MODEL & KNOWN BLINDSPOTS")
+                                font: Tokens.font.label.medium
+                                color: Colours.palette.m3tertiary
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            StyledText {
+                                text: {
+                                    const lp = Memory.learnerProfile
+                                    if (!lp || !lp.active_context) return ""
+                                    const parts = lp.active_context.split(" ")
+                                    return parts[0].split("/").pop()
+                                }
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3outline
+                            }
+                        }
+
+                        // Weakest Domains Row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            visible: ((Memory.learnerProfile && Memory.learnerProfile.weakest_domains) || []).length > 0
+
+                            StyledText {
+                                text: qsTr("Focus Areas:")
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3onSurfaceVariant
+                            }
+
+                            Repeater {
+                                model: ((Memory.learnerProfile && Memory.learnerProfile.weakest_domains) || []).slice(0, 4)
+
+                                StyledRect {
+                                    implicitHeight: 20
+                                    implicitWidth: weakTxt.implicitWidth + 12
+                                    radius: Tokens.rounding.full
+                                    color: Qt.alpha(Colours.palette.m3error, 0.12)
+
+                                    StyledText {
+                                        id: weakTxt
+                                        anchors.centerIn: parent
+                                        text: modelData
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3error
+                                    }
+                                }
+                            }
+                        }
+
+                        // Blindspots list (top 3)
+                        Repeater {
+                            model: ((Memory.learnerProfile && Memory.learnerProfile.blindspots) || []).slice(0, 3)
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                MaterialIcon {
+                                    text: "warning"
+                                    fontStyle: Tokens.font.icon.small
+                                    color: Colours.palette.m3error
+                                    Layout.alignment: Qt.AlignTop
+                                }
+
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: modelData
+                                    font: Tokens.font.body.small
+                                    color: Colours.palette.m3onSurface
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Section 1: Developer Environment
                 ColumnLayout {
                     Layout.fillWidth: true

@@ -13,90 +13,114 @@ import re
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-# ---------------------------------------------------------
-# Path Constants
-# ---------------------------------------------------------
-CONFIG_PATH = os.path.expanduser("~/.config/caelestia/assistant.json")
-HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
-MEMORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_memory.json")
-PROFILE_PATH = os.path.expanduser("~/.config/caelestia/assistant_profile.json")
-
-GEMINI_CANDIDATE_MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
-]
-
-GROQ_CANDIDATE_MODELS = [
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b"
-]
-
-STOP_WORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
-    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
-    "can", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing",
-    "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't",
-    "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers",
-    "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in",
-    "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't",
-    "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought",
-    "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll",
-    "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their",
-    "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll",
-    "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very",
-    "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's",
-    "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
-    "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your",
-    "yours", "yourself", "yourselves"
-}
-
-CODE_TOKEN_PATTERN = re.compile(
-    r'(?:'
-    r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+'
-    r'|[a-zA-Z0-9]+_[a-zA-Z0-9_]+'
-    r'|[a-z]+[A-Z][a-zA-Z0-9]*'
-    r'|[A-Z][a-z]+[A-Z][a-zA-Z0-9]*'
-    r'|--[a-zA-Z0-9_-]+'
-    r'|[A-Z]{2,}(?:_[A-Z0-9]+)*'
-    r')'
+from assistant_common import (
+    CONFIG_PATH, HISTORY_PATH, MEMORY_PATH, PROFILE_PATH, LEARNER_PROFILE_PATH,
+    GEMINI_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS, STOP_WORDS,
+    CODE_TOKEN_PATTERN, WORD_PATTERN, JSON_CLEAN_PATTERN,
+    emit, load_config, load_profile, load_learner_profile, save_learner_profile,
+    extract_keywords, extract_code_tokens, normalize_concept_key,
+    clean_json_response, parse_json_safely
 )
 
-WORD_PATTERN = re.compile(r'[a-zA-Z0-9_]+')
-JSON_CLEAN_PATTERN = re.compile(r'```(?:json)?\s*(.*?)\s*```', re.DOTALL)
 DEMOTION_THRESHOLD_SECONDS = 30 * 86400  # 30-day mastery decay
 
 # ---------------------------------------------------------
-# Utilities & I/O
+# Learner Profile Subsystem
 # ---------------------------------------------------------
-def emit(obj):
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+def sync_learner_profile(cards=None):
+    if cards is None:
+        cards = load_memory()
+    profile = load_learner_profile()
 
-def load_config():
-    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini"}
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    cfg.update(data)
-                    if "gemini_api_key" in data and not cfg.get("gemini_key"):
-                        cfg["gemini_key"] = data["gemini_api_key"]
-                    if "groq_api_key" in data and not cfg.get("groq_key"):
-                        cfg["groq_key"] = data["groq_api_key"]
-                    if "preferred_provider" in data and not cfg.get("primary"):
-                        cfg["primary"] = data["preferred_provider"]
-        except Exception:
-            pass
-    if not cfg.get("gemini_key"):
-        cfg["gemini_key"] = os.environ.get("GEMINI_API_KEY", "")
-    if not cfg.get("groq_key"):
-        cfg["groq_key"] = os.environ.get("GROQ_API_KEY", "")
-    return cfg
+    # 1. Pull active context from ContextAnchor
+    ctx_card = next((c for c in cards if c.get("type") == "context"), None)
+    if ctx_card:
+        proj = ctx_card.get("project_path") or "active workspace"
+        branch = ctx_card.get("git_branch", "main")
+        profile["active_context"] = f"{proj} (branch: {branch})"
+    elif not profile.get("active_context") or profile.get("active_context") == "unknown workspace":
+        profile["active_context"] = "default workspace"
+
+    # 2. Track strongest/weakest domains based on Gauntlet/mastery scores
+    domain_scores = {}
+    domain_counts = {}
+    for c in cards:
+        if c.get("type") == "context":
+            continue
+        dom = c.get("domain") or c.get("category") or "general"
+        score = float(c.get("srs_data", {}).get("score", c.get("mastery_score", 0.0)))
+        domain_scores[dom] = domain_scores.get(dom, 0.0) + score
+        domain_counts[dom] = domain_counts.get(dom, 0) + 1
+
+    avg_scores = {}
+    for d, total in domain_scores.items():
+        cnt = domain_counts.get(d, 1)
+        avg_scores[d] = round(total / cnt, 2)
+    profile["domain_scores"] = avg_scores
+
+    sorted_domains = sorted(avg_scores.items(), key=lambda x: x[1])
+    profile["weakest_domains"] = [d[0] for d in sorted_domains if d[1] < 0.70][:3]
+    profile["strongest_domains"] = [d[0] for d in reversed(sorted_domains) if d[1] >= 0.70][:3]
+
+    # Prepopulate blindspots array from existing traps if empty
+    if not profile.get("blindspots"):
+        existing_traps = []
+        for c in cards:
+            dom = c.get("domain") or c.get("category") or "general"
+            for t in (c.get("user_traps") or c.get("personal_traps") or []):
+                if t and len(t) > 10:
+                    existing_traps.append(f"{dom} ({c.get('title') or c.get('topic')}): {t}")
+        profile["blindspots"] = existing_traps[:6]
+
+    profile["last_updated"] = datetime.now(timezone.utc).isoformat()
+    save_learner_profile(profile)
+    return profile
+
+def hook_gauntlet_result(card, resp_data, cards):
+    """Gauntlet Hook: updates learner_profile.json when a user fails a Gauntlet tier."""
+    try:
+        profile = load_learner_profile()
+        score = float(resp_data.get("score", 0.0))
+        verdict = resp_data.get("verdict", "fail").lower()
+        title = card.get("title") or card.get("topic") or "Concept"
+        domain = card.get("domain") or card.get("category") or "General"
+
+        new_blindspots = []
+        q_results = resp_data.get("q_results", {})
+
+        tier_names = {
+            "q1": "Tier 1 (Mental Model)",
+            "q2": "Tier 2 (Bug Hunt & Invariants)",
+            "q3": "Tier 3 (Edge Case & Traps)"
+        }
+
+        # Identify tier-level failures
+        for q_id, q_val in q_results.items():
+            if isinstance(q_val, dict) and q_val.get("verdict") == "fail":
+                tier_label = tier_names.get(q_id, f"Tier {q_id}")
+                comment = (q_val.get("comment") or "").strip()
+                if not comment:
+                    comment = (resp_data.get("personal_trap") or resp_data.get("blindspots") or "Incorrect analysis").strip()
+                new_blindspots.append(f"Fails {tier_label} on {domain} ({title}): {comment}")
+
+        # If overall failure without explicit q_results fail
+        if (verdict != "pass" or score < 0.85) and not new_blindspots:
+            trap = (resp_data.get("personal_trap") or resp_data.get("blindspots") or "Unresolved misconception").strip()
+            new_blindspots.append(f"Fails Gauntlet on {domain} ({title}): {trap}")
+
+        current_blindspots = profile.get("blindspots", [])
+        for bs in new_blindspots:
+            if bs and not any(bs.lower() == existing.lower() for existing in current_blindspots):
+                current_blindspots.insert(0, bs)
+
+        profile["blindspots"] = current_blindspots[:10]
+        save_learner_profile(profile)
+        # Resync domain scores and context
+        sync_learner_profile(cards)
+    except Exception as e:
+        sys.stderr.write(f"[MemoryEngine] hook_gauntlet_result error: {e}\n")
 
 def load_memory(auto_demote=True):
     if not os.path.exists(MEMORY_PATH):
@@ -111,33 +135,86 @@ def load_memory(auto_demote=True):
                 for card in data:
                     if not isinstance(card, dict):
                         continue
+
+                    # 1. Determine entity type: "knowledge" | "fact" | "context"
+                    ctype = card.get("type")
+                    if not ctype or ctype not in ["knowledge", "fact", "context"]:
+                        if card.get("project_path"):
+                            ctype = "context"
+                        elif card.get("front") or card.get("tier") == "primitive":
+                            ctype = "fact"
+                        else:
+                            ctype = "knowledge"
+                    card["type"] = ctype
+
+                    if ctype == "context":
+                        if "domain" not in card:
+                            card["domain"] = "workspace"
+                        if "title" not in card:
+                            card["title"] = card.get("topic") or "Active Workspace"
+                        continue
+
+                    # Common status & review fields
                     if "status" not in card:
                         card["status"] = "learning"
-                    if "archived_lines" not in card:
-                        card["archived_lines"] = []
-                    if "trials" not in card:
-                        card["trials"] = []
-                    if "last_fail_feedback" not in card:
-                        card["last_fail_feedback"] = ""
                     if "mastery_score" not in card:
                         card["mastery_score"] = 1.0 if card.get("status") == "mastered" else 0.0
                     if "last_reviewed" not in card:
                         card["last_reviewed"] = card.get("updated") or card.get("created") or ""
-                    if "personal_traps" not in card or not isinstance(card["personal_traps"], list):
-                        card["personal_traps"] = []
-                    if "traps" not in card:
-                        card["traps"] = card.get("personal_traps", [])
-                    if "invariants" not in card:
-                        card["invariants"] = card.get("lines", [])
+
+                    # Normalize SRS Data
+                    srs = card.get("srs", {})
+                    srs_data = card.get("srs_data", {})
+                    score = float(srs_data.get("score") or srs.get("score") or card.get("mastery_score") or 0.0)
+                    streak = int(srs_data.get("streak") or srs.get("streak") or 0)
+                    interval_days = int(srs_data.get("interval_days") or srs.get("interval_days") or (14 if ctype == "knowledge" else 7))
+                    next_rev = srs_data.get("next_review") or srs.get("next_review") or card.get("next_review") or ""
+
+                    card["srs_data"] = {
+                        "score": score,
+                        "streak": streak,
+                        "interval_days": interval_days,
+                        "next_review": next_rev,
+                        "last_reviewed": card.get("last_reviewed") or card.get("updated") or ""
+                    }
+                    card["srs"] = card["srs_data"]
+                    card["next_review"] = next_rev
+
+                    if ctype == "fact":
+                        if "front" not in card:
+                            card["front"] = card.get("title") or card.get("topic") or ""
+                        if "back" not in card:
+                            card["back"] = " ".join(card.get("lines", []))
+                        if "title" not in card:
+                            card["title"] = card.get("front")
+                        card["topic"] = card.get("title")
+                        card["lines"] = [card.get("back", "")]
+                    else:  # knowledge
+                        if "title" not in card:
+                            card["title"] = card.get("topic") or "Knowledge Concept"
+                        card["topic"] = card.get("title")
+                        if "invariants" not in card:
+                            card["invariants"] = card.get("lines", [])
+                        card["lines"] = card.get("invariants", [])
+                        if "user_traps" not in card:
+                            card["user_traps"] = card.get("personal_traps") or card.get("traps") or []
+                        card["personal_traps"] = card.get("user_traps", [])
+                        card["traps"] = card.get("user_traps", [])
+                        if "mental_model" not in card:
+                            card["mental_model"] = card.get("primer", {}).get("mental_model") or card.get("summary") or card["title"]
+                        card["summary"] = card.get("mental_model", "")
+                        if "snippet" not in card:
+                            card["snippet"] = card.get("primer", {}).get("snippet") or (card.get("sections") and card["sections"][0].get("snippet")) or ""
+
                     if "category" not in card:
                         card["category"] = "general"
-                    if "tier" not in card:
-                        card["tier"] = "hub" if card.get("sections") else "concept"
+                    if "domain" not in card:
+                        card["domain"] = card.get("primer", {}).get("domain") or card.get("category") or "code"
                     if "relations" not in card or not isinstance(card["relations"], list):
                         card["relations"] = []
 
-                    # Spaced Repetition: 30-day decay demotion check
-                    if auto_demote and card.get("status") == "mastered":
+                    # Spaced Repetition: 30-day decay demotion check for knowledge nodes
+                    if auto_demote and ctype == "knowledge" and card.get("status") == "mastered":
                         lr_str = card.get("last_reviewed") or card.get("updated") or card.get("created") or ""
                         if lr_str:
                             try:
@@ -190,55 +267,6 @@ def atomic_save_memory(cards):
             except Exception:
                 pass
         raise e
-
-def clean_json_response(raw_text):
-    text = (raw_text or "").strip()
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline != -1:
-            text = text[first_newline+1:]
-        else:
-            text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3].rstrip()
-
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace >= first_brace:
-        text = text[first_brace:last_brace+1].strip()
-
-    if not text:
-        raise ValueError("Received empty or malformed JSON from model.")
-    return text
-
-def parse_json_safely(raw_text):
-    text = clean_json_response(raw_text)
-    try:
-        return json.loads(text, strict=False)
-    except Exception as e1:
-        # Fallback 1: Python dicts with single quotes
-        try:
-            val = ast.literal_eval(text)
-            if isinstance(val, dict):
-                return val
-        except Exception:
-            pass
-
-        # Fallback 2: Remove trailing commas before closing braces/brackets
-        try:
-            cleaned = re.sub(r',\s*([\]}])', r'\1', text)
-            return json.loads(cleaned, strict=False)
-        except Exception:
-            pass
-
-        # Fallback 3: Convert unescaped single quotes
-        try:
-            cleaned = re.sub(r"(?<!\\)'", '"', text)
-            return json.loads(cleaned, strict=False)
-        except Exception:
-            pass
-
-        raise e1
 
 # ---------------------------------------------------------
 # AI Calling Helper (Groq / Gemini Hybrid)
@@ -327,21 +355,6 @@ def call_llm(system_instruction, user_payload, expect_json=True, temperature=0.2
             continue
 
     raise RuntimeError(f"All AI providers failed: {last_error}")
-
-# ---------------------------------------------------------
-# Keyword & Token Utilities
-# ---------------------------------------------------------
-def extract_keywords(text):
-    if not text:
-        return set()
-    words = WORD_PATTERN.findall(text.lower())
-    return {w for w in words if len(w) >= 3 and w not in STOP_WORDS}
-
-def extract_code_tokens(text):
-    if not text:
-        return set()
-    matches = CODE_TOKEN_PATTERN.findall(text)
-    return {m for m in matches if len(m) >= 3}
 
 # ---------------------------------------------------------
 # CLI Command: get_context <query>
@@ -445,45 +458,49 @@ def get_context(query_text):
 # CLI Command: distill
 # Thread-aware, noise-filtered memory card distillation
 # ---------------------------------------------------------
-DISTILL_PROMPT = """You are the Knowledge Distillation Engine for an advanced developer's Linux HUD Assistant.
-Your task is to analyze new interactions from the user's history and curate high-value, deep Knowledge Cards.
+DISTILL_PROMPT = """You are a strict knowledge classifier. Analyze the chat history. Determine if the user learned a deep engineering concept, a quick atomic fact, or if they established a new workspace context.
 
-KNOWLEDGE HIERARCHY & CONSOLIDATION RULES:
-1. DUAL-LAYER ARCHITECTURE:
-   - DOMAIN CODE HUBS (type: "code_hub"): Concrete programming language idioms, framework patterns, and code recipes. IMPORTANT: Keep core language patterns and major enterprise frameworks separate (e.g., 'card_java_core_hub' for core Java concurrency/virtual threads/records, and 'card_spring_boot_hub' for Spring Boot JPA/DTO/SSE). Use 'sections' to group related topics.
-   - ARCHITECTURAL CONCEPTS (type: "concept"): High-level system design, distributed architectures, and development paradigms (e.g., MVP, PaaS overhead, OCI containers, TCP/IP fundamentals) must remain distinct conceptual cards.
-2. CONSOLIDATE, DO NOT FRAGMENT: If incoming interactions discuss code or idioms for an ecosystem that already has a Domain Code Hub in 'current_memory', APPEND or UPDATE the relevant section in that card instead of generating a new isolated card.
-3. CONCISE CODE SNIPPETS: Provide short, focused, practical code snippets (under 8-10 lines max). Do NOT provide giant boilerplate classes or package/import scaffolding. Focus cleanly on the core idiom/pattern.
-4. IGNORE NOISE: Skip greetings, simple translations, pure arithmetic, short tests, and transient banter.
-5. LINE LINEAGE: Each bullet in 'lines' or 'sections' must trace directly to a source interaction ID in 'sources'.
-6. GENERAL & CONCISE CARD TITLES (5-7 WORDS MAX): When naming or updating card topics, the title MUST be a clean, broad, general concept (e.g., 'Java Core & Concurrency Hub', 'Spring Boot Engineering Hub', 'Docker Architecture & Linux Kernel Primitives') and strictly 5 to 7 words maximum. Never use hyper-specific multi-clause sentences for card titles.
-7. EXTRACT ESSENTIAL GENERAL RULES (NOT SITUATIONAL EXAMPLES): Formulate knowledge as universal technical invariants, patterns, and rules, NOT as task-specific project walk-throughs or history anecdotes. Do NOT mention specific temporary repo names, local file paths, or ephemeral exercise narratives. Extract the enduring, transferable learning point.
+If it is a DEEP CONCEPT, you MUST extract a Mental Model, at least 2 Invariants, a valid Code Snippet, and at least 1 personal trap. Output as type 'knowledge'.
+If it is a QUICK FACT, output only a 1-sentence question and a 1-sentence answer. Output as type 'fact'.
+If it is a WORKSPACE CONTEXT, extract project_path and git_branch. Output as type 'context'.
 
-OUTPUT FORMAT:
-Return a JSON object with a single key 'cards', containing an array of card objects:
+DO NOT output generic summaries. Output STRICT JSON.
+
+OUTPUT JSON SCHEMA:
 {
   "cards": [
     {
-      "id": "card_<category>_<slug>",
-      "topic": "Clear Descriptive Topic",
-      "category": "java|python|linux|architecture|networking|general",
-      "type": "code_hub|concept",
-      "status": "learning",
-      "lines": [
-        "Concise high-yield rule or insight 1",
-        "Concise high-yield rule or insight 2"
+      "id": "card_<domain>_<slug>",
+      "type": "knowledge",
+      "domain": "code|concurrency|architecture|networking|linux|general",
+      "title": "Clear Concept Title (5-7 words max)",
+      "mental_model": "Underlying cause-and-effect principle and WHY it works",
+      "invariants": [
+        "Universal rule or invariant 1",
+        "Universal rule or invariant 2"
       ],
-      "sections": [
-        {
-          "id": "subtopic_slug",
-          "title": "Subtopic Title",
-          "rules": ["Actionable rule 1", "Actionable rule 2"],
-          "snippet": "```lang\\n// Production code snippet\\n...\\n```",
-          "pitfalls": ["Common pitfall or anti-pattern"]
-        }
+      "snippet": "```lang\\n// Valid production code snippet\\n...\\n```",
+      "user_traps": [
+        "Specific personal trap or pitfall to avoid"
       ],
       "tags": ["relevant", "tags"],
-      "sources": ["history_id_1", "history_id_2"]
+      "sources": ["source_interaction_id"]
+    },
+    {
+      "id": "fact_<domain>_<slug>",
+      "type": "fact",
+      "domain": "vocab|architecture|linux|general",
+      "front": "1-sentence question or prompt?",
+      "back": "1-sentence authoritative answer.",
+      "tags": ["relevant", "tags"],
+      "sources": ["source_interaction_id"]
+    },
+    {
+      "id": "ctx_<slug>",
+      "type": "context",
+      "project_path": "/path/to/project",
+      "git_branch": "main",
+      "last_active": "ISO8601"
     }
   ]
 }
@@ -554,9 +571,13 @@ def distill():
         "current_memory": [
             {
                 "id": c.get("id"),
-                "topic": c.get("topic"),
-                "category": c.get("category"),
-                "lines": c.get("lines"),
+                "type": c.get("type", "knowledge"),
+                "domain": c.get("domain", "general"),
+                "title": c.get("title") or c.get("topic"),
+                "mental_model": c.get("mental_model"),
+                "invariants": c.get("invariants") or c.get("lines"),
+                "front": c.get("front"),
+                "back": c.get("back"),
                 "tags": c.get("tags"),
                 "sources": c.get("sources", [])
             } for c in current_memory
@@ -577,51 +598,190 @@ def distill():
     now_iso = datetime.now(timezone.utc).isoformat()
     existing_map = {c.get("id"): c for c in current_memory}
 
+    def find_existing_card(card_type, target_id, target_title, project_path=""):
+        if target_id and target_id in existing_map:
+            return existing_map[target_id]
+        if card_type == "context" and project_path:
+            norm_target_path = os.path.abspath(project_path).rstrip("/").lower()
+            for c in existing_map.values():
+                if c.get("type") == "context":
+                    c_path = os.path.abspath(c.get("project_path") or "").rstrip("/").lower()
+                    if c_path and c_path == norm_target_path:
+                        return c
+        norm_key = normalize_concept_key(target_title)
+        if not norm_key:
+            return None
+        for c in existing_map.values():
+            if c.get("type") != card_type and card_type != "context":
+                continue
+            c_title = c.get("title") or c.get("topic") or c.get("front") or ""
+            c_norm = normalize_concept_key(c_title)
+            if not c_norm:
+                continue
+            if norm_key == c_norm:
+                return c
+            if len(norm_key) >= 10 and len(c_norm) >= 10:
+                if norm_key in c_norm or c_norm in norm_key:
+                    return c
+        return None
+
     created_count = 0
     updated_count = 0
 
     for nc in new_cards:
-        cid = nc.get("id") or f"card_{int(time.time()*1000)}"
-        if cid in existing_map:
-            # Update existing card
-            card = existing_map[cid]
-            if nc.get("type"):
-                card["type"] = nc.get("type")
-            if nc.get("sections"):
-                existing_sections = card.get("sections") or []
-                sec_map = {s.get("id"): s for s in existing_sections if s.get("id")}
-                for s in nc.get("sections"):
-                    sid = s.get("id")
-                    if sid and sid in sec_map:
-                        sec_map[sid].update(s)
-                    else:
-                        existing_sections.append(s)
-                card["sections"] = existing_sections
-            card["lines"] = nc.get("lines", card.get("lines", []))
+        if not isinstance(nc, dict):
+            continue
+        ctype = nc.get("type", "knowledge")
+        cid = nc.get("id") or f"{'ctx' if ctype == 'context' else ('fact' if ctype == 'fact' else 'card')}_{int(time.time()*1000)}"
+
+        if ctype == "context":
+            ctx_path = nc.get("project_path") or os.getcwd()
+            ctx_title = nc.get("title") or ctx_path or "Workspace Context"
+            existing_ctx = find_existing_card("context", cid, ctx_title, ctx_path)
+            card = {
+                "id": existing_ctx.get("id") if existing_ctx else cid,
+                "type": "context",
+                "domain": "workspace",
+                "title": ctx_title,
+                "topic": ctx_title,
+                "project_path": ctx_path,
+                "git_branch": nc.get("git_branch") or "main",
+                "last_active": now_iso,
+                "_ts": int(time.time() * 1000)
+            }
+            if existing_ctx:
+                existing_ctx.update(card)
+                updated_count += 1
+            else:
+                existing_map[cid] = card
+                created_count += 1
+            continue
+
+        if ctype == "fact":
+            front = nc.get("front") or nc.get("title") or nc.get("topic") or "Quick Fact"
+            back = nc.get("back") or " ".join(nc.get("lines", []))
+            tags = list(set((nc.get("tags") or [])))
+            sources = list(set((nc.get("sources") or [])))
+            existing_fact = find_existing_card("fact", cid, front)
+            if existing_fact:
+                card = existing_fact
+                card["type"] = "fact"
+                card["front"] = front
+                card["back"] = back
+                card["title"] = front
+                card["topic"] = front
+                card["lines"] = [back]
+                card["domain"] = nc.get("domain") or card.get("domain", "general")
+                card["tags"] = list(set((card.get("tags") or []) + tags))
+                card["sources"] = list(set((card.get("sources") or []) + sources))
+                card["updated"] = now_iso
+                card["_ts"] = int(time.time() * 1000)
+                updated_count += 1
+            else:
+                next_rev = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+                card = {
+                    "id": cid,
+                    "type": "fact",
+                    "domain": nc.get("domain") or "general",
+                    "title": front,
+                    "topic": front,
+                    "front": front,
+                    "back": back,
+                    "lines": [back],
+                    "status": "learning",
+                    "mastery_score": 0.0,
+                    "srs_data": {
+                        "score": 0.0,
+                        "streak": 0,
+                        "interval_days": 1,
+                        "next_review": next_rev,
+                        "last_reviewed": now_iso
+                    },
+                    "srs": {
+                        "score": 0.0,
+                        "streak": 0,
+                        "interval_days": 1,
+                        "next_review": next_rev
+                    },
+                    "next_review": next_rev,
+                    "tags": tags,
+                    "sources": sources,
+                    "created": now_iso,
+                    "updated": now_iso,
+                    "_ts": int(time.time() * 1000)
+                }
+                existing_map[cid] = card
+                created_count += 1
+            continue
+
+        # KnowledgeNode
+        title = nc.get("title") or nc.get("topic") or "Knowledge Concept"
+        mental_model = nc.get("mental_model") or nc.get("summary") or title
+        invariants = nc.get("invariants") or nc.get("lines") or []
+        user_traps = nc.get("user_traps") or nc.get("personal_traps") or []
+        snippet = nc.get("snippet", "")
+        tags = list(set((nc.get("tags") or [])))
+        sources = list(set((nc.get("sources") or [])))
+
+        existing_knowledge = find_existing_card("knowledge", cid, title)
+        if existing_knowledge:
+            card = existing_knowledge
+            card["type"] = "knowledge"
+            card["title"] = title
+            card["topic"] = title
+            card["domain"] = nc.get("domain") or card.get("domain", "code")
+            card["mental_model"] = mental_model
+            card["summary"] = mental_model
+            merged_invs = list(dict.fromkeys((card.get("invariants") or card.get("lines") or []) + invariants))
+            card["invariants"] = merged_invs
+            card["lines"] = merged_invs
+            if snippet:
+                card["snippet"] = snippet
+            if user_traps:
+                card["user_traps"] = list(set((card.get("user_traps") or []) + user_traps))
+                card["personal_traps"] = card["user_traps"]
+            card["tags"] = list(set((card.get("tags") or []) + tags))
+            card["sources"] = list(set((card.get("sources") or []) + sources))
             card["updated"] = now_iso
-            card["tags"] = list(set((card.get("tags") or []) + (nc.get("tags") or [])))
-            card["sources"] = list(set((card.get("sources") or []) + (nc.get("sources") or [])))
             card["_ts"] = int(time.time() * 1000)
             updated_count += 1
         else:
-            # Create new card
+            next_rev = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
             card = {
                 "id": cid,
-                "topic": nc.get("topic", "Untitled Concept"),
-                "category": nc.get("category", "general"),
-                "type": nc.get("type", "concept"),
+                "type": "knowledge",
+                "domain": nc.get("domain") or "code",
+                "title": title,
+                "topic": title,
+                "mental_model": mental_model,
+                "summary": mental_model,
+                "invariants": invariants,
+                "lines": invariants,
+                "snippet": snippet,
+                "user_traps": user_traps,
+                "personal_traps": user_traps,
+                "sections": nc.get("sections", []),
+                "primer": {},
                 "status": "learning",
                 "mastery_score": 0.0,
-                "lines": nc.get("lines", []),
-                "sections": nc.get("sections", []),
-                "archived_lines": [],
-                "tags": nc.get("tags", []),
-                "sources": nc.get("sources", []),
-                "last_fail_feedback": "",
-                "trials": [],
+                "srs_data": {
+                    "score": 0.0,
+                    "streak": 0,
+                    "interval_days": 1,
+                    "next_review": next_rev,
+                    "last_reviewed": now_iso
+                },
+                "srs": {
+                    "score": 0.0,
+                    "streak": 0,
+                    "interval_days": 1,
+                    "next_review": next_rev
+                },
+                "next_review": next_rev,
+                "tags": tags,
+                "sources": sources,
                 "created": now_iso,
                 "updated": now_iso,
-                "last_reviewed": now_iso,
                 "_ts": int(time.time() * 1000)
             }
             existing_map[cid] = card
@@ -629,6 +789,7 @@ def distill():
 
     final_cards = list(existing_map.values())
     atomic_save_memory(final_cards)
+    sync_learner_profile(final_cards)
 
     emit({
         "success": True,
@@ -690,6 +851,40 @@ Return valid JSON with:
 }
 """
 
+FACT_CHALLENGE_PROMPT = """You are an examiner testing atomic knowledge facts, definitions, and commands.
+Generate EXACTLY 1 Multiple Choice Question (QCM) to test whether the user knows the given flash fact.
+
+RULES:
+1. ONLY return EXACTLY 1 question of type 'qcm'.
+2. DO NOT return bug hunts, code snippets, or edge case scenarios.
+3. Provide 4 options (A, B, C, D) with exactly one unambiguous correct answer matching the fact.
+
+FORMAT REQUIREMENT:
+Return valid JSON with:
+{
+  "card_id": "<card_id>",
+  "topic": "<topic>",
+  "domain": "fact",
+  "complexity": "small",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "qcm",
+      "title": "Quick Fact Quiz",
+      "question": "Clear multiple choice question testing the fact...",
+      "options": [
+        "A) First option",
+        "B) Second option",
+        "C) Third option",
+        "D) Fourth option"
+      ],
+      "correct_option": "A",
+      "explanation": "Why this option is correct based on the fact"
+    }
+  ]
+}
+"""
+
 def challenge(card_id, is_daily=False):
     cards = load_memory()
     card = next((c for c in cards if c.get("id") == card_id), None)
@@ -697,25 +892,44 @@ def challenge(card_id, is_daily=False):
         emit({"success": False, "error": f"Card '{card_id}' not found."})
         return
 
-    primer = card.get("primer") or {}
-    domain = primer.get("domain") or ("code" if extract_code_tokens(card.get("topic", "") + " " + " ".join(card.get("lines", []))) else "protocol")
-    complexity = primer.get("complexity") or ("small" if len(card.get("lines", [])) <= 1 else "medium")
+    if card.get("type") == "context":
+        emit({"success": False, "error": "Context anchors are workspace references and cannot be tested."})
+        return
 
-    payload = {
-        "card_id": card.get("id"),
-        "topic": card.get("topic"),
-        "category": card.get("category"),
-        "domain": domain,
-        "complexity": complexity,
-        "lines": card.get("lines"),
-        "archived_lines": card.get("archived_lines", []),
-        "last_fail_feedback": card.get("last_fail_feedback", ""),
-        "personal_traps": card.get("personal_traps", []),
-        "primer": primer
-    }
+    is_fact = (card.get("type") == "fact")
+    prompt_to_use = FACT_CHALLENGE_PROMPT if is_fact else CHALLENGE_PROMPT
+
+    if is_fact:
+        payload = {
+            "card_id": card.get("id"),
+            "topic": card.get("title") or card.get("topic"),
+            "domain": card.get("domain", "fact"),
+            "front": card.get("front", ""),
+            "back": card.get("back", ""),
+            "last_fail_feedback": card.get("last_fail_feedback", "")
+        }
+        domain = "fact"
+        complexity = "small"
+    else:
+        primer = card.get("primer") or {}
+        domain = primer.get("domain") or ("code" if extract_code_tokens(card.get("topic", "") + " " + " ".join(card.get("lines", []))) else "protocol")
+        complexity = primer.get("complexity") or ("small" if len(card.get("lines", [])) <= 1 else "medium")
+
+        payload = {
+            "card_id": card.get("id"),
+            "topic": card.get("title") or card.get("topic"),
+            "category": card.get("category"),
+            "domain": domain,
+            "complexity": complexity,
+            "lines": card.get("invariants") or card.get("lines", []),
+            "archived_lines": card.get("archived_lines", []),
+            "last_fail_feedback": card.get("last_fail_feedback", ""),
+            "personal_traps": card.get("user_traps") or card.get("personal_traps", []),
+            "primer": primer
+        }
 
     try:
-        raw_resp = call_llm(CHALLENGE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
+        raw_resp = call_llm(prompt_to_use, json.dumps(payload, ensure_ascii=False), expect_json=True)
         resp_data = parse_json_safely(raw_resp)
         resp_data["card_id"] = card_id
         resp_data["success"] = True
@@ -842,15 +1056,18 @@ def grade(card_id, user_answer_raw):
                 card["personal_traps"] = card["personal_traps"][:5]
 
         # Enforce score >= 0.85 for true mastery graduation
+        is_fact = (card.get("type") == "fact")
         if verdict == "pass" and score >= 0.85:
             card["status"] = "mastered"
             card["mastery_score"] = score
             card["last_fail_feedback"] = ""
-            # Compress lines on mastery
-            compressed = resp_data.get("compressed_summary", "").strip()
-            if compressed:
-                card["archived_lines"] = list(card.get("lines") or [])
-                card["lines"] = [f"Mastered Rule: {compressed}"]
+            # Compress lines on mastery for knowledge cards
+            if not is_fact:
+                compressed = resp_data.get("compressed_summary", "").strip()
+                if compressed:
+                    card["archived_lines"] = list(card.get("lines") or [])
+                    card["lines"] = [f"Mastered Rule: {compressed}"]
+                    card["invariants"] = card["lines"]
         else:
             card["status"] = "learning"
             card["mastery_score"] = score
@@ -880,19 +1097,21 @@ def grade(card_id, user_answer_raw):
 
         next_review_date = datetime.now(timezone.utc) + timedelta(days=interval_days)
         card["next_review"] = next_review_date.isoformat()
-        card["srs"] = {
+        card["srs_data"] = {
             "score": round(score, 2),
             "streak": streak,
             "interval_days": interval_days,
             "next_review": next_review_date.isoformat(),
-            "status": card["status"]
+            "last_reviewed": now_iso
         }
+        card["srs"] = card["srs_data"]
+        card["user_traps"] = card.get("personal_traps", [])
         card["invariants"] = card.get("lines", [])
-        card["traps"] = card.get("personal_traps", [])
 
         # Clear the active trial
         card.pop("active_trial", None)
         atomic_save_memory(cards)
+        hook_gauntlet_result(card, resp_data, cards)
 
         resp_data["card_id"] = card_id
         resp_data["status"] = card["status"]
@@ -900,61 +1119,6 @@ def grade(card_id, user_answer_raw):
         emit(resp_data)
     except Exception as e:
         emit({"success": False, "error": f"Grading failed: {e}"})
-
-# ---------------------------------------------------------
-# CLI Command: suggest_profile
-# Analyzes history without writing to disk
-# ---------------------------------------------------------
-PROFILE_PROMPT = """Analyze the user's recent interactions and memory cards to suggest updates to their developer profile.
-Detect newly recurring technologies, active stacks, or explicit preferences.
-
-OUTPUT JSON:
-{
-  "suggested_additions": ["item1", "item2"],
-  "suggested_removals": [],
-  "detected_preference": "Concise summary of observed style preferences",
-  "reasoning": "Brief rationale"
-}
-"""
-
-def suggest_profile():
-    cards = load_memory()
-    history = []
-    if os.path.exists(HISTORY_PATH):
-        try:
-            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                d = json.load(f)
-                if isinstance(d, list):
-                    history = d[-30:]
-        except Exception:
-            pass
-
-    profile = {}
-    if os.path.exists(PROFILE_PATH):
-        try:
-            with open(PROFILE_PATH, "r", encoding="utf-8") as f:
-                profile = json.load(f)
-        except Exception:
-            pass
-
-    payload = {
-        "current_profile": profile,
-        "sample_interactions": [
-            {
-                "prompt": h.get("prompt", "")[:200],
-                "text": h.get("text", "")[:300]
-            } for h in history
-        ],
-        "mastered_topics": [c.get("topic") for c in cards if c.get("status") == "mastered"]
-    }
-
-    try:
-        raw_resp = call_llm(PROFILE_PROMPT, json.dumps(payload, ensure_ascii=False), expect_json=True)
-        resp_data = parse_json_safely(raw_resp)
-        resp_data["success"] = True
-        emit(resp_data)
-    except Exception as e:
-        emit({"success": False, "error": f"Profile suggestion failed: {e}"})
 
 # ---------------------------------------------------------
 # CLI Command: enrich <card_id>
@@ -1059,70 +1223,6 @@ def enrich(card_id):
         })
     except Exception as e:
         emit({"success": False, "error": f"Enrichment failed: {e}"})
-
-# ---------------------------------------------------------
-# CLI Command: merge <id1> <id2>
-# Deduplication & merging of cards (card2 into card1)
-# ---------------------------------------------------------
-def merge_cards(id1, id2):
-    cards = load_memory(auto_demote=False)
-    card1 = next((c for c in cards if str(c.get("id")) == str(id1)), None)
-    card2 = next((c for c in cards if str(c.get("id")) == str(id2)), None)
-    if not card1 or not card2:
-        emit({"success": False, "error": f"One or both cards not found: '{id1}', '{id2}'"})
-        return
-    if id1 == id2:
-        emit({"success": False, "error": "Cannot merge a card into itself."})
-        return
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    # Merge lines
-    existing_lines = list(card1.get("lines") or [])
-    for line in (card2.get("lines") or []):
-        if line and line not in existing_lines:
-            existing_lines.append(line)
-    card1["lines"] = existing_lines
-
-    # Merge archived lines
-    existing_archived = list(card1.get("archived_lines") or [])
-    for line in (card2.get("archived_lines") or []):
-        if line and line not in existing_archived:
-            existing_archived.append(line)
-    card1["archived_lines"] = existing_archived
-
-    # Union tags & sources
-    card1["tags"] = list(set((card1.get("tags") or []) + (card2.get("tags") or [])))
-    card1["sources"] = list(set((card1.get("sources") or []) + (card2.get("sources") or [])))
-
-    # Combine trials chronologically
-    combined_trials = (card1.get("trials") or []) + (card2.get("trials") or [])
-    combined_trials.sort(key=lambda t: t.get("timestamp", 0))
-    card1["trials"] = combined_trials
-
-    # Inherit primer if card1 lacks one
-    if not card1.get("primer") and card2.get("primer"):
-        card1["primer"] = card2["primer"]
-
-    # Status & score
-    if card1.get("status") != "mastered" and card2.get("status") == "mastered":
-        card1["status"] = "mastered"
-        card1["mastery_score"] = card2.get("mastery_score", 1.0)
-    else:
-        card1["mastery_score"] = max(float(card1.get("mastery_score", 0.0)), float(card2.get("mastery_score", 0.0)))
-
-    card1["updated"] = now_iso
-
-    # Remove card2
-    remaining_cards = [c for c in cards if str(c.get("id")) != str(id2)]
-    atomic_save_memory(remaining_cards)
-
-    emit({
-        "success": True,
-        "merged_into": id1,
-        "deleted_id": id2,
-        "total_cards": len(remaining_cards)
-    })
 
 # ---------------------------------------------------------
 # CLI Command: consolidate <domain>
@@ -1301,19 +1401,19 @@ def consolidate_domain(domain_query="java"):
 # ---------------------------------------------------------
 def daily_challenge():
     cards = load_memory()
-    if not cards:
-        emit({"success": False, "error": "No memory cards found to generate daily gauntlet."})
+    testable_cards = [c for c in cards if c.get("type") != "context"]
+    if not testable_cards:
+        emit({"success": False, "error": "No testable memory cards found to generate daily gauntlet."})
         return
 
     now_epoch = time.time()
-    FOURTEEN_DAYS = 14 * 86400
 
     def card_priority(c):
         # Priority 1: Unresolved blindspots / personal traps
         if c.get("status") != "mastered" and c.get("last_fail_feedback"):
             return 10
         # Priority 2: Due for review based on SM-2 next_review
-        nr_str = c.get("next_review")
+        nr_str = (c.get("srs_data") and c["srs_data"].get("next_review")) or c.get("next_review")
         if nr_str:
             try:
                 nr_dt = datetime.fromisoformat(nr_str.replace("Z", "+00:00"))
@@ -1328,105 +1428,9 @@ def daily_challenge():
         # Priority 4: Mastered cards
         return 50
 
-    sorted_candidates = sorted(cards, key=card_priority)
+    sorted_candidates = sorted(testable_cards, key=card_priority)
     chosen_card = sorted_candidates[0]
     challenge(chosen_card.get("id"), is_daily=True)
-# ---------------------------------------------------------
-# CLI Command: sync_graph
-# Constructs Knowledge Graph relationships (prerequisites, evolutions, related)
-# ---------------------------------------------------------
-GRAPH_PROMPT = """You are an expert software knowledge graph architect and mentor.
-Analyze the provided developer memory cards and map ALL high-value knowledge graph connections between them across all domains (Java, Concurrency, Networking, Linux, Architecture, System Design).
-
-CONNECTION TYPES:
-1. "prerequisite": Target card is foundational or required to understand or implement the source card (e.g., OSI Model / TCP is a prerequisite for HTTP SSE Streaming; basic Java Concurrency is a prerequisite for ConcurrentHashMap internals).
-2. "evolution": Source card evolved from, modernizes, or solves advanced/edge-case problems of the target card (e.g., CopyOnWriteArrayList evolves from basic Java Collections; OCI ADR Containers evolves from general Docker primitives).
-3. "related": Sibling concepts that frequently co-occur in architectures or solve adjacent facets of the same problem (e.g., Docker Architecture and OCI Containers, URI vs URL and Networking Protocols, Spring Boot Config and Thymeleaf Integration).
-
-RULES:
-- Review the entire list of cards thoroughly. Create genuine, high-value connections wherever conceptual linkage exists.
-- Aim to link related cards into cohesive topic clusters so the developer can navigate between connected concepts.
-- 'reason' MUST be a crisp, informative 1-sentence explanation of why they are linked.
-
-OUTPUT JSON FORMAT:
-{
-  "connections": [
-    {
-      "source_id": "<card_id_1>",
-      "target_id": "<card_id_2>",
-      "type": "prerequisite" | "evolution" | "related",
-      "reason": "Clear 1-sentence explanation of the conceptual link"
-    }
-  ]
-}
-"""
-
-def sync_graph():
-    cards = load_memory()
-    if len(cards) < 2:
-        emit({"success": True, "connections_count": 0, "message": "Need at least 2 cards to form a knowledge graph."})
-        return
-
-    manifest = []
-    card_map = {c["id"]: c for c in cards}
-    for c in cards:
-        lines = c.get("lines") or []
-        summary = lines[0] if lines else ""
-        manifest.append({
-            "id": c["id"],
-            "topic": c.get("topic", "Untitled"),
-            "summary": summary[:120]
-        })
-
-    try:
-        raw_resp = call_llm(GRAPH_PROMPT, json.dumps({"cards": manifest}, ensure_ascii=False), expect_json=True)
-        resp_data = parse_json_safely(raw_resp)
-        connections = resp_data.get("connections", [])
-
-        # Reset existing relations
-        for c in cards:
-            c["relations"] = []
-
-        valid_count = 0
-        for conn in connections:
-            s_id = conn.get("source_id")
-            t_id = conn.get("target_id")
-            rel_type = conn.get("type", "related")
-            reason = conn.get("reason", "")
-
-            if s_id in card_map and t_id in card_map and s_id != t_id:
-                s_card = card_map[s_id]
-                t_card = card_map[t_id]
-
-                # Check duplicate on source
-                if not any(r.get("target_id") == t_id for r in s_card["relations"]):
-                    s_card["relations"].append({
-                        "target_id": t_id,
-                        "target_topic": t_card.get("topic", "Untitled"),
-                        "type": rel_type,
-                        "reason": reason
-                    })
-                    valid_count += 1
-
-                # Add reciprocal link if not already present
-                rev_type = "prerequisite_for" if rel_type == "prerequisite" else ("evolved_to" if rel_type == "evolution" else "related")
-                if not any(r.get("target_id") == s_id for r in t_card["relations"]):
-                    t_card["relations"].append({
-                        "target_id": s_id,
-                        "target_topic": s_card.get("topic", "Untitled"),
-                        "type": rev_type,
-                        "reason": reason
-                    })
-
-        atomic_save_memory(cards)
-        emit({
-            "success": True,
-            "connections_count": valid_count,
-            "cards_count": len(cards),
-            "message": f"Successfully mapped {valid_count} graph connections across {len(cards)} cards."
-        })
-    except Exception as e:
-        emit({"success": False, "error": f"Knowledge graph sync failed: {e}"})
 
 def remove_trap(card_id, trap_text):
     cards = load_memory()
@@ -1440,19 +1444,44 @@ def remove_trap(card_id, trap_text):
     emit({"success": True, "personal_traps": card["personal_traps"]})
 
 def quick_card(source_text, answer_text, action_type="explain"):
-    """Rapidly extracts a high-yield memory flashcard from a Q&A interaction."""
-    system_instruction = (
-        "You are an expert developer memory synthesis engine. "
-        "From the given context and assistant explanation, create a concise, high-yield flashcard for long-term developer mastery. "
-        "Return a JSON object with:\n"
-        "- topic: Short crisp title (3-6 words, e.g. 'ConcurrentHashMap computeIfAbsent')\n"
-        "- category: Technology or domain (e.g. java, python, qml, linux, spring, architecture, english)\n"
-        "- summary: 1 clear sentence summarizing the core technical takeaway\n"
-        "- lines: Array of 2-3 actionable, high-density principles or code rules\n"
-        "- tags: Array of 3-5 lowercase search tags\n"
-        "- trial_question: A tough, realistic interview/debugging question testing this exact concept\n"
-        "- trial_criteria: Array of 2-3 key points a correct answer MUST mention\n"
+    """Rapidly extracts a high-yield memory flashcard from a Q&A interaction.
+    Outputs a typed card (knowledge or fact) matching the current schema.
+    """
+    # Decide card type: translate/simple vocab → fact; code/explain/deep → knowledge
+    is_fact_action = action_type in ("translate", "examples")
+    is_fact_content = (
+        len((source_text or "").strip()) < 120
+        and len(extract_code_tokens(source_text or "")) == 0
+        and action_type not in ("explain", "ask")
     )
+    emit_as_fact = is_fact_action or is_fact_content
+
+    if emit_as_fact:
+        system_instruction = (
+            "You are a knowledge classifier. From this Q&A, extract a single atomic flash fact.\n"
+            "Return a JSON object with:\n"
+            "- type: always \"fact\"\n"
+            "- domain: one word (e.g. vocab, linux, general, networking)\n"
+            "- front: 1-sentence question or prompt\n"
+            "- back: 1-sentence authoritative answer\n"
+            "- tags: array of 2-3 lowercase tags\n"
+            "DO NOT return generic summaries. Output STRICT JSON."
+        )
+    else:
+        system_instruction = (
+            "You are a knowledge classifier. From this Q&A, extract a deep engineering concept card.\n"
+            "Return a JSON object with:\n"
+            "- type: always \"knowledge\"\n"
+            "- domain: one word (e.g. code, architecture, networking, devops)\n"
+            "- title: short crisp title (3-7 words)\n"
+            "- mental_model: 1-2 sentence core mental model\n"
+            "- invariants: array of 2-4 concise actionable rules\n"
+            "- snippet: optional code string, empty string if not applicable\n"
+            "- user_traps: array of 1-2 common mistakes the user might make\n"
+            "- tags: array of 3-5 lowercase tags\n"
+            "DO NOT return generic summaries. Output STRICT JSON."
+        )
+
     user_payload = f"SOURCE / CONTEXT:\n{source_text[:2000]}\n\nASSISTANT ANSWER:\n{answer_text[:4000]}"
     try:
         raw_res = call_llm(system_instruction, user_payload, expect_json=True, temperature=0.2)
@@ -1461,44 +1490,100 @@ def quick_card(source_text, answer_text, action_type="explain"):
             emit({"success": False, "error": "Failed to parse AI response into card schema"})
             return
 
-        card_id = "card_" + re.sub(r"[^a-z0-9_]+", "_", data.get("topic", "flashcard").lower()).strip("_")[:40]
-        now_iso = datetime.now().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        next_rev = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        ctype = data.get("type", "fact" if emit_as_fact else "knowledge")
 
-        new_card = {
-            "id": card_id,
-            "topic": data.get("topic", "Extracted Flashcard"),
-            "category": data.get("category", "general"),
-            "status": "learning",
-            "mastery_score": 0.0,
-            "summary": data.get("summary", ""),
-            "lines": data.get("lines", []),
-            "tags": data.get("tags", []),
-            "personal_traps": [],
-            "trials": [],
-            "trial_question": data.get("trial_question", ""),
-            "trial_criteria": data.get("trial_criteria", []),
-            "created": now_iso,
-            "updated": now_iso,
-            "next_review": now_iso
-        }
+        if ctype == "fact":
+            front = (data.get("front") or source_text[:80]).strip()
+            back = (data.get("back") or answer_text[:200]).strip()
+            card_id = "fact_" + re.sub(r"[^a-z0-9_]+", "_", front.lower())[:40].strip("_")
+            new_card = {
+                "id": card_id,
+                "type": "fact",
+                "domain": data.get("domain", "general"),
+                "title": front,
+                "topic": front,
+                "front": front,
+                "back": back,
+                "lines": [back],
+                "tags": data.get("tags", []),
+                "status": "learning",
+                "mastery_score": 0.0,
+                "srs_data": {"score": 0.0, "streak": 0, "interval_days": 1, "next_review": next_rev, "last_reviewed": now_iso},
+                "next_review": next_rev,
+                "created": now_iso,
+                "updated": now_iso,
+                "_ts": int(time.time() * 1000)
+            }
+        else:
+            title = (data.get("title") or data.get("topic") or "Knowledge Concept").strip()
+            card_id = "card_" + re.sub(r"[^a-z0-9_]+", "_", title.lower())[:40].strip("_")
+            new_card = {
+                "id": card_id,
+                "type": "knowledge",
+                "domain": data.get("domain", "code"),
+                "title": title,
+                "topic": title,
+                "mental_model": data.get("mental_model", ""),
+                "summary": data.get("mental_model", ""),
+                "invariants": data.get("invariants", []),
+                "lines": data.get("invariants", []),
+                "snippet": data.get("snippet", ""),
+                "user_traps": data.get("user_traps", []),
+                "personal_traps": data.get("user_traps", []),
+                "tags": data.get("tags", []),
+                "status": "learning",
+                "mastery_score": 0.0,
+                "primer": {},
+                "srs_data": {"score": 0.0, "streak": 0, "interval_days": 1, "next_review": next_rev, "last_reviewed": now_iso},
+                "srs": {"score": 0.0, "streak": 0, "interval_days": 1, "next_review": next_rev},
+                "next_review": next_rev,
+                "created": now_iso,
+                "updated": now_iso,
+                "_ts": int(time.time() * 1000)
+            }
 
         cards = load_memory(auto_demote=False)
-        existing_idx = next((i for i, c in enumerate(cards) if c.get("id") == card_id or c.get("topic", "").lower() == new_card["topic"].lower()), -1)
+        target_title = new_card.get("title") or new_card.get("front") or new_card.get("topic") or ""
+        norm_target = normalize_concept_key(target_title)
+        existing_idx = -1
+        for i, c in enumerate(cards):
+            if c.get("id") == card_id:
+                existing_idx = i
+                break
+            c_title = c.get("title") or c.get("topic") or c.get("front") or ""
+            c_norm = normalize_concept_key(c_title)
+            if norm_target and c_norm:
+                if norm_target == c_norm:
+                    existing_idx = i
+                    break
+                if len(norm_target) >= 10 and len(c_norm) >= 10 and (norm_target in c_norm or c_norm in norm_target):
+                    existing_idx = i
+                    break
         if existing_idx >= 0:
-            existing_lines = cards[existing_idx].get("lines", [])
-            merged_lines = list(dict.fromkeys(existing_lines + new_card["lines"]))
-            cards[existing_idx].update({
-                "summary": new_card["summary"],
-                "lines": merged_lines,
-                "updated": now_iso
-            })
-            saved_card = cards[existing_idx]
+            existing = cards[existing_idx]
+            if ctype == "fact":
+                existing.update({"back": new_card["back"], "front": new_card["front"],
+                                 "title": new_card["title"], "updated": now_iso})
+            else:
+                merged_invariants = list(dict.fromkeys(
+                    (existing.get("invariants") or existing.get("lines") or []) + new_card["invariants"]
+                ))
+                existing.update({
+                    "mental_model": new_card["mental_model"],
+                    "summary": new_card["mental_model"],
+                    "invariants": merged_invariants,
+                    "lines": merged_invariants,
+                    "updated": now_iso
+                })
+            saved_card = existing
         else:
             cards.insert(0, new_card)
             saved_card = new_card
 
         atomic_save_memory(cards)
-        emit({"success": True, "card": saved_card, "message": f"Saved flash card: '{saved_card['topic']}'"})
+        emit({"success": True, "card": saved_card, "message": f"Saved {ctype} card: '{saved_card.get('title', saved_card.get('front', ''))}'"})
     except Exception as e:
         emit({"success": False, "error": str(e)})
 
@@ -1509,7 +1594,7 @@ def main():
     if len(sys.argv) < 2:
         emit({
             "error": "USAGE",
-            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|suggest_profile|enrich|merge|daily_challenge|sync_graph|remove_trap|quick_card> [args...]"
+            "message": "Usage: memory_engine.py <distill|get_context|challenge|grade|enrich|daily_challenge|consolidate|remove_trap|quick_card|learner_profile> [args...]"
         })
         sys.exit(1)
 
@@ -1542,13 +1627,6 @@ def main():
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py enrich <card_id>"})
             sys.exit(1)
         enrich(sys.argv[2])
-    elif cmd == "merge":
-        if len(sys.argv) < 4:
-            emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py merge <card_id1> <card_id2>"})
-            sys.exit(1)
-        merge_cards(sys.argv[2], sys.argv[3])
-    elif cmd == "sync_graph":
-        sync_graph()
     elif cmd == "consolidate":
         domain = sys.argv[2] if len(sys.argv) > 2 else "java"
         consolidate_domain(domain)
@@ -1557,8 +1635,8 @@ def main():
             emit({"error": "MISSING_ARG", "message": "Usage: memory_engine.py remove_trap <card_id> \"<trap_text>\""})
             sys.exit(1)
         remove_trap(sys.argv[2], sys.argv[3])
-    elif cmd == "suggest_profile":
-        suggest_profile()
+    elif cmd == "learner_profile":
+        emit(sync_learner_profile())
     else:
         emit({"error": "UNKNOWN_COMMAND", "command": cmd})
         sys.exit(1)
