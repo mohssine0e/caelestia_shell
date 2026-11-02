@@ -885,9 +885,84 @@ Singleton {
         root.selectedText = item.text || ""
         root.rawResultText = item.answer || ""
         root.resultText = root.cleanMarkdown(item.answer || "")
-        root.activeAction = item.action || ""
+        root.activeAction = item.action || "ask"
+        root.activePrompt = item.prompt || item.original || ""
         root.errorMessage = ""
         root.errorType = ""
+
+        const msgs = []
+        const threadList = []
+
+        // If part of an existing thread, load all turns from that thread in chronological order
+        if (item.thread_id && root.history && root.history.length > 0) {
+            const threadHistory = root.history
+                .filter(h => h && h.thread_id === item.thread_id)
+                .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
+
+            if (threadHistory.length > 0) {
+                for (let i = 0; i < threadHistory.length; i++) {
+                    const h = threadHistory[i]
+                    const hPrompt = (h.prompt || h.original || h.text || "").trim()
+                    const hDisplay = hPrompt || (h.action && h.action !== "ask" ? h.action.toUpperCase() : qsTr("Question"))
+                    const hTime = h.timestamp ? new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""
+                    const hAnswer = root.cleanMarkdown(h.answer || "")
+
+                    msgs.push({
+                        id: "u_" + (h.id || i),
+                        role: "user",
+                        action: h.action || "ask",
+                        text: hDisplay,
+                        timestamp: hTime
+                    })
+                    msgs.push({
+                        id: "a_" + (h.id || i),
+                        role: "assistant",
+                        action: h.action || "ask",
+                        text: hAnswer,
+                        isStreaming: false,
+                        timestamp: hTime
+                    })
+                    threadList.push({ role: "user", content: hPrompt })
+                    threadList.push({ role: "assistant", content: root.distillEssentials(h.answer || "") })
+                }
+            }
+        }
+
+        // Fallback for single item without thread_id or standalone item
+        if (msgs.length === 0) {
+            const userPrompt = (item.prompt || item.original || item.text || "").trim()
+            const userDisplay = userPrompt || (item.action && item.action !== "ask" ? item.action.toUpperCase() : qsTr("Question"))
+            const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""
+
+            msgs.push({
+                id: "u_" + (item.id || Date.now()),
+                role: "user",
+                action: item.action || "ask",
+                text: userDisplay,
+                timestamp: timeStr
+            })
+            msgs.push({
+                id: "a_" + (item.id || Date.now()),
+                role: "assistant",
+                action: item.action || "ask",
+                text: root.resultText,
+                isStreaming: false,
+                timestamp: timeStr
+            })
+            threadList.push({ role: "user", content: userPrompt })
+            threadList.push({ role: "assistant", content: root.distillEssentials(item.answer || "") })
+        }
+
+        while (threadList.length > 6) {
+            threadList.shift()
+        }
+
+        root.messages = msgs
+        root.thread = threadList
+        root.currentThreadId = item.thread_id || ("t_" + Date.now().toString(36))
+        const lastPrompt = (item.prompt || item.original || item.text || "").trim()
+        root.topicAnchor = lastPrompt.slice(0, 350)
+        root.inputMode = "followup"
     }
 
     // ── Autonomous Classification & Background Memory Distillation ──

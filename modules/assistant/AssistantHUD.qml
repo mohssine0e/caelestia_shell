@@ -1509,7 +1509,11 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "history"
-            onBackRequested: root.currentView = "assistant"
+            onBackRequested: {
+                root.askBoundToSelection = false
+                root.currentView = "assistant"
+                Qt.callLater(() => customQuestionInput.forceActiveFocus())
+            }
             onCloseRequested: root.closeRequested()
         }
 

@@ -409,6 +409,10 @@ FocusScope {
                                         root.expandedId = (root.expandedId === sid) ? "" : sid
                                     }
                                 }
+                                onDoubleClicked: {
+                                    Assistant.reopenItem(itemCard.itemData)
+                                    root.backRequested()
+                                }
                             }
 
                             ColumnLayout {
@@ -483,6 +487,23 @@ FocusScope {
                                         implicitHeight: 26
                                         onClicked: {
                                             if (itemCard.itemData.id) Assistant.toggleStar(itemCard.itemData.id)
+                                        }
+                                    }
+
+                                    // Continue / Focus in Chat Button
+                                    IconButton {
+                                        type: IconButton.Text
+                                        icon: "forum"
+                                        font: Tokens.font.icon.small
+                                        implicitWidth: 26
+                                        implicitHeight: 26
+                                        activeColour: "transparent"
+                                        inactiveColour: "transparent"
+                                        activeOnColour: Colours.palette.m3primary
+                                        inactiveOnColour: Colours.palette.m3outline
+                                        onClicked: {
+                                            Assistant.reopenItem(itemCard.itemData)
+                                            root.backRequested()
                                         }
                                     }
 
