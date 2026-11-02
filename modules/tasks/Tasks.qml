@@ -84,7 +84,7 @@ FocusScope {
         })
     }
 
-    property string activePage: "tasks"
+    property string activePage: "commands"
     property string statusFilter: "all"
     property string searchQuery: ""
     property string commandSearchQuery: ""
@@ -320,6 +320,7 @@ FocusScope {
             visible: root.activePage === "commands"
             focus: root.activePage === "commands"
             searchQuery: root.commandSearchQuery
+            onFlagSearchRequested: query => root.commandSearchQuery = query
             onEscapePressed: root.closeRequested()
         }
         }

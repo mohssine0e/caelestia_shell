@@ -29,6 +29,7 @@ FocusScope {
     readonly property string commandsPath: Quickshell.env("HOME") + "/.config/caelestia/commands.json"
 
     signal escapePressed()
+    signal flagSearchRequested(string query)
 
     // ── Persistence via FileView ────────────────────────────────
     FileView {
@@ -81,18 +82,23 @@ FocusScope {
                 if ((item.category || "").toLowerCase() !== cat) return false
             }
 
-            // Search query filter (matches title, description, category, or any case command/flags)
+            // Search query filter (matches tool title, subtitle, description, category, or any command/flags/params)
             if (q.length > 0) {
                 const titleMatch = (item.title || "").toLowerCase().includes(q)
+                const subtitleMatch = (item.subtitle || "").toLowerCase().includes(q)
                 const descMatch = (item.description || "").toLowerCase().includes(q)
                 const catMatch = (item.category || "").toLowerCase().includes(q)
-                const caseMatch = (item.cases || []).some(c => {
+                const list = item.commands || item.cases || []
+                const cmdMatch = list.some(c => {
                     const cTitle = (c.title || c.desc || "").toLowerCase().includes(q)
                     const cCmd = (c.cmd || "").toLowerCase().includes(q)
                     const cFlags = (c.flags || []).some(f => (f.flag + " " + f.desc).toLowerCase().includes(q))
-                    return cTitle || cCmd || cFlags
+                    const cPlaceholders = (c.placeholders || []).some(p => (p.name + " " + p.desc).toLowerCase().includes(q))
+                    const cParams = (c.params || []).some(p => (p.key + " " + p.value).toLowerCase().includes(q))
+                    const cNotes = (c.notes || c.warning || c.prereqs || "").toLowerCase().includes(q)
+                    return cTitle || cCmd || cFlags || cPlaceholders || cParams || cNotes
                 })
-                return titleMatch || descMatch || catMatch || caseMatch
+                return titleMatch || subtitleMatch || descMatch || catMatch || cmdMatch
             }
 
             return true
@@ -282,6 +288,7 @@ FocusScope {
                 onToggleExpandRequested: id => {
                     root.expandedCommandId = (root.expandedCommandId === id ? "" : id)
                 }
+                onFlagClicked: flag => root.flagSearchRequested(flag)
             }
         }
 
