@@ -439,12 +439,12 @@ Singleton {
         onTriggered: root.checkClipboard(false)
     }
 
-    // ── High-Performance Stream Batching (~22 updates/sec max) ────
+    // ── High-Performance Stream Batching (~16.6 updates/sec) ────
     property string _streamBuffer: ""
 
     Timer {
         id: streamBatchTimer
-        interval: 45
+        interval: 60
         repeat: false
         onTriggered: root._flushStreamBuffer()
     }
@@ -454,14 +454,6 @@ Singleton {
         root.rawResultText += root._streamBuffer
         root._streamBuffer = ""
         root.resultText = root.rawResultText
-        if (root.messages && root.messages.length > 0) {
-            const msgs = root.messages.slice()
-            const last = msgs[msgs.length - 1]
-            if (last && last.role === "assistant") {
-                last.text = root.rawResultText
-                root.messages = msgs
-            }
-        }
     }
 
     // ── Streaming AI Worker Process via SplitParser ──────────────
@@ -581,7 +573,20 @@ Singleton {
         }
         onExited: {
             streamBatchTimer.stop()
-            root._streamBuffer = ""
+            if (root._streamBuffer && root._streamBuffer.length > 0) {
+                root.rawResultText += root._streamBuffer
+                root._streamBuffer = ""
+                root.resultText = root.cleanMarkdown(root.rawResultText)
+            }
+            if (root.messages && root.messages.length > 0) {
+                const msgs = root.messages.slice()
+                const last = msgs[msgs.length - 1]
+                if (last && last.role === "assistant" && last.isStreaming) {
+                    last.text = root.resultText || last.text
+                    last.isStreaming = false
+                    root.messages = msgs
+                }
+            }
             root.isLoading = false
             root.isStreaming = false
         }
@@ -1004,11 +1009,12 @@ Singleton {
         }
 
         const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const promptSnippet = root.selectedText ? (root.selectedText.trim().slice(0, 140) + (root.selectedText.trim().length > 140 ? "…" : "")) : ""
         const userMsg = {
             id: "u_" + Date.now(),
             role: "user",
             action: action,
-            text: customPrompt || root.selectedText,
+            text: customPrompt ? customPrompt : (action && action !== "ask" ? (action.toUpperCase() + ": " + promptSnippet) : promptSnippet),
             timestamp: nowStr
         }
 

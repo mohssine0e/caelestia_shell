@@ -1020,28 +1020,26 @@ FocusScope {
                         spacing: 12
                         model: Assistant.messages
 
-                        property bool userScrolledUp: false
-
-                        onContentYChanged: {
-                            if (!moving && !dragging) return
-                            const atBottom = (contentY >= contentHeight - height - 30)
-                            userScrolledUp = !atBottom
-                        }
+                        property int lastMessageCount: 0
 
                         Connections {
                             target: Assistant
-                            function onIsGeneratingChanged() {
-                                if (Assistant.isGenerating) {
-                                    chatList.userScrolledUp = false
-                                }
-                            }
                             function onMessagesChanged() {
-                                // Anchor view at the beginning of the new answer so user can read from line 1
-                                if (!chatList.userScrolledUp && Assistant.messages.length > 0) {
+                                const msgs = Assistant.messages
+                                if (!msgs || msgs.length === 0) {
+                                    chatList.lastMessageCount = 0
+                                    return
+                                }
+                                if (msgs.length > chatList.lastMessageCount) {
+                                    const lastMsg = msgs[msgs.length - 1]
+                                    const targetIndex = (lastMsg && lastMsg.role === "assistant" && msgs.length >= 2)
+                                        ? msgs.length - 2
+                                        : msgs.length - 1
                                     Qt.callLater(() => {
-                                        chatList.positionViewAtIndex(Assistant.messages.length - 1, ListView.Beginning)
+                                        chatList.positionViewAtIndex(targetIndex, ListView.Beginning)
                                     })
                                 }
+                                chatList.lastMessageCount = msgs.length
                             }
                         }
 
@@ -1075,12 +1073,13 @@ FocusScope {
                                     }
 
                                     StyledRect {
-                                        implicitHeight: 22
-                                        implicitWidth: topicDivText.implicitWidth + 18
+                                        Layout.preferredHeight: 22
+                                        Layout.preferredWidth: topicDivRow.implicitWidth + 18
                                         radius: Tokens.rounding.full
                                         color: Colours.palette.m3surfaceContainerHigh
 
                                         RowLayout {
+                                            id: topicDivRow
                                             anchors.centerIn: parent
                                             spacing: 4
 
@@ -1180,7 +1179,7 @@ FocusScope {
                                         TextEdit {
                                             id: msgTextEdit
                                             Layout.fillWidth: true
-                                            text: modelData.text || ""
+                                            text: (modelData.isStreaming && Assistant.isStreaming) ? Assistant.resultText : (modelData.text || "")
                                             readOnly: true
                                             selectByMouse: true
                                             selectByKeyboard: true
@@ -1203,7 +1202,7 @@ FocusScope {
 
                                         // Streaming Shimmer Indicator when waiting for first token
                                         RowLayout {
-                                            visible: modelData.isStreaming && (!modelData.text || modelData.text.length === 0)
+                                            visible: modelData.isStreaming && (!msgTextEdit.text || msgTextEdit.text.length === 0)
                                             spacing: 6
 
                                             MaterialIcon {
