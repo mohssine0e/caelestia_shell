@@ -68,6 +68,15 @@ FocusScope {
         }
     }
 
+    Component.onCompleted: {
+        Qt.callLater(() => {
+            if (root.activePage === "tasks")
+                taskList.forceActiveFocus()
+            else
+                dailyHabitsList.forceActiveFocus()
+        })
+    }
+
     property string activePage: "tasks"
     property string statusFilter: "all"
     property string searchQuery: ""

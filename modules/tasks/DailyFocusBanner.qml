@@ -63,7 +63,7 @@ StyledRect {
         onLoaded: {
             try {
                 var raw = JSON.parse(text())
-                root.isExpanded = !!raw.expanded
+                root.isExpanded = false // Always collapsed by default on open
 
                 if (Array.isArray(raw.groups) && raw.groups.length > 0) {
                     root.groups = raw.groups
@@ -156,9 +156,6 @@ StyledRect {
     onIsExpandedChanged: {
         if (root.isExpanded) {
             syncEditorText()
-            Qt.callLater(() => {
-                if (scratchpadInput) scratchpadInput.forceActiveFocus()
-            })
         } else {
             root.editingGroupId = ""
             root.deletingConfirmId = ""
@@ -734,8 +731,16 @@ StyledRect {
                     root.updateActiveNote(text)
                 }
 
-                Keys.onEscapePressed: {
+                onActiveFocusChanged: {
+                    if (!activeFocus && root.isExpanded) {
+                        root.isExpanded = false
+                    }
+                }
+
+                Keys.onEscapePressed: event => {
                     focus = false
+                    root.isExpanded = false
+                    event.accepted = true
                 }
             }
         }
