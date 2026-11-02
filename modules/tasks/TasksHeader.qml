@@ -86,6 +86,7 @@ Item {
             // ── Capture Field ──────────────────────────────────
             StyledTextField {
                 id: captureField
+                visible: root.activePage !== "commands"
                 Layout.preferredWidth: 500
                 Layout.alignment: Qt.AlignVCenter
                 implicitHeight: pageSwitch.implicitHeight + 4
@@ -139,10 +140,11 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
                 model: [
                     { icon: "checklist", text: "Tasks", value: "tasks", action: () => root.pageChanged("tasks") },
-                    { icon: "wb_sunny", text: "Daily", value: "daily", action: () => root.pageChanged("daily") }
+                    { icon: "wb_sunny", text: "Daily", value: "daily", action: () => root.pageChanged("daily") },
+                    { icon: "terminal", text: "Commands", value: "commands", action: () => root.pageChanged("commands") }
                 ]
                 currentValue: root.activePage
-                onActivated: root.pageChanged(value)
+                onActivated: val => root.pageChanged(val)
                 showOnlyActiveText: true
             }
         }

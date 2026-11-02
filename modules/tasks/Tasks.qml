@@ -24,12 +24,15 @@ FocusScope {
     Keys.onPressed: event => {
         // Q — quick page switch (only when no text field has focus)
         if (event.key === Qt.Key_Q && !root.inputActive) {
-            if (root.activePage === "daily") {
-                root.activePage = "tasks"
-                taskList.forceActiveFocus()
-            } else {
+            if (root.activePage === "tasks") {
                 root.activePage = "daily"
                 dailyHabitsList.forceActiveFocus()
+            } else if (root.activePage === "daily") {
+                root.activePage = "commands"
+                commandsList.forceActiveFocus()
+            } else {
+                root.activePage = "tasks"
+                taskList.forceActiveFocus()
             }
             event.accepted = true
             return
@@ -63,8 +66,10 @@ FocusScope {
         onPressed: {
             if (root.activePage === "tasks")
                 taskList.forceActiveFocus()
-            else
+            else if (root.activePage === "daily")
                 dailyHabitsList.forceActiveFocus()
+            else if (root.activePage === "commands")
+                commandsList.forceActiveFocus()
         }
     }
 
@@ -72,8 +77,10 @@ FocusScope {
         Qt.callLater(() => {
             if (root.activePage === "tasks")
                 taskList.forceActiveFocus()
-            else
+            else if (root.activePage === "daily")
                 dailyHabitsList.forceActiveFocus()
+            else if (root.activePage === "commands")
+                commandsList.forceActiveFocus()
         })
     }
 
@@ -146,6 +153,7 @@ FocusScope {
 
         // ── Separator ────────────────────────────────────────────
         StyledRect {
+            visible: root.activePage !== "commands"
             Layout.fillWidth: true
             implicitHeight: 1
             color: Colours.palette.m3outlineVariant
@@ -154,6 +162,7 @@ FocusScope {
 
         // ── Status filter + search ───────────────────────────────
         RowLayout {
+            visible: root.activePage !== "commands"
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
 
@@ -261,6 +270,7 @@ FocusScope {
 
         // ── Separator ────────────────────────────────────────────
         StyledRect {
+            visible: root.activePage !== "commands"
             Layout.fillWidth: true
             implicitHeight: 1
             color: Colours.palette.m3outlineVariant
@@ -297,6 +307,16 @@ FocusScope {
             statusFilter: root.statusFilter
             searchQuery: root.searchQuery
             categoryFilter: root.categoryFilter
+        }
+
+        // ── Commands Vault ───────────────────────────────────────
+        CommandsList {
+            id: commandsList
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.activePage === "commands"
+            focus: root.activePage === "commands"
+            onEscapePressed: root.closeRequested()
         }
         }
 
