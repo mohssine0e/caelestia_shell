@@ -16,6 +16,7 @@ Item {
     required property string activePage
     required property string habitIcon
     required property string habitType
+    property string commandSearchQuery: ""
 
     signal pageChanged(string page)
     signal captureAccepted(string text)
@@ -68,7 +69,11 @@ Item {
     implicitHeight: headerColumn.implicitHeight
 
     function focusCapture() {
-        captureField.forceActiveFocus()
+        if (root.activePage === "commands") {
+            commandSearchField.forceActiveFocus()
+        } else {
+            captureField.forceActiveFocus()
+        }
     }
 
     readonly property bool showHabitControls: root.activePage === "daily" && (captureField.activeFocus || captureField.text.length > 0)
@@ -132,6 +137,27 @@ Item {
             // ── Spacer ──────────────────────────────────────────
             Item {
                 Layout.fillWidth: true
+            }
+
+            // ── Commands Search (near the switch buttons) ───────
+            StyledTextField {
+                id: commandSearchField
+                visible: root.activePage === "commands"
+                Layout.preferredWidth: 360
+                Layout.alignment: Qt.AlignVCenter
+                implicitHeight: pageSwitch.implicitHeight + 4
+                leadingIcon: "search"
+                borderWidth: 1
+                placeholderText: qsTr("Search runbooks, commands, or flags (/)...")
+                text: root.commandSearchQuery
+                onTextChanged: {
+                    root.commandSearchQuery = text
+                }
+                Keys.onEscapePressed: {
+                    clear()
+                    focus = false
+                    root.escapePressed()
+                }
             }
 
             // ── Page Switcher ──────────────────────────────────

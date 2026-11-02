@@ -57,27 +57,6 @@ FocusScope {
         root.saveCommands()
     }
 
-    function recordUsage(cmdStr) {
-        const list = root.allCommands.slice()
-        for (let i = 0; i < list.length; i++) {
-            if (list[i].cmd === cmdStr) {
-                list[i].use_count = (list[i].use_count || 0) + 1
-                list[i].updated = "Just now"
-                break
-            }
-        }
-        root.allCommands = list
-        root.saveCommands()
-    }
-
-    function runCommandInTerminal(cmdStr) {
-        root.recordUsage(cmdStr)
-        // Spawn Kitty terminal executing command with an exit pause so output is visible
-        const p = Qt.createQmlObject('import Quickshell.Io; Process { running: false }', root, "runnerProc")
-        p.command = ["kitty", "--hold", "sh", "-c", cmdStr]
-        p.running = true
-    }
-
     // ── Filtered Model ──────────────────────────────────────────
     readonly property var filteredCommands: {
         const q = root.searchQuery.trim().toLowerCase()
@@ -107,7 +86,6 @@ FocusScope {
 
     readonly property int totalCount: (root.allCommands || []).length
     readonly property int starredCount: (root.allCommands || []).filter(c => !!c.starred).length
-    readonly property int recentlyUsedCount: (root.allCommands || []).filter(c => (c.use_count || 0) > 0).length
 
     // ── Keyboard Navigation ──────────────────────────────────────
     Keys.onUpPressed: {
@@ -124,21 +102,6 @@ FocusScope {
         }
     }
 
-    Keys.onReturnPressed: {
-        const item = root.filteredCommands[root.selectedIndex]
-        if (item) {
-            root.runCommandInTerminal(item.cmd)
-        }
-    }
-
-    Keys.onSpacePressed: {
-        const item = root.filteredCommands[root.selectedIndex]
-        if (item) {
-            Quickshell.clipboardText = item.cmd
-            root.recordUsage(item.cmd)
-        }
-    }
-
     Keys.onEscapePressed: {
         root.escapePressed()
     }
@@ -147,138 +110,114 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        // ── Top Search & Filter Bar ─────────────────────────────────
+        // ── Top Category Filter Pills ──────────────────────────────
         RowLayout {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: 6
 
-            // Search Bar
-            StyledTextField {
-                id: searchInput
-                Layout.preferredWidth: 370
-                implicitHeight: 38
-                leadingIcon: "search"
-                placeholderText: qsTr("Search runbooks, commands, or flags (/)...")
-                text: root.searchQuery
-                onTextChanged: {
-                    root.searchQuery = text
-                    root.selectedIndex = 0
+            // 1. All Pill
+            StyledRect {
+                implicitHeight: 32
+                implicitWidth: allRow.implicitWidth + 18
+                radius: Tokens.rounding.full
+                color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
+                border.width: 1
+                border.color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+
+                RowLayout {
+                    id: allRow
+                    anchors.centerIn: parent
+                    spacing: 4
+
+                    MaterialIcon {
+                        text: "apps"
+                        fontStyle: Tokens.font.icon.small
+                        color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                    }
+
+                    StyledText {
+                        text: qsTr("All")
+                        font: Tokens.font.label.medium
+                        color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                    }
                 }
-                Keys.onEscapePressed: {
-                    clear()
-                    focus = false
-                    root.forceActiveFocus()
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.selectedCategory = "all"
+                        root.selectedIndex = 0
+                    }
                 }
             }
 
-            // Category Filter Pills
-            RowLayout {
-                spacing: 6
+            // 2. Starred Pill
+            StyledRect {
+                implicitHeight: 32
+                implicitWidth: starredRow.implicitWidth + 18
+                radius: Tokens.rounding.full
+                color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.tPalette.m3surfaceContainer
+                border.width: 1
+                border.color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.palette.m3outlineVariant
 
-                // 1. All Pill
-                StyledRect {
+                RowLayout {
+                    id: starredRow
+                    anchors.centerIn: parent
+                    spacing: 4
+
+                    MaterialIcon {
+                        text: "star"
+                        fontStyle: Tokens.font.icon.small
+                        color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
+                        fill: 1
+                    }
+
+                    StyledText {
+                        text: qsTr("Starred")
+                        font: Tokens.font.label.medium
+                        color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.selectedCategory = "starred"
+                        root.selectedIndex = 0
+                    }
+                }
+            }
+
+            // 3. Domain Tag Pills (#network, #bluetooth, #arch, #vpn, #files)
+            Repeater {
+                model: ["network", "bluetooth", "arch", "vpn", "files"]
+                delegate: StyledRect {
+                    required property string modelData
+                    readonly property bool active: root.selectedCategory === modelData
+
                     implicitHeight: 32
-                    implicitWidth: allRow.implicitWidth + 16
+                    implicitWidth: catLabel.implicitWidth + 18
                     radius: Tokens.rounding.full
-                    color: root.selectedCategory === "all" ? "#d0bcff" : "#1d1a24"
+                    color: active ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
                     border.width: 1
-                    border.color: root.selectedCategory === "all" ? "#d0bcff" : "#2f2b3b"
+                    border.color: active ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
 
-                    RowLayout {
-                        id: allRow
+                    StyledText {
+                        id: catLabel
                         anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: "apps"
-                            fontStyle: Tokens.font.icon.small
-                            color: root.selectedCategory === "all" ? "#16141a" : "#ede6df"
-                        }
-
-                        StyledText {
-                            text: qsTr("All")
-                            font: Tokens.font.label.medium
-                            color: root.selectedCategory === "all" ? "#16141a" : "#ede6df"
-                        }
+                        text: "#" + modelData
+                        font: Tokens.font.label.medium
+                        color: active ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
                     }
 
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            root.selectedCategory = "all"
+                            root.selectedCategory = active ? "all" : modelData
                             root.selectedIndex = 0
-                        }
-                    }
-                }
-
-                // 2. Starred Pill
-                StyledRect {
-                    implicitHeight: 32
-                    implicitWidth: starredRow.implicitWidth + 16
-                    radius: Tokens.rounding.full
-                    color: root.selectedCategory === "starred" ? Qt.alpha("#ffca1b", 0.25) : "#1d1a24"
-                    border.width: 1
-                    border.color: root.selectedCategory === "starred" ? "#ffca1b" : "#2f2b3b"
-
-                    RowLayout {
-                        id: starredRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: "star"
-                            fontStyle: Tokens.font.icon.small
-                            color: "#ffca1b"
-                            fill: 1
-                        }
-
-                        StyledText {
-                            text: qsTr("Starred")
-                            font: Tokens.font.label.medium
-                            color: root.selectedCategory === "starred" ? "#ffca1b" : "#ede6df"
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            root.selectedCategory = "starred"
-                            root.selectedIndex = 0
-                        }
-                    }
-                }
-
-                // 3. Domain Tag Pills (#network, #bluetooth, #arch, #vpn, #files)
-                Repeater {
-                    model: ["network", "bluetooth", "arch", "vpn", "files"]
-                    delegate: StyledRect {
-                        required property string modelData
-                        readonly property bool active: root.selectedCategory === modelData
-
-                        implicitHeight: 32
-                        implicitWidth: catLabel.implicitWidth + 18
-                        radius: Tokens.rounding.full
-                        color: active ? "#38314a" : "#1d1a24"
-                        border.width: 1
-                        border.color: active ? "#d0bcff" : "#2f2b3b"
-
-                        StyledText {
-                            id: catLabel
-                            anchors.centerIn: parent
-                            text: "#" + modelData
-                            font: Tokens.font.label.medium
-                            color: active ? "#d0bcff" : Qt.alpha("#ede6df", 0.7)
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.selectedCategory = active ? "all" : modelData
-                                root.selectedIndex = 0
-                            }
                         }
                     }
                 }
@@ -316,19 +255,17 @@ FocusScope {
                 }
 
                 onToggleStarRequested: id => root.toggleStar(id)
-                onRunRequested: cmd => root.runCommandInTerminal(cmd)
-                onCopyRequested: cmd => root.recordUsage(cmd)
             }
         }
 
-        // ── Bottom Status Bar (Metadata & Keyboard shortcuts) ───────
+        // ── Bottom Status Bar ───────────────────────────────────────
         StyledRect {
             Layout.fillWidth: true
             implicitHeight: 34
             radius: Tokens.rounding.small
-            color: "#121016"
+            color: Colours.tPalette.m3surfaceContainerLow
             border.width: 1
-            border.color: "#23202c"
+            border.color: Colours.palette.m3outlineVariant
 
             RowLayout {
                 anchors.fill: parent
@@ -339,62 +276,44 @@ FocusScope {
                 MaterialIcon {
                     text: "info"
                     fontStyle: Tokens.font.icon.small
-                    color: Qt.alpha("#ede6df", 0.4)
+                    color: Colours.palette.m3onSurfaceVariant
                 }
 
                 StyledText {
-                    text: qsTr("%1 commands • %2 starred • %3 recently used")
+                    text: qsTr("%1 commands • %2 starred")
                         .arg(root.totalCount)
                         .arg(root.starredCount)
-                        .arg(root.recentlyUsedCount)
                     font: Tokens.font.label.small
-                    color: Qt.alpha("#ede6df", 0.5)
+                    color: Colours.palette.m3onSurfaceVariant
                 }
 
                 Item { Layout.fillWidth: true }
 
-                // Keyboard hints: [↑↓ to navigate]  [Enter to run]
+                // Keyboard hint: [↑↓ to navigate]
                 RowLayout {
                     spacing: 6
 
                     StyledRect {
                         implicitHeight: 20
                         implicitWidth: 32
-                        radius: 4
-                        color: "#211e29"
+                        radius: Tokens.rounding.extraSmall
+                        color: Colours.tPalette.m3surfaceContainer
+                        border.width: 1
+                        border.color: Colours.palette.m3outlineVariant
+
                         StyledText {
                             anchors.centerIn: parent
                             text: "↑↓"
                             font.family: "monospace"
                             font.pixelSize: 11
-                            color: Qt.alpha("#ede6df", 0.7)
+                            color: Colours.palette.m3onSurface
                         }
                     }
 
                     StyledText {
                         text: qsTr("to navigate")
                         font: Tokens.font.label.small
-                        color: Qt.alpha("#ede6df", 0.4)
-                    }
-
-                    StyledRect {
-                        implicitHeight: 20
-                        implicitWidth: 44
-                        radius: 4
-                        color: "#211e29"
-                        StyledText {
-                            anchors.centerIn: parent
-                            text: "Enter"
-                            font.family: "monospace"
-                            font.pixelSize: 11
-                            color: "#d0bcff"
-                        }
-                    }
-
-                    StyledText {
-                        text: qsTr("to run")
-                        font: Tokens.font.label.small
-                        color: Qt.alpha("#ede6df", 0.4)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                 }
             }

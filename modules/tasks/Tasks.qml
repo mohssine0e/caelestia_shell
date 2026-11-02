@@ -87,6 +87,7 @@ FocusScope {
     property string activePage: "tasks"
     property string statusFilter: "all"
     property string searchQuery: ""
+    property string commandSearchQuery: ""
     property string categoryFilter: "all"
     property string habitType: "build"
     property string habitIcon: "task_alt"
@@ -134,10 +135,12 @@ FocusScope {
             activePage: root.activePage
             habitIcon: root.habitIcon
             habitType: root.habitType
+            commandSearchQuery: root.commandSearchQuery
 
             onHabitTypeSelected: type => root.habitType = type
             onHabitIconSelected: icon => root.habitIcon = icon
             onPageChanged: page => root.activePage = page
+            onCommandSearchQueryChanged: root.commandSearchQuery = tasksHeader.commandSearchQuery
 
             onEscapePressed: {
                 (root.activePage === "tasks" ? taskList : dailyHabitsList).forceActiveFocus()
@@ -316,6 +319,7 @@ FocusScope {
             Layout.fillHeight: true
             visible: root.activePage === "commands"
             focus: root.activePage === "commands"
+            searchQuery: root.commandSearchQuery
             onEscapePressed: root.closeRequested()
         }
         }

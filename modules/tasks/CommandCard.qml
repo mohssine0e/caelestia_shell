@@ -16,36 +16,20 @@ StyledRect {
     property bool isSelected: false
 
     signal toggleStarRequested(string id)
-    signal runRequested(string cmd)
-    signal copyRequested(string cmd)
 
     property bool isExpanded: false
-    property bool copied: false
 
     width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
     implicitHeight: mainCol.implicitHeight + 24
 
     radius: Tokens.rounding.medium
-    color: "#16141a"
+    color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainerLow
     border.width: 1
     border.color: root.isExpanded
-        ? Qt.alpha("#ffca1b", 0.6)
-        : (root.isSelected ? Qt.alpha("#d0bcff", 0.4) : Qt.alpha("#353140", 0.6))
+        ? Colours.palette.m3tertiary
+        : (root.isSelected ? Colours.palette.m3primary : Colours.palette.m3outlineVariant)
 
     Behavior on border.color { CAnim {} }
-
-    Timer {
-        id: copyResetTimer
-        interval: 1800
-        onTriggered: root.copied = false
-    }
-
-    function doCopy() {
-        Quickshell.clipboardText = root.commandData.cmd
-        root.copied = true
-        copyResetTimer.restart()
-        root.copyRequested(root.commandData.cmd)
-    }
 
     function getCategoryIcon(cat) {
         switch (cat) {
@@ -96,7 +80,7 @@ StyledRect {
             StyledText {
                 text: root.commandData.title || ""
                 font: Tokens.font.title.small
-                color: "#ede6df"
+                color: Colours.palette.m3onSurface
                 Layout.alignment: Qt.AlignVCenter
             }
 
@@ -105,86 +89,20 @@ StyledRect {
                 implicitHeight: 20
                 implicitWidth: catText.implicitWidth + 12
                 radius: Tokens.rounding.full
-                color: "#282433"
+                color: Colours.tPalette.m3surfaceContainer
+                border.width: 1
+                border.color: Colours.palette.m3outlineVariant
 
                 StyledText {
                     id: catText
                     anchors.centerIn: parent
                     text: "#" + (root.commandData.category || "general")
                     font: Tokens.font.label.small
-                    color: "#d0bcff"
+                    color: Colours.palette.m3primary
                 }
             }
 
             Item { Layout.fillWidth: true }
-
-            // Shortcut Badge / Copy Button (when expanded shows Ctrl+C, when collapsed shows Copy)
-            StyledRect {
-                implicitHeight: 26
-                implicitWidth: copyBtnRow.implicitWidth + 14
-                radius: Tokens.rounding.small
-                color: root.copied ? Qt.alpha("#4CAF50", 0.25) : "#25212e"
-                border.width: 1
-                border.color: root.copied ? "#4CAF50" : Qt.alpha("#d0bcff", 0.2)
-
-                RowLayout {
-                    id: copyBtnRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: root.copied ? "check" : "content_copy"
-                        fontStyle: Tokens.font.icon.small
-                        color: root.copied ? "#4CAF50" : "#ede6df"
-                    }
-
-                    StyledText {
-                        text: root.copied ? qsTr("Copied") : (root.isExpanded ? "Ctrl+C" : qsTr("Copy"))
-                        font: Tokens.font.label.small
-                        color: root.copied ? "#4CAF50" : "#ede6df"
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.doCopy()
-                }
-            }
-
-            // Run Button
-            StyledRect {
-                implicitHeight: 26
-                implicitWidth: runBtnRow.implicitWidth + 14
-                radius: Tokens.rounding.small
-                color: "#302b3d"
-                border.width: 1
-                border.color: Qt.alpha("#d0bcff", 0.3)
-
-                RowLayout {
-                    id: runBtnRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: "play_arrow"
-                        fontStyle: Tokens.font.icon.small
-                        color: "#d0bcff"
-                    }
-
-                    StyledText {
-                        text: qsTr("Run")
-                        font: Tokens.font.label.small
-                        color: "#d0bcff"
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.runRequested(root.commandData.cmd)
-                }
-            }
 
             // Expand / Collapse Chevron
             Item {
@@ -195,7 +113,7 @@ StyledRect {
                     anchors.centerIn: parent
                     text: root.isExpanded ? "keyboard_arrow_up" : "keyboard_arrow_down"
                     fontStyle: Tokens.font.icon.medium
-                    color: Qt.alpha("#ede6df", 0.6)
+                    color: Colours.palette.m3onSurfaceVariant
                 }
 
                 MouseArea {
@@ -211,15 +129,15 @@ StyledRect {
             Layout.fillWidth: true
             implicitHeight: Math.max(38, cmdRow.implicitHeight + 14)
             radius: Tokens.rounding.small
-            color: "#0d0c10"
+            color: Colours.tPalette.m3surfaceContainerLowest
             border.width: 1
-            border.color: "#232128"
+            border.color: Colours.palette.m3outlineVariant
 
             RowLayout {
                 id: cmdRow
                 anchors.fill: parent
                 anchors.leftMargin: 12
-                anchors.rightMargin: 10
+                anchors.rightMargin: 12
                 spacing: 8
 
                 // Terminal prompt sign
@@ -228,61 +146,18 @@ StyledRect {
                     font.family: "monospace"
                     font.pixelSize: 13
                     font.bold: true
-                    color: "#ffca1b"
+                    color: Colours.palette.m3tertiary
                 }
 
-                // Monospace command string with sudo highlight
+                // Monospace command string
                 StyledText {
                     Layout.fillWidth: true
-                    text: {
-                        let raw = root.commandData.cmd || ""
-                        raw = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                        if (raw.startsWith("sudo ")) {
-                            return '<font color="#ffca1b">sudo</font> ' + raw.substring(5)
-                        }
-                        return raw
-                    }
-                    textFormat: Text.RichText
+                    text: root.commandData.cmd || ""
                     font.family: "monospace"
                     font.pixelSize: 13
-                    color: "#f0ece9"
+                    color: Colours.palette.m3onSurface
                     wrapMode: root.isExpanded ? Text.Wrap : Text.NoWrap
                     elide: root.isExpanded ? Text.ElideNone : Text.ElideRight
-                }
-
-                // Inner copy icon button
-                StyledRect {
-                    implicitWidth: innerCopyRow.implicitWidth + 12
-                    implicitHeight: 24
-                    radius: Tokens.rounding.small
-                    color: root.copied ? Qt.alpha("#4CAF50", 0.25) : "#1f1c26"
-                    border.width: 1
-                    border.color: root.copied ? "#4CAF50" : Qt.alpha("#ede6df", 0.15)
-                    visible: !root.isExpanded
-
-                    RowLayout {
-                        id: innerCopyRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: root.copied ? "check" : "content_copy"
-                            fontStyle: Tokens.font.icon.small
-                            color: root.copied ? "#4CAF50" : "#ede6df"
-                        }
-
-                        StyledText {
-                            text: root.copied ? qsTr("Copied") : qsTr("Copy")
-                            font: Tokens.font.label.small
-                            color: root.copied ? "#4CAF50" : "#ede6df"
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.doCopy()
-                    }
                 }
             }
         }
@@ -302,14 +177,14 @@ StyledRect {
                 MaterialIcon {
                     text: "info"
                     fontStyle: Tokens.font.icon.small
-                    color: Qt.alpha("#ede6df", 0.5)
+                    color: Colours.palette.m3onSurfaceVariant
                 }
 
                 StyledText {
                     Layout.fillWidth: true
                     text: root.commandData.description || ""
                     font: Tokens.font.body.small
-                    color: Qt.alpha("#ede6df", 0.75)
+                    color: Colours.palette.m3onSurfaceVariant
                     wrapMode: Text.Wrap
                 }
             }
@@ -325,12 +200,12 @@ StyledRect {
                     MaterialIcon {
                         text: "flag"
                         fontStyle: Tokens.font.icon.small
-                        color: "#ffca1b"
+                        color: Colours.palette.m3tertiary
                     }
                     StyledText {
                         text: qsTr("Flags:")
                         font: Tokens.font.label.small
-                        color: Qt.alpha("#ede6df", 0.6)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                 }
 
@@ -346,9 +221,9 @@ StyledRect {
                             implicitHeight: 22
                             implicitWidth: flagRow.implicitWidth + 14
                             radius: Tokens.rounding.full
-                            color: "#211e29"
+                            color: Colours.tPalette.m3surfaceContainer
                             border.width: 1
-                            border.color: "#353042"
+                            border.color: Colours.palette.m3outlineVariant
 
                             RowLayout {
                                 id: flagRow
@@ -360,13 +235,13 @@ StyledRect {
                                     font.family: "monospace"
                                     font.pixelSize: 11
                                     font.bold: true
-                                    color: "#ffca1b"
+                                    color: Colours.palette.m3tertiary
                                 }
 
                                 StyledText {
                                     text: modelData.desc
                                     font: Tokens.font.label.small
-                                    color: "#ede6df"
+                                    color: Colours.palette.m3onSurface
                                 }
                             }
                         }
@@ -380,7 +255,7 @@ StyledRect {
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: 1
-                color: Qt.alpha("#ede6df", 0.08)
+                color: Colours.palette.m3outlineVariant
             }
 
             // Metadata Footer
@@ -394,18 +269,18 @@ StyledRect {
                     MaterialIcon {
                         text: "folder"
                         fontStyle: Tokens.font.icon.small
-                        color: Qt.alpha("#ede6df", 0.4)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                     StyledText {
                         text: root.commandData.folder || ""
                         font: Tokens.font.label.small
-                        color: Qt.alpha("#ede6df", 0.5)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                 }
 
                 StyledText {
                     text: "|"
-                    color: Qt.alpha("#ede6df", 0.2)
+                    color: Colours.palette.m3outlineVariant
                     visible: !!root.commandData.folder
                 }
 
@@ -415,12 +290,12 @@ StyledRect {
                     MaterialIcon {
                         text: "schedule"
                         fontStyle: Tokens.font.icon.small
-                        color: Qt.alpha("#ede6df", 0.4)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                     StyledText {
                         text: qsTr("Updated: %1").arg(root.commandData.updated || "")
                         font: Tokens.font.label.small
-                        color: Qt.alpha("#ede6df", 0.5)
+                        color: Colours.palette.m3onSurfaceVariant
                     }
                 }
 
@@ -439,12 +314,12 @@ StyledRect {
                         MaterialIcon {
                             text: "keyboard_arrow_up"
                             fontStyle: Tokens.font.icon.small
-                            color: Qt.alpha("#d0bcff", 0.7)
+                            color: Colours.palette.m3primary
                         }
                         StyledText {
                             text: qsTr("Press to collapse")
                             font: Tokens.font.label.small
-                            color: Qt.alpha("#d0bcff", 0.7)
+                            color: Colours.palette.m3primary
                         }
                     }
 
