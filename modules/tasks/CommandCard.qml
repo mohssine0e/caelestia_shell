@@ -49,6 +49,42 @@ StyledRect {
         return root.commandData.cmd || ""
     }
 
+    readonly property string fullScriptText: {
+        const list = root.commandsList
+        let lines = []
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i]
+            const comment = item.title || item.desc || ""
+            if (comment) {
+                lines.push("# " + comment)
+            }
+            if (item.cmd) {
+                lines.push(item.cmd)
+            }
+            if (i < list.length - 1) {
+                lines.push("")
+            }
+        }
+        return lines.join("\n")
+    }
+
+    readonly property var allUniqueFlags: {
+        const list = root.commandsList
+        const map = {}
+        const flags = []
+        for (let i = 0; i < list.length; i++) {
+            const fList = list[i].flags || []
+            for (let j = 0; j < fList.length; j++) {
+                const f = fList[j]
+                if (f && f.flag && !map[f.flag]) {
+                    map[f.flag] = true
+                    flags.push(f)
+                }
+            }
+        }
+        return flags
+    }
+
     function getCategoryIcon(cat) {
         switch (cat) {
             case "network": return "wifi"
@@ -61,18 +97,26 @@ StyledRect {
         }
     }
 
-    function formatSyntaxHighlight(cmd) {
-        if (!cmd) return ""
-        let s = cmd.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        // Sudo keyword in amber
-        s = s.replace(/\b(sudo)\b/g, '<font color="#ffb74d"><b>$1</b></font>')
-        // Executables in violet/primary
-        s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="#d0bcff"><b>$1</b></font>')
-        // Flags (-Syu, -Rns, --needed, etc.) in light cyan
-        s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="#80d4ff">$2</font>')
-        // Placeholders (&lt;package&gt;, &lt;SSID&gt;, &lt;PASSWORD&gt;, etc.) in gold
-        s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="#fbc02d"><i>$1</i></font>')
-        return s
+    function formatSyntaxHighlight(text) {
+        if (!text) return ""
+        let lines = text.split("\n")
+        let formattedLines = []
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i]
+            let trimmed = line.trim()
+            if (trimmed.startsWith("#")) {
+                let escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                formattedLines.push('<font color="#9595a8"><i>' + escaped + '</i></font>')
+            } else {
+                let s = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                s = s.replace(/\b(sudo)\b/g, '<font color="#ffb74d"><b>$1</b></font>')
+                s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="#d0bcff"><b>$1</b></font>')
+                s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="#80d4ff">$2</font>')
+                s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="#fbc02d"><i>$1</i></font>')
+                formattedLines.push(s)
+            }
+        }
+        return formattedLines.join("<br>")
     }
 
     ColumnLayout {
@@ -310,7 +354,7 @@ StyledRect {
             }
         }
 
-        // ── 3. Expanded View (Full tool description + all commands with details shown directly)
+        // ── 3. Expanded View: Single "Use cases" heading + big code cell + flags at the end
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -331,182 +375,138 @@ StyledRect {
                 Layout.fillWidth: true
                 height: 1
                 color: Colours.palette.m3outlineVariant
-                opacity: 0.3
+                opacity: 0.25
             }
 
-            // Individual Commands
-            Repeater {
-                model: root.commandsList
-                delegate: ColumnLayout {
-                    id: cmdEntry
-                    required property var modelData
-                    required property int index
+            // Use cases header line
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
 
+                StyledText {
+                    text: qsTr("Use cases")
+                    font: Tokens.font.label.large
+                    color: Colours.palette.m3onSurface
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Copy All Button
+                StyledRect {
+                    id: copyAllBtn
                     property bool copied: false
+                    implicitHeight: 24
+                    implicitWidth: copyAllRow.implicitWidth + 14
+                    radius: Tokens.rounding.small
+                    color: copied ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
+                    border.width: 1
+                    border.color: copied ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
 
-                    Layout.fillWidth: true
-                    spacing: 5
-
-                    // Divider between commands (except before first command)
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: Colours.palette.m3outlineVariant
-                        opacity: 0.2
-                        visible: index > 0
-                    }
-
-                    // 1. Command Header Line
                     RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
+                        id: copyAllRow
+                        anchors.centerIn: parent
+                        spacing: 4
 
-                        // Number & Title
+                        MaterialIcon {
+                            text: copyAllBtn.copied ? "check" : "content_copy"
+                            fontStyle: Tokens.font.icon.small
+                            color: copyAllBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        }
+
                         StyledText {
-                            text: (index + 1) + ". " + (modelData.title || qsTr("Command %1").arg(index + 1))
-                            font: Tokens.font.label.large
-                            color: Colours.palette.m3onSurface
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-
-                        // Sudo Badge if elevated
-                        StyledRect {
-                            implicitHeight: 18
-                            implicitWidth: sudoText.implicitWidth + 8
-                            radius: Tokens.rounding.full
-                            color: Colours.tPalette.m3surfaceContainer
-                            border.width: 1
-                            border.color: Colours.palette.m3tertiary
-                            visible: !!modelData.sudo || (typeof modelData.cmd === "string" && modelData.cmd.startsWith("sudo"))
-
-                            StyledText {
-                                id: sudoText
-                                anchors.centerIn: parent
-                                text: "sudo"
-                                font: Tokens.font.label.small
-                                color: Colours.palette.m3tertiary
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Copy Command Button
-                        StyledRect {
-                            id: cmdCopyBtn
-                            implicitHeight: 24
-                            implicitWidth: cmdCopyRow.implicitWidth + 12
-                            radius: Tokens.rounding.small
-                            color: cmdEntry.copied ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
-                            border.width: 1
-                            border.color: cmdEntry.copied ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-
-                            RowLayout {
-                                id: cmdCopyRow
-                                anchors.centerIn: parent
-                                spacing: 4
-
-                                MaterialIcon {
-                                    text: cmdEntry.copied ? "check" : "content_copy"
-                                    fontStyle: Tokens.font.icon.small
-                                    color: cmdEntry.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                                }
-
-                                StyledText {
-                                    text: cmdEntry.copied ? qsTr("Copied!") : qsTr("Copy")
-                                    font: Tokens.font.label.small
-                                    color: cmdEntry.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
-                                }
-                            }
-
-                            Timer {
-                                id: cmdCopyTimer
-                                interval: 1500
-                                onTriggered: cmdEntry.copied = false
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    Quickshell.clipboardText = modelData.cmd || ""
-                                    cmdEntry.copied = true
-                                    cmdCopyTimer.restart()
-                                }
-                            }
+                            text: copyAllBtn.copied ? qsTr("Copied!") : qsTr("Copy")
+                            font: Tokens.font.label.small
+                            color: copyAllBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
                         }
                     }
 
-                    // 2. Monospace Code Block
-                    StyledRect {
-                        Layout.fillWidth: true
-                        implicitHeight: caseEdit.implicitHeight + 12
-                        radius: Tokens.rounding.small
-                        color: "#0a0a0f"
+                    Timer {
+                        id: copyAllTimer
+                        interval: 1500
+                        onTriggered: copyAllBtn.copied = false
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            Quickshell.clipboardText = root.fullScriptText
+                            copyAllBtn.copied = true
+                            copyAllTimer.restart()
+                        }
+                    }
+                }
+            }
+
+            // Big code cell with # comments and commands
+            StyledRect {
+                Layout.fillWidth: true
+                implicitHeight: fullEdit.implicitHeight + 16
+                radius: Tokens.rounding.small
+                color: "#0a0a0f"
+                border.width: 1
+                border.color: Colours.palette.m3outlineVariant
+
+                TextEdit {
+                    id: fullEdit
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    readOnly: true
+                    selectByMouse: true
+                    mouseSelectionMode: TextEdit.SelectCharacters
+                    activeFocusOnPress: false
+                    textFormat: TextEdit.RichText
+                    text: root.formatSyntaxHighlight(root.fullScriptText)
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                    color: Colours.palette.m3onSurface
+                    selectionColor: Colours.palette.m3primary
+                    selectedTextColor: Colours.palette.m3onPrimary
+                    wrapMode: TextEdit.Wrap
+                }
+            }
+
+            // Flags explained at the end
+            Flow {
+                Layout.fillWidth: true
+                spacing: 5
+                visible: root.allUniqueFlags.length > 0
+
+                Repeater {
+                    model: root.allUniqueFlags
+                    delegate: StyledRect {
+                        required property var modelData
+                        implicitHeight: 20
+                        implicitWidth: flagRow.implicitWidth + 12
+                        radius: Tokens.rounding.full
+                        color: Colours.tPalette.m3surfaceContainer
                         border.width: 1
                         border.color: Colours.palette.m3outlineVariant
 
-                        TextEdit {
-                            id: caseEdit
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            readOnly: true
-                            selectByMouse: true
-                            mouseSelectionMode: TextEdit.SelectCharacters
-                            activeFocusOnPress: false
-                            textFormat: TextEdit.RichText
-                            text: root.formatSyntaxHighlight(modelData.cmd || "")
-                            font.family: "monospace"
-                            font.pixelSize: 12
-                            color: Colours.palette.m3onSurface
-                            selectionColor: Colours.palette.m3primary
-                            selectedTextColor: Colours.palette.m3onPrimary
-                            wrapMode: TextEdit.Wrap
-                        }
-                    }
+                        RowLayout {
+                            id: flagRow
+                            anchors.centerIn: parent
+                            spacing: 4
 
-                    // 3. Compact Flag / Parameter Pills
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 5
-                        visible: !!(modelData.flags && modelData.flags.length > 0)
-
-                        Repeater {
-                            model: (modelData && modelData.flags) ? modelData.flags : []
-                            delegate: StyledRect {
-                                required property var modelData
-                                implicitHeight: 20
-                                implicitWidth: flagRow.implicitWidth + 12
-                                radius: Tokens.rounding.full
-                                color: Colours.tPalette.m3surfaceContainer
-                                border.width: 1
-                                border.color: Colours.palette.m3outlineVariant
-
-                                RowLayout {
-                                    id: flagRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-
-                                    StyledText {
-                                        text: modelData.flag
-                                        font.family: "monospace"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        color: Colours.palette.m3tertiary
-                                    }
-
-                                    StyledText {
-                                        text: modelData.desc
-                                        font: Tokens.font.label.small
-                                        color: Colours.palette.m3onSurfaceVariant
-                                    }
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.flagClicked(modelData.flag)
-                                }
+                            StyledText {
+                                text: modelData.flag + ":"
+                                font.family: "monospace"
+                                font.pixelSize: 11
+                                font.bold: true
+                                color: Colours.palette.m3tertiary
                             }
+
+                            StyledText {
+                                text: modelData.desc
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3onSurfaceVariant
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.flagClicked(modelData.flag)
                         }
                     }
                 }
