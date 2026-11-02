@@ -116,6 +116,27 @@ Item {
                 }
             }
 
+            // ── Commands Search Field ──────────────────────────
+            StyledTextField {
+                id: commandSearchField
+                visible: root.activePage === "commands"
+                Layout.preferredWidth: 540
+                Layout.alignment: Qt.AlignVCenter
+                implicitHeight: pageSwitch.implicitHeight + 4
+                leadingIcon: "search"
+                borderWidth: 1
+                placeholderText: qsTr("Search runbooks, commands, or flags (/)...")
+                text: root.commandSearchQuery
+                onTextChanged: {
+                    root.commandSearchQuery = text
+                }
+                Keys.onEscapePressed: {
+                    clear()
+                    focus = false
+                    root.escapePressed()
+                }
+            }
+
             // ── Habit Type Switcher (daily only) ───────────────
             BtnSwitcher {
                 id: habitTypeSwitch
@@ -137,27 +158,6 @@ Item {
             // ── Spacer ──────────────────────────────────────────
             Item {
                 Layout.fillWidth: true
-            }
-
-            // ── Commands Search (near the switch buttons) ───────
-            StyledTextField {
-                id: commandSearchField
-                visible: root.activePage === "commands"
-                Layout.preferredWidth: 360
-                Layout.alignment: Qt.AlignVCenter
-                implicitHeight: pageSwitch.implicitHeight + 4
-                leadingIcon: "search"
-                borderWidth: 1
-                placeholderText: qsTr("Search runbooks, commands, or flags (/)...")
-                text: root.commandSearchQuery
-                onTextChanged: {
-                    root.commandSearchQuery = text
-                }
-                Keys.onEscapePressed: {
-                    clear()
-                    focus = false
-                    root.escapePressed()
-                }
             }
 
             // ── Page Switcher ──────────────────────────────────

@@ -7,6 +7,7 @@ import Caelestia
 import Caelestia.Config
 import qs.components
 import qs.components.controls
+import qs.services
 
 StyledRect {
     id: root
@@ -149,10 +150,22 @@ StyledRect {
                     color: Colours.palette.m3tertiary
                 }
 
+                // Golden sudo keyword
+                StyledText {
+                    text: "sudo"
+                    font.family: "monospace"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: Colours.palette.m3tertiary
+                    visible: (root.commandData.cmd || "").startsWith("sudo ")
+                }
+
                 // Monospace command string
                 StyledText {
                     Layout.fillWidth: true
-                    text: root.commandData.cmd || ""
+                    text: (root.commandData.cmd || "").startsWith("sudo ")
+                        ? (root.commandData.cmd || "").substring(5)
+                        : (root.commandData.cmd || "")
                     font.family: "monospace"
                     font.pixelSize: 13
                     color: Colours.palette.m3onSurface
