@@ -15,10 +15,10 @@ StyledRect {
     property var commandData: ({})
     property int itemIndex: 0
     property bool isSelected: false
+    property bool isExpanded: false
 
     signal toggleStarRequested(string id)
-
-    property bool isExpanded: false
+    signal toggleExpandRequested(string id)
 
     width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
     implicitHeight: mainCol.implicitHeight + 24
@@ -52,21 +52,34 @@ StyledRect {
         anchors.margins: 12
         spacing: 10
 
-        // ── 1. Header Line ──────────────────────────────────────────
-        RowLayout {
+        // ── 1. Clickable Header Line (Expands / Collapses) ───────────
+        Item {
             Layout.fillWidth: true
-            spacing: 8
+            implicitHeight: headerRow.implicitHeight
 
-            // Star / Category Icon
+            // MouseArea covering the header row to expand / collapse
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleExpandRequested(root.commandData.id)
+            }
+
+            RowLayout {
+                id: headerRow
+                width: parent.width
+                spacing: 8
+
+            // Star Button (Clickable independently, z: 2)
             Item {
                 implicitWidth: 24
                 implicitHeight: 24
+                z: 2
 
                 MaterialIcon {
                     anchors.centerIn: parent
                     text: root.commandData.starred ? "star" : root.getCategoryIcon(root.commandData.category)
                     fontStyle: Tokens.font.icon.small
-                    color: root.commandData.starred ? "#ffca1b" : "#d0bcff"
+                    color: root.commandData.starred ? Colours.palette.m3tertiary : Colours.palette.m3primary
                     fill: root.commandData.starred ? 1 : 0
                 }
 
@@ -85,7 +98,7 @@ StyledRect {
                 Layout.alignment: Qt.AlignVCenter
             }
 
-            // Category Pill (e.g. #arch, #network)
+            // Category Pill
             StyledRect {
                 implicitHeight: 20
                 implicitWidth: catText.implicitWidth + 12
@@ -105,241 +118,150 @@ StyledRect {
 
             Item { Layout.fillWidth: true }
 
-            // Expand / Collapse Chevron
-            Item {
-                implicitWidth: 26
-                implicitHeight: 26
-
-                MaterialIcon {
-                    anchors.centerIn: parent
-                    text: root.isExpanded ? "keyboard_arrow_up" : "keyboard_arrow_down"
-                    fontStyle: Tokens.font.icon.medium
-                    color: Colours.palette.m3onSurfaceVariant
+            // Case count badge
+            StyledText {
+                text: {
+                    const cases = root.commandData.cases || []
+                    return qsTr("%1 use cases").arg(cases.length)
                 }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.isExpanded = !root.isExpanded
-                }
+                font: Tokens.font.label.small
+                color: Colours.palette.m3onSurfaceVariant
+                Layout.alignment: Qt.AlignVCenter
             }
         }
+    }
 
-        // ── 2. Terminal Code Box ────────────────────────────────────
+        // ── 2. Collapsed Preview Box (Selectable text, no >_) ───────
         StyledRect {
             Layout.fillWidth: true
-            implicitHeight: Math.max(38, cmdRow.implicitHeight + 14)
+            implicitHeight: previewEdit.implicitHeight + 16
             radius: Tokens.rounding.small
             color: Colours.tPalette.m3surfaceContainerLowest
             border.width: 1
             border.color: Colours.palette.m3outlineVariant
+            visible: !root.isExpanded
 
-            RowLayout {
-                id: cmdRow
+            TextEdit {
+                id: previewEdit
                 anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
-
-                // Terminal prompt sign
-                StyledText {
-                    text: ">_"
-                    font.family: "monospace"
-                    font.pixelSize: 13
-                    font.bold: true
-                    color: Colours.palette.m3tertiary
+                anchors.margins: 8
+                readOnly: true
+                selectByMouse: true
+                mouseSelectionMode: TextEdit.SelectCharacters
+                activeFocusOnPress: false
+                text: {
+                    const cases = root.commandData.cases || []
+                    return cases.length > 0 ? cases[0].cmd : (root.commandData.cmd || "")
                 }
-
-                // Golden sudo keyword
-                StyledText {
-                    text: "sudo"
-                    font.family: "monospace"
-                    font.pixelSize: 13
-                    font.bold: true
-                    color: Colours.palette.m3tertiary
-                    visible: (root.commandData.cmd || "").startsWith("sudo ")
-                }
-
-                // Monospace command string
-                StyledText {
-                    Layout.fillWidth: true
-                    text: (root.commandData.cmd || "").startsWith("sudo ")
-                        ? (root.commandData.cmd || "").substring(5)
-                        : (root.commandData.cmd || "")
-                    font.family: "monospace"
-                    font.pixelSize: 13
-                    color: Colours.palette.m3onSurface
-                    wrapMode: root.isExpanded ? Text.Wrap : Text.NoWrap
-                    elide: root.isExpanded ? Text.ElideNone : Text.ElideRight
-                }
+                font.family: "monospace"
+                font.pixelSize: 13
+                color: Colours.palette.m3onSurface
+                selectionColor: Colours.palette.m3primary
+                selectedTextColor: Colours.palette.m3onPrimary
+                wrapMode: TextEdit.Wrap
             }
         }
 
-        // ── 3. Expanded Detail Sections (Visible only when expanded) ─
+        // ── 3. Expanded View (Description + All Use Cases) ──────────
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 12
             visible: root.isExpanded
 
-            // Description Row
-            RowLayout {
+            // Tool Description
+            StyledText {
                 Layout.fillWidth: true
-                spacing: 6
+                text: root.commandData.description || ""
+                font: Tokens.font.body.small
+                color: Colours.palette.m3onSurfaceVariant
+                wrapMode: Text.Wrap
                 visible: !!root.commandData.description
-
-                MaterialIcon {
-                    text: "info"
-                    fontStyle: Tokens.font.icon.small
-                    color: Colours.palette.m3onSurfaceVariant
-                }
-
-                StyledText {
-                    Layout.fillWidth: true
-                    text: root.commandData.description || ""
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
-                    wrapMode: Text.Wrap
-                }
             }
 
-            // Flags Breakdown Row
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                visible: root.commandData.flags && root.commandData.flags.length > 0
+            // Use Cases List
+            Repeater {
+                model: root.commandData.cases || []
+                delegate: ColumnLayout {
+                    required property var modelData
+                    required property int index
 
-                RowLayout {
-                    spacing: 4
-                    MaterialIcon {
-                        text: "flag"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3tertiary
-                    }
-                    StyledText {
-                        text: qsTr("Flags:")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                }
-
-                // Horizontal Row of Flag Pills
-                RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
 
-                    Repeater {
-                        model: root.commandData.flags || []
-                        delegate: StyledRect {
-                            required property var modelData
-                            implicitHeight: 22
-                            implicitWidth: flagRow.implicitWidth + 14
-                            radius: Tokens.rounding.full
-                            color: Colours.tPalette.m3surfaceContainer
-                            border.width: 1
-                            border.color: Colours.palette.m3outlineVariant
+                    // Case Explanation
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: (index + 1) + ". " + (modelData.desc || modelData.title || "")
+                        font: Tokens.font.label.large
+                        color: Colours.palette.m3onSurface
+                        wrapMode: Text.Wrap
+                    }
 
-                            RowLayout {
-                                id: flagRow
-                                anchors.centerIn: parent
-                                spacing: 4
+                    // Selectable Code Box (No >_ symbol)
+                    StyledRect {
+                        Layout.fillWidth: true
+                        implicitHeight: caseEdit.implicitHeight + 16
+                        radius: Tokens.rounding.small
+                        color: Colours.tPalette.m3surfaceContainerLowest
+                        border.width: 1
+                        border.color: Colours.palette.m3outlineVariant
 
-                                StyledText {
-                                    text: modelData.flag + ":"
-                                    font.family: "monospace"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Colours.palette.m3tertiary
-                                }
+                        TextEdit {
+                            id: caseEdit
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            readOnly: true
+                            selectByMouse: true
+                            mouseSelectionMode: TextEdit.SelectCharacters
+                            activeFocusOnPress: false
+                            text: modelData.cmd || ""
+                            font.family: "monospace"
+                            font.pixelSize: 13
+                            color: Colours.palette.m3onSurface
+                            selectionColor: Colours.palette.m3primary
+                            selectedTextColor: Colours.palette.m3onPrimary
+                            wrapMode: TextEdit.Wrap
+                        }
+                    }
 
-                                StyledText {
-                                    text: modelData.desc
-                                    font: Tokens.font.label.small
-                                    color: Colours.palette.m3onSurface
+                    // Direct Flag Explanations (No "Flags:" word or icon)
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        visible: !!(modelData && modelData.flags && modelData.flags.length > 0)
+
+                        Repeater {
+                            model: (modelData && modelData.flags) ? modelData.flags : []
+                            delegate: StyledRect {
+                                required property var modelData
+                                implicitHeight: 24
+                                implicitWidth: flagRow.implicitWidth + 16
+                                radius: Tokens.rounding.full
+                                color: Colours.tPalette.m3surfaceContainer
+                                border.width: 1
+                                border.color: Colours.palette.m3outlineVariant
+
+                                RowLayout {
+                                    id: flagRow
+                                    anchors.centerIn: parent
+                                    spacing: 5
+
+                                    StyledText {
+                                        text: modelData.flag + ":"
+                                        font.family: "monospace"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        color: Colours.palette.m3tertiary
+                                    }
+
+                                    StyledText {
+                                        text: modelData.desc
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3onSurface
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    Item { Layout.fillWidth: true }
-                }
-            }
-
-            // Divider
-            StyledRect {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Colours.palette.m3outlineVariant
-            }
-
-            // Metadata Footer
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 12
-
-                RowLayout {
-                    spacing: 4
-                    visible: !!root.commandData.folder
-                    MaterialIcon {
-                        text: "folder"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                    StyledText {
-                        text: root.commandData.folder || ""
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                }
-
-                StyledText {
-                    text: "|"
-                    color: Colours.palette.m3outlineVariant
-                    visible: !!root.commandData.folder
-                }
-
-                RowLayout {
-                    spacing: 4
-                    visible: !!root.commandData.updated
-                    MaterialIcon {
-                        text: "schedule"
-                        fontStyle: Tokens.font.icon.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                    StyledText {
-                        text: qsTr("Updated: %1").arg(root.commandData.updated || "")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                }
-
-                Item { Layout.fillWidth: true }
-
-                // Collapse prompt
-                Item {
-                    implicitWidth: collapseRow.implicitWidth
-                    implicitHeight: collapseRow.implicitHeight
-
-                    RowLayout {
-                        id: collapseRow
-                        anchors.fill: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: "keyboard_arrow_up"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3primary
-                        }
-                        StyledText {
-                            text: qsTr("Press to collapse")
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3primary
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.isExpanded = false
                     }
                 }
             }

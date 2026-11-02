@@ -17,7 +17,14 @@ FocusScope {
     property string searchQuery: ""
     property string selectedCategory: "all"
     property int selectedIndex: 0
+    property string expandedCommandId: ""
     property var allCommands: []
+
+    onAllCommandsChanged: {
+        if (root.allCommands.length > 0 && root.expandedCommandId === "") {
+            root.expandedCommandId = root.allCommands[0].id
+        }
+    }
 
     readonly property string commandsPath: Quickshell.env("HOME") + "/.config/caelestia/commands.json"
 
@@ -34,6 +41,9 @@ FocusScope {
                 const parsed = JSON.parse(text())
                 if (Array.isArray(parsed)) {
                     root.allCommands = parsed
+                    if (parsed.length > 0 && root.expandedCommandId === "") {
+                        root.expandedCommandId = parsed[0].id
+                    }
                 }
             } catch (e) {
                 root.allCommands = []
@@ -71,14 +81,18 @@ FocusScope {
                 if ((item.category || "").toLowerCase() !== cat) return false
             }
 
-            // Search query filter (matches title, cmd, description, or flags)
+            // Search query filter (matches title, description, category, or any case command/flags)
             if (q.length > 0) {
                 const titleMatch = (item.title || "").toLowerCase().includes(q)
-                const cmdMatch = (item.cmd || "").toLowerCase().includes(q)
                 const descMatch = (item.description || "").toLowerCase().includes(q)
                 const catMatch = (item.category || "").toLowerCase().includes(q)
-                const flagMatch = (item.flags || []).some(f => (f.flag + " " + f.desc).toLowerCase().includes(q))
-                return titleMatch || cmdMatch || descMatch || catMatch || flagMatch
+                const caseMatch = (item.cases || []).some(c => {
+                    const cTitle = (c.title || c.desc || "").toLowerCase().includes(q)
+                    const cCmd = (c.cmd || "").toLowerCase().includes(q)
+                    const cFlags = (c.flags || []).some(f => (f.flag + " " + f.desc).toLowerCase().includes(q))
+                    return cTitle || cCmd || cFlags
+                })
+                return titleMatch || descMatch || catMatch || caseMatch
             }
 
             return true
@@ -100,6 +114,20 @@ FocusScope {
         if (root.selectedIndex < root.filteredCommands.length - 1) {
             root.selectedIndex++
             cmdListView.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+        }
+    }
+
+    Keys.onReturnPressed: {
+        if (root.filteredCommands[root.selectedIndex]) {
+            const id = root.filteredCommands[root.selectedIndex].id
+            root.expandedCommandId = (root.expandedCommandId === id ? "" : id)
+        }
+    }
+
+    Keys.onSpacePressed: {
+        if (root.filteredCommands[root.selectedIndex]) {
+            const id = root.filteredCommands[root.selectedIndex].id
+            root.expandedCommandId = (root.expandedCommandId === id ? "" : id)
         }
     }
 
@@ -248,14 +276,12 @@ FocusScope {
                 commandData: modelData
                 itemIndex: index
                 isSelected: index === root.selectedIndex
-
-                Component.onCompleted: {
-                    if (index === 0) {
-                        isExpanded = true
-                    }
-                }
+                isExpanded: root.expandedCommandId === modelData.id
 
                 onToggleStarRequested: id => root.toggleStar(id)
+                onToggleExpandRequested: id => {
+                    root.expandedCommandId = (root.expandedCommandId === id ? "" : id)
+                }
             }
         }
 
@@ -281,7 +307,7 @@ FocusScope {
                 }
 
                 StyledText {
-                    text: qsTr("%1 commands • %2 starred")
+                    text: qsTr("%1 tools • %2 starred")
                         .arg(root.totalCount)
                         .arg(root.starredCount)
                     font: Tokens.font.label.small
