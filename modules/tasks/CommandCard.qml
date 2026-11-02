@@ -42,13 +42,6 @@ StyledRect {
         return []
     }
 
-    readonly property string previewCommandText: {
-        if (root.commandData.previewCmd) return root.commandData.previewCmd
-        const list = root.commandsList
-        if (list.length > 0 && list[0].cmd) return list[0].cmd
-        return root.commandData.cmd || ""
-    }
-
     readonly property string fullScriptText: {
         const list = root.commandsList
         let lines = []
@@ -222,135 +215,19 @@ StyledRect {
             }
         }
 
-        // ── 2. Collapsed View: 1-line description + Preview Box + [Copy] + [Expand]
-        ColumnLayout {
+        // ── 2. Collapsed View: 1-line description
+        StyledText {
             Layout.fillWidth: true
-            spacing: 6
-            visible: !root.isExpanded
+            text: root.commandData.description || ""
+            font: Tokens.font.body.small
+            color: Colours.palette.m3onSurfaceVariant
+            elide: Text.ElideRight
+            visible: !root.isExpanded && !!root.commandData.description
 
-            // Short one-line description
-            StyledText {
-                Layout.fillWidth: true
-                text: root.commandData.description || ""
-                font: Tokens.font.body.small
-                color: Colours.palette.m3onSurfaceVariant
-                elide: Text.ElideRight
-                visible: !!root.commandData.description
-            }
-
-            // Command Preview Row
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                visible: !!root.previewCommandText
-
-                // Monospace preview code box
-                StyledRect {
-                    Layout.fillWidth: true
-                    implicitHeight: 32
-                    radius: Tokens.rounding.small
-                    color: "#0a0a0f"
-                    border.width: 1
-                    border.color: Colours.palette.m3outlineVariant
-
-                    TextEdit {
-                        id: previewEdit
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        anchors.topMargin: 6
-                        readOnly: true
-                        selectByMouse: true
-                        textFormat: TextEdit.RichText
-                        text: root.formatSyntaxHighlight(root.previewCommandText)
-                        font.family: "monospace"
-                        font.pixelSize: 12
-                        color: Colours.palette.m3onSurface
-                        selectionColor: Colours.palette.m3primary
-                        selectedTextColor: Colours.palette.m3onPrimary
-                        wrapMode: TextEdit.NoWrap
-                    }
-                }
-
-                // Copy Preview Button
-                StyledRect {
-                    id: previewCopyBtn
-                    property bool copied: false
-                    implicitHeight: 32
-                    implicitWidth: previewCopyRow.implicitWidth + 14
-                    radius: Tokens.rounding.small
-                    color: copied ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
-                    border.width: 1
-                    border.color: copied ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-
-                    RowLayout {
-                        id: previewCopyRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: previewCopyBtn.copied ? "check" : "content_copy"
-                            fontStyle: Tokens.font.icon.small
-                            color: previewCopyBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                        }
-
-                        StyledText {
-                            text: previewCopyBtn.copied ? qsTr("Copied!") : qsTr("Copy")
-                            font: Tokens.font.label.small
-                            color: previewCopyBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
-                        }
-                    }
-
-                    Timer {
-                        id: previewCopyTimer
-                        interval: 1500
-                        onTriggered: previewCopyBtn.copied = false
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            Quickshell.clipboardText = root.previewCommandText
-                            previewCopyBtn.copied = true
-                            previewCopyTimer.restart()
-                        }
-                    }
-                }
-
-                // Expand Button
-                StyledRect {
-                    implicitHeight: 32
-                    implicitWidth: previewExpandRow.implicitWidth + 14
-                    radius: Tokens.rounding.small
-                    color: Colours.tPalette.m3surfaceContainer
-                    border.width: 1
-                    border.color: Colours.palette.m3outlineVariant
-
-                    RowLayout {
-                        id: previewExpandRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: "expand_more"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3primary
-                        }
-
-                        StyledText {
-                            text: qsTr("Expand")
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3primary
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleExpandRequested(root.commandData.id)
-                    }
-                }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleExpandRequested(root.commandData.id)
             }
         }
 
