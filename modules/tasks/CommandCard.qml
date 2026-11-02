@@ -22,7 +22,7 @@ StyledRect {
     signal flagClicked(string flag)
 
     width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
-    implicitHeight: mainCol.implicitHeight + 18
+    implicitHeight: mainCol.implicitHeight + 14
 
     radius: Tokens.rounding.medium
     color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainerLow
@@ -106,16 +106,16 @@ StyledRect {
             let trimmed = line.trim()
             if (trimmed.startsWith("#")) {
                 let escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;"><font color="#9595a8"><i>' + escaped + '</i></font></p>')
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.25;"><font color="#9595a8"><i>' + escaped + '</i></font></p>')
             } else if (trimmed === "") {
-                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;">&nbsp;</p>')
+                formattedLines.push('<p style="margin: 0; padding: 0; font-size: 6px; line-height: 6px;">&nbsp;</p>')
             } else {
                 let s = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 s = s.replace(/\b(sudo)\b/g, '<font color="#ffb74d"><b>$1</b></font>')
                 s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="#d0bcff"><b>$1</b></font>')
                 s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="#80d4ff">$2</font>')
                 s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="#fbc02d"><i>$1</i></font>')
-                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;">' + s + '</p>')
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.25;">' + s + '</p>')
             }
         }
         return formattedLines.join("")
@@ -126,8 +126,8 @@ StyledRect {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 10
-        spacing: 8
+        anchors.margins: 8
+        spacing: 6
 
         // ── 1. Tool Header Line ─────────────────────────────────────
         Item {
@@ -357,7 +357,7 @@ StyledRect {
         // ── 3. Expanded View: Single "Use cases" heading + big code cell + flags at the end
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 6
             visible: root.isExpanded
 
             // Tool Full Description
@@ -388,7 +388,7 @@ StyledRect {
             // Big code cell with # comments and commands
             StyledRect {
                 Layout.fillWidth: true
-                implicitHeight: fullEdit.implicitHeight + 16
+                implicitHeight: fullEdit.implicitHeight + 12
                 radius: Tokens.rounding.small
                 color: "#0a0a0f"
                 border.width: 1
@@ -397,7 +397,7 @@ StyledRect {
                 TextEdit {
                     id: fullEdit
                     anchors.fill: parent
-                    anchors.margins: 8
+                    anchors.margins: 6
                     readOnly: true
                     selectByMouse: true
                     textFormat: TextEdit.RichText

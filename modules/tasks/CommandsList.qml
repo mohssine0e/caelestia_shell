@@ -267,7 +267,7 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: 10
+            spacing: 6
             model: root.filteredCommands
 
             StyledScrollBar.vertical: StyledScrollBar {
