@@ -1030,14 +1030,17 @@ FocusScope {
 
                         Connections {
                             target: Assistant
-                            function onResultTextChanged() {
-                                if (!chatList.userScrolledUp) {
-                                    Qt.callLater(() => chatList.positionViewAtEnd())
+                            function onIsGeneratingChanged() {
+                                if (Assistant.isGenerating) {
+                                    chatList.userScrolledUp = false
                                 }
                             }
                             function onMessagesChanged() {
-                                if (!chatList.userScrolledUp) {
-                                    Qt.callLater(() => chatList.positionViewAtEnd())
+                                // Anchor view at the beginning of the new answer so user can read from line 1
+                                if (!chatList.userScrolledUp && Assistant.messages.length > 0) {
+                                    Qt.callLater(() => {
+                                        chatList.positionViewAtIndex(Assistant.messages.length - 1, ListView.Beginning)
+                                    })
                                 }
                             }
                         }
@@ -1182,7 +1185,7 @@ FocusScope {
                                             selectByMouse: true
                                             selectByKeyboard: true
                                             cursorVisible: false
-                                            textFormat: (modelData.isStreaming && Assistant.isStreaming) ? TextEdit.PlainText : TextEdit.MarkdownText
+                                            textFormat: TextEdit.MarkdownText
                                             wrapMode: TextEdit.Wrap
                                             font: Tokens.font.body.builders.small.size(11).build()
                                             color: Colours.palette.m3onSurface

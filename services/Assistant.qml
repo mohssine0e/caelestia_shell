@@ -439,6 +439,31 @@ Singleton {
         onTriggered: root.checkClipboard(false)
     }
 
+    // ── High-Performance Stream Batching (~22 updates/sec max) ────
+    property string _streamBuffer: ""
+
+    Timer {
+        id: streamBatchTimer
+        interval: 45
+        repeat: false
+        onTriggered: root._flushStreamBuffer()
+    }
+
+    function _flushStreamBuffer() {
+        if (!root._streamBuffer || root._streamBuffer.length === 0) return
+        root.rawResultText += root._streamBuffer
+        root._streamBuffer = ""
+        root.resultText = root.rawResultText
+        if (root.messages && root.messages.length > 0) {
+            const msgs = root.messages.slice()
+            const last = msgs[msgs.length - 1]
+            if (last && last.role === "assistant") {
+                last.text = root.rawResultText
+                root.messages = msgs
+            }
+        }
+    }
+
     // ── Streaming AI Worker Process via SplitParser ──────────────
     Process {
         id: apiProc
@@ -473,17 +498,16 @@ Singleton {
                     } else if (msg.type === "chunk") {
                         root.isLoading = false
                         root.isStreaming = true
-                        root.rawResultText += msg.text
-                        root.resultText = root.rawResultText
-                        if (root.messages && root.messages.length > 0) {
-                            const msgs = root.messages.slice()
-                            const last = msgs[msgs.length - 1]
-                            if (last && last.role === "assistant") {
-                                last.text = root.rawResultText
-                                root.messages = msgs
-                            }
+                        root._streamBuffer += msg.text
+                        if (!streamBatchTimer.running) {
+                            streamBatchTimer.restart()
                         }
                     } else if (msg.type === "done") {
+                        streamBatchTimer.stop()
+                        if (root._streamBuffer && root._streamBuffer.length > 0) {
+                            root.rawResultText += root._streamBuffer
+                            root._streamBuffer = ""
+                        }
                         root.isLoading = false
                         root.isStreaming = false
                         root.providerUsed = msg.provider || root.providerUsed
@@ -531,6 +555,8 @@ Singleton {
                             root.pushTurn(root.activePrompt, root.resultText)
                         }
                     } else if (msg.type === "error") {
+                        streamBatchTimer.stop()
+                        root._streamBuffer = ""
                         root.isLoading = false
                         root.isStreaming = false
                         root.errorMessage = msg.message || "An error occurred."
@@ -554,6 +580,8 @@ Singleton {
             }
         }
         onExited: {
+            streamBatchTimer.stop()
+            root._streamBuffer = ""
             root.isLoading = false
             root.isStreaming = false
         }
