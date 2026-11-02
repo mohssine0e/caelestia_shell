@@ -75,11 +75,13 @@ def get_provider_ceiling(primary, gemini_key, groq_key):
     # Both configured and it's auto (or fallback): smaller of the two caps
     return 100000
 
-def save_config(gemini_key, groq_key, provider=None, max_chars=None):
+def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     cfg = load_config()
-    cfg["gemini_key"] = gemini_key.strip()
-    cfg["groq_key"] = groq_key.strip()
+    if gemini_key is not None and gemini_key.strip():
+        cfg["gemini_key"] = gemini_key.strip()
+    if groq_key is not None and groq_key.strip():
+        cfg["groq_key"] = groq_key.strip()
     if provider:
         cfg["primary"] = provider.strip().lower()
     if max_chars:

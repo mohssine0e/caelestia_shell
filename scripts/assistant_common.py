@@ -98,6 +98,10 @@ def load_config():
                         cfg["primary"] = data["preferred_provider"]
         except Exception:
             pass
+    if not cfg.get("gemini_key"):
+        cfg["gemini_key"] = os.environ.get("GEMINI_API_KEY", "")
+    if not cfg.get("groq_key"):
+        cfg["groq_key"] = os.environ.get("GROQ_API_KEY", "")
     return cfg
 
 def load_profile():

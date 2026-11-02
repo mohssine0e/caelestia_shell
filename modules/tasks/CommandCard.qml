@@ -106,17 +106,19 @@ StyledRect {
             let trimmed = line.trim()
             if (trimmed.startsWith("#")) {
                 let escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                formattedLines.push('<font color="#9595a8"><i>' + escaped + '</i></font>')
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;"><font color="#9595a8"><i>' + escaped + '</i></font></p>')
+            } else if (trimmed === "") {
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;">&nbsp;</p>')
             } else {
                 let s = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 s = s.replace(/\b(sudo)\b/g, '<font color="#ffb74d"><b>$1</b></font>')
                 s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="#d0bcff"><b>$1</b></font>')
                 s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="#80d4ff">$2</font>')
                 s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="#fbc02d"><i>$1</i></font>')
-                formattedLines.push(s)
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.4;">' + s + '</p>')
             }
         }
-        return formattedLines.join("<br>")
+        return formattedLines.join("")
     }
 
     ColumnLayout {
@@ -259,8 +261,6 @@ StyledRect {
                         anchors.topMargin: 6
                         readOnly: true
                         selectByMouse: true
-                        mouseSelectionMode: TextEdit.SelectCharacters
-                        activeFocusOnPress: false
                         textFormat: TextEdit.RichText
                         text: root.formatSyntaxHighlight(root.previewCommandText)
                         font.family: "monospace"
@@ -379,63 +379,10 @@ StyledRect {
             }
 
             // Use cases header line
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-
-                StyledText {
-                    text: qsTr("Use cases")
-                    font: Tokens.font.label.large
-                    color: Colours.palette.m3onSurface
-                }
-
-                Item { Layout.fillWidth: true }
-
-                // Copy All Button
-                StyledRect {
-                    id: copyAllBtn
-                    property bool copied: false
-                    implicitHeight: 24
-                    implicitWidth: copyAllRow.implicitWidth + 14
-                    radius: Tokens.rounding.small
-                    color: copied ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
-                    border.width: 1
-                    border.color: copied ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-
-                    RowLayout {
-                        id: copyAllRow
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        MaterialIcon {
-                            text: copyAllBtn.copied ? "check" : "content_copy"
-                            fontStyle: Tokens.font.icon.small
-                            color: copyAllBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                        }
-
-                        StyledText {
-                            text: copyAllBtn.copied ? qsTr("Copied!") : qsTr("Copy")
-                            font: Tokens.font.label.small
-                            color: copyAllBtn.copied ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
-                        }
-                    }
-
-                    Timer {
-                        id: copyAllTimer
-                        interval: 1500
-                        onTriggered: copyAllBtn.copied = false
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            Quickshell.clipboardText = root.fullScriptText
-                            copyAllBtn.copied = true
-                            copyAllTimer.restart()
-                        }
-                    }
-                }
+            StyledText {
+                text: qsTr("Use cases")
+                font: Tokens.font.label.large
+                color: Colours.palette.m3onSurface
             }
 
             // Big code cell with # comments and commands
@@ -453,8 +400,6 @@ StyledRect {
                     anchors.margins: 8
                     readOnly: true
                     selectByMouse: true
-                    mouseSelectionMode: TextEdit.SelectCharacters
-                    activeFocusOnPress: false
                     textFormat: TextEdit.RichText
                     text: root.formatSyntaxHighlight(root.fullScriptText)
                     font.family: "monospace"

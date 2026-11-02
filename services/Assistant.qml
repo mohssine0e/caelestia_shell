@@ -665,8 +665,8 @@ Singleton {
 
     function saveSettings(geminiKey, groqKey, provider, maxChars) {
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
-        const gKey = (geminiKey !== undefined ? geminiKey : root.geminiKey || "").trim()
-        const qKey = (groqKey !== undefined ? groqKey : root.groqKey || "").trim()
+        const gKey = (geminiKey !== undefined && geminiKey !== "" ? geminiKey : root.geminiKey || "").trim()
+        const qKey = (groqKey !== undefined && groqKey !== "" ? groqKey : root.groqKey || "").trim()
         const prov = (provider || root.preferredProvider || "gemini").toLowerCase()
         const mChars = String(maxChars || root.maxChars || 12000)
 
