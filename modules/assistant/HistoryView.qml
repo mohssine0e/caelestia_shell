@@ -84,19 +84,6 @@ FocusScope {
         return items
     }
 
-    // Count items that have no tags or empty tags array
-    readonly property int unorganizedCount: {
-        const items = Assistant.history || []
-        let count = 0
-        for (let i = 0; i < items.length; i++) {
-            const tags = items[i].tags
-            if (!tags || tags.length === 0) {
-                count++
-            }
-        }
-        return count
-    }
-
     property int visibleLimit: 30
     onSelectedTagChanged: visibleLimit = 30
     readonly property var displayedHistory: (root.filteredHistory || []).slice(0, root.visibleLimit)
@@ -173,52 +160,6 @@ FocusScope {
                 }
 
                 Item { Layout.fillWidth: true }
-
-                // AI Organize Button with pending unorganized badge
-                Item {
-                    implicitWidth: 32
-                    implicitHeight: 32
-
-                    IconButton {
-                        id: organizeBtn
-                        anchors.fill: parent
-                        type: IconButton.Tonal
-                        icon: "auto_awesome"
-                        font: Tokens.font.icon.small
-                        enabled: !Assistant.isOrganizing && (Assistant.history || []).length > 0
-                        opacity: enabled ? 1.0 : 0.4
-                        onClicked: Assistant.organizeHistory()
-
-                        RotationAnimation on rotation {
-                            from: 0
-                            to: 360
-                            duration: 1000
-                            loops: Animation.Infinite
-                            running: Assistant.isOrganizing
-                        }
-                    }
-
-                    // Badge showing count of unorganized / new chats
-                    StyledRect {
-                        visible: root.unorganizedCount > 0 && !Assistant.isOrganizing
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.topMargin: -2
-                        anchors.rightMargin: -2
-                        implicitWidth: Math.max(14, organizeBadgeText.implicitWidth + 6)
-                        implicitHeight: 14
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3primary
-
-                        StyledText {
-                            id: organizeBadgeText
-                            anchors.centerIn: parent
-                            text: root.unorganizedCount > 99 ? "99+" : String(root.unorganizedCount)
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onPrimary
-                        }
-                    }
-                }
 
                 IconButton {
                     type: IconButton.Text

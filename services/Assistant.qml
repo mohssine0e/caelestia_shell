@@ -37,7 +37,6 @@ Singleton {
     // History & Raw Log (File 1)
     property var history: []
     property int unDistilledCount: 0
-    property bool isOrganizing: false
     property string activePrompt: ""
     property var recalledContext: null
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
@@ -114,7 +113,18 @@ Singleton {
             try {
                 const parsed = JSON.parse(raw)
                 if (Array.isArray(parsed)) {
+                    let needsSave = false
+                    for (let i = 0; i < parsed.length; i++) {
+                        const it = parsed[i]
+                        if (!it.tags || it.tags.length === 0) {
+                            it.tags = root.getAutonomousTags(it.action, it.text, it.prompt)
+                            needsSave = true
+                        }
+                    }
                     root.history = parsed
+                    if (needsSave) {
+                        Qt.callLater(() => root.saveHistory())
+                    }
                 }
             } catch (e) {
                 root.history = []
@@ -769,7 +779,7 @@ Singleton {
             timestamp: isoStr,
             starred: false,
             context_excluded: false,
-            tags: [],
+            tags: root.getAutonomousTags(action, cleanText, cleanPrompt),
             thread_id: threadId
         }
 
@@ -791,11 +801,8 @@ Singleton {
         root.history = list
         root.saveHistory()
 
-        root.unDistilledCount++
-        if (root.unDistilledCount >= 5 && !Memory.isDistilling) {
-            root.unDistilledCount = 0
-            Qt.callLater(() => Memory.distill())
-        }
+        // Debounced autonomous memory extraction & SRS distillation (2s after turn completes)
+        autoDistillTimer.restart()
     }
 
     function deleteHistoryItem(id) {
@@ -883,48 +890,33 @@ Singleton {
         root.errorType = ""
     }
 
-    Process {
-        id: organizeProc
-        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py", "organize"]
-        stdout: SplitParser {
-            onRead: data => {
-                const line = data.trim()
-                if (!line) return
-                try {
-                    const msg = JSON.parse(line)
-                    if (msg.type === "organize_done") {
-                        root.isOrganizing = false
-                        if (msg.mapping) {
-                            const updated = root.history.slice()
-                            for (let i = 0; i < updated.length; i++) {
-                                const id = String(updated[i].id)
-                                if (msg.mapping[id]) {
-                                    updated[i].tags = msg.mapping[id]
-                                }
-                            }
-                            root.history = updated
-                            root.saveHistory()
-                        }
-                        if (msg.proposed_profile) {
-                            root.proposedProfile = msg.proposed_profile
-                        }
-                    } else if (msg.type === "error") {
-                        root.isOrganizing = false
-                    }
-                } catch (e) {
-                    root.isOrganizing = false
-                }
-            }
-        }
-        onExited: {
-            root.isOrganizing = false
-        }
+    // ── Autonomous Classification & Background Memory Distillation ──
+    function getAutonomousTags(action, text, prompt) {
+        const combined = ((action || "") + " " + (text || "") + " " + (prompt || "")).toLowerCase()
+        const tags = []
+        if (action === "translate" || /[\u0600-\u06FF]/.test(combined)) tags.push("arabic")
+        if (action === "fix" || /(?:error|exception|traceback|failed|panic|syntaxerror)/.test(combined)) tags.push("debug")
+        if (/(?:python|pip|pytest|django|flask|fastapi)/.test(combined)) tags.push("python")
+        if (/(?:spring|java|maven|gradle|jvm)/.test(combined)) tags.push("java")
+        if (/(?:linux|arch|hyprland|bash|zsh|systemd|pacman)/.test(combined)) tags.push("linux")
+        if (/(?:git|rebase|merge|commit|branch)/.test(combined)) tags.push("git")
+        if (/(?:qml|quickshell|qt)/.test(combined)) tags.push("qml")
+        if (/(?:javascript|typescript|react|html|css|node)/.test(combined)) tags.push("web")
+        if (/(?:docker|container|podman|k8s)/.test(combined)) tags.push("devops")
+        if (/(?:sql|postgres|sqlite|database)/.test(combined)) tags.push("database")
+        if (tags.length === 0) tags.push(action || "general")
+        return tags.slice(0, 3)
     }
 
-    function organizeHistory() {
-        if (root.isOrganizing) return
-        root.isOrganizing = true
-        organizeProc.running = true
+    Timer {
+        id: autoDistillTimer
+        interval: 1800
+        repeat: false
+        onTriggered: {
+            if (!Memory.isDistilling && !root.isStreaming && !root.isLoading) {
+                Memory.distill()
+            }
+        }
     }
 
     Process {
