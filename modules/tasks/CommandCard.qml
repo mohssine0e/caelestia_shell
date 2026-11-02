@@ -436,17 +436,7 @@ StyledRect {
                         }
                     }
 
-                    // 2. Command Explanation
-                    StyledText {
-                        Layout.fillWidth: true
-                        text: modelData.desc || ""
-                        font: Tokens.font.body.small
-                        color: Colours.palette.m3onSurfaceVariant
-                        wrapMode: Text.Wrap
-                        visible: !!modelData.desc
-                    }
-
-                    // 3. Monospace Code Block
+                    // 2. Monospace Code Block
                     StyledRect {
                         Layout.fillWidth: true
                         implicitHeight: caseEdit.implicitHeight + 12
@@ -474,39 +464,7 @@ StyledRect {
                         }
                     }
 
-                    // 4. Warning Alert (if any)
-                    StyledRect {
-                        Layout.fillWidth: true
-                        implicitHeight: warnRow.implicitHeight + 8
-                        radius: Tokens.rounding.small
-                        color: "#251a05"
-                        border.width: 1
-                        border.color: Colours.palette.m3tertiary
-                        visible: !!modelData.warning
-
-                        RowLayout {
-                            id: warnRow
-                            anchors.fill: parent
-                            anchors.margins: 5
-                            spacing: 6
-
-                            MaterialIcon {
-                                text: "warning"
-                                fontStyle: Tokens.font.icon.small
-                                color: Colours.palette.m3tertiary
-                            }
-
-                            StyledText {
-                                Layout.fillWidth: true
-                                text: modelData.warning || ""
-                                font: Tokens.font.body.small
-                                color: Colours.palette.m3onSurface
-                                wrapMode: Text.Wrap
-                            }
-                        }
-                    }
-
-                    // 5. Flag Pills (Shown directly! Clickable to search)
+                    // 3. Compact Flag / Parameter Pills
                     Flow {
                         Layout.fillWidth: true
                         spacing: 5
@@ -516,8 +474,8 @@ StyledRect {
                             model: (modelData && modelData.flags) ? modelData.flags : []
                             delegate: StyledRect {
                                 required property var modelData
-                                implicitHeight: 22
-                                implicitWidth: flagRow.implicitWidth + 14
+                                implicitHeight: 20
+                                implicitWidth: flagRow.implicitWidth + 12
                                 radius: Tokens.rounding.full
                                 color: Colours.tPalette.m3surfaceContainer
                                 border.width: 1
@@ -529,7 +487,7 @@ StyledRect {
                                     spacing: 4
 
                                     StyledText {
-                                        text: modelData.flag + ":"
+                                        text: modelData.flag
                                         font.family: "monospace"
                                         font.pixelSize: 11
                                         font.bold: true
@@ -539,7 +497,7 @@ StyledRect {
                                     StyledText {
                                         text: modelData.desc
                                         font: Tokens.font.label.small
-                                        color: Colours.palette.m3onSurface
+                                        color: Colours.palette.m3onSurfaceVariant
                                     }
                                 }
 
@@ -549,92 +507,6 @@ StyledRect {
                                     onClicked: root.flagClicked(modelData.flag)
                                 }
                             }
-                        }
-                    }
-
-                    // 6. Structured Technical Parameters (e.g. NetworkManager EAP/Inner/MAC)
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 3
-                        visible: !!(modelData.params && modelData.params.length > 0)
-
-                        Repeater {
-                            model: (modelData && modelData.params) ? modelData.params : []
-                            delegate: RowLayout {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                spacing: 10
-
-                                StyledText {
-                                    text: modelData.key + ":"
-                                    font.family: "monospace"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Colours.palette.m3tertiary
-                                    Layout.preferredWidth: 95
-                                }
-
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: modelData.value
-                                    font: Tokens.font.body.small
-                                    color: Colours.palette.m3onSurface
-                                    wrapMode: Text.Wrap
-                                }
-                            }
-                        }
-                    }
-
-                    // 7. Placeholders (e.g. <package>, <SSID>, <PASSWORD>)
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 3
-                        visible: !!(modelData.placeholders && modelData.placeholders.length > 0)
-
-                        Repeater {
-                            model: (modelData && modelData.placeholders) ? modelData.placeholders : []
-                            delegate: RowLayout {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                StyledText {
-                                    text: modelData.name + ":"
-                                    font.family: "monospace"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Colours.palette.m3primary
-                                }
-
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: modelData.desc
-                                    font: Tokens.font.body.small
-                                    color: Colours.palette.m3onSurfaceVariant
-                                    wrapMode: Text.Wrap
-                                }
-                            }
-                        }
-                    }
-
-                    // 8. Notes / Prerequisites (if any)
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        visible: !!modelData.notes || !!modelData.prereqs
-
-                        MaterialIcon {
-                            text: modelData.prereqs ? "lock" : "lightbulb"
-                            fontStyle: Tokens.font.icon.small
-                            color: Colours.palette.m3secondary
-                        }
-
-                        StyledText {
-                            text: modelData.prereqs ? qsTr("Prerequisites: %1").arg(modelData.prereqs) : (modelData.notes || "")
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurfaceVariant
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
                         }
                     }
                 }
