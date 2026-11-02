@@ -1021,23 +1021,41 @@ FocusScope {
                         model: Assistant.messages
 
                         property int lastMessageCount: 0
+                        property bool userScrolledUp: false
+
+                        onContentYChanged: {
+                            if (chatList.moving && !chatList.atYEnd) {
+                                chatList.userScrolledUp = true
+                            } else if (chatList.atYEnd) {
+                                chatList.userScrolledUp = false
+                            }
+                        }
 
                         Connections {
                             target: Assistant
+
+                            function onResultTextChanged() {
+                                if (Assistant.isStreaming && !chatList.userScrolledUp) {
+                                    chatList.positionViewAtEnd()
+                                }
+                            }
+
+                            function onIsStreamingChanged() {
+                                if (!Assistant.isStreaming && !chatList.userScrolledUp) {
+                                    Qt.callLater(() => chatList.positionViewAtEnd())
+                                }
+                            }
+
                             function onMessagesChanged() {
                                 const msgs = Assistant.messages
                                 if (!msgs || msgs.length === 0) {
                                     chatList.lastMessageCount = 0
+                                    chatList.userScrolledUp = false
                                     return
                                 }
                                 if (msgs.length > chatList.lastMessageCount) {
-                                    const lastMsg = msgs[msgs.length - 1]
-                                    const targetIndex = (lastMsg && lastMsg.role === "assistant" && msgs.length >= 2)
-                                        ? msgs.length - 2
-                                        : msgs.length - 1
-                                    Qt.callLater(() => {
-                                        chatList.positionViewAtIndex(targetIndex, ListView.Beginning)
-                                    })
+                                    chatList.userScrolledUp = false
+                                    Qt.callLater(() => chatList.positionViewAtEnd())
                                 }
                                 chatList.lastMessageCount = msgs.length
                             }
@@ -1432,71 +1450,6 @@ FocusScope {
                             customQuestionInput.text = ""
                             root.askBoundToSelection = false
                         }
-                    }
-                }
-
-                // Arabic / Text TTS Audio Pronunciation Button
-                IconButton {
-                    id: ttsBtn
-                    type: IconButton.Tonal
-                    icon: Assistant.isSpeaking ? "volume_off" : "volume_up"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 36
-                    implicitHeight: 36
-                    enabled: Assistant.resultText.length > 0
-                    opacity: enabled ? 1.0 : 0.4
-                    onClicked: Assistant.speakText(Assistant.resultText)
-                }
-
-                IconButton {
-                    id: saveCardBtn
-                    type: IconButton.Tonal
-                    property bool saved: false
-                    icon: saved ? "bookmark_added" : (Memory.isCreatingQuickCard ? "hourglass_top" : "bookmark_add")
-                    font: Tokens.font.icon.small
-                    implicitWidth: 36
-                    implicitHeight: 36
-                    enabled: Assistant.resultText.length > 0 && !Assistant.isGenerating && !Memory.isCreatingQuickCard
-                    opacity: enabled ? 1.0 : 0.4
-                    onClicked: {
-                        Memory.createCardFromAssistant(Assistant.selectedText || Assistant.activePrompt, Assistant.resultText, Assistant.activeAction)
-                        saved = true
-                        resetCardTimer.restart()
-                    }
-
-                    Timer {
-                        id: resetCardTimer
-                        interval: 2500
-                        onTriggered: saveCardBtn.saved = false
-                    }
-                }
-
-                IconButton {
-                    id: copyBtn
-                    type: IconButton.Filled
-                    property bool copied: false
-                    icon: copied ? "check" : "content_copy"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 36
-                    implicitHeight: 36
-                    enabled: Assistant.resultText.length > 0 || root.activeSelectedText.length > 0
-                    opacity: enabled ? 1.0 : 0.4
-                    onClicked: {
-                        if (root.activeSelectedText.length > 0) {
-                            Quickshell.clipboardText = root.activeSelectedText
-                            Assistant.lastSeenClipboard = root.activeSelectedText.trim()
-                        } else if (Assistant.resultText.length > 0) {
-                            Quickshell.clipboardText = Assistant.resultText
-                            Assistant.lastSeenClipboard = Assistant.resultText.trim()
-                        }
-                        copied = true
-                        resetCopyTimer.restart()
-                    }
-
-                    Timer {
-                        id: resetCopyTimer
-                        interval: 1800
-                        onTriggered: copyBtn.copied = false
                     }
                 }
             }

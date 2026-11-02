@@ -462,22 +462,6 @@ FocusScope {
                                         color: Colours.palette.m3outline
                                     }
 
-                                    // Context Recall Exclusion Toggle ("Forget this")
-                                    IconButton {
-                                        type: IconButton.Text
-                                        icon: itemCard.itemData.context_excluded ? "visibility_off" : "visibility"
-                                        font: Tokens.font.icon.small
-                                        implicitWidth: 26
-                                        implicitHeight: 26
-                                        activeColour: "transparent"
-                                        inactiveColour: "transparent"
-                                        activeOnColour: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
-                                        inactiveOnColour: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3outline
-                                        onClicked: {
-                                            if (itemCard.itemData.id) Assistant.toggleContextExcluded(itemCard.itemData.id)
-                                        }
-                                    }
-
                                     // Star Button
                                     IconButton {
                                         type: IconButton.Text
@@ -716,19 +700,6 @@ FocusScope {
                                                         id: resetItemCopy
                                                         interval: 1800
                                                         onTriggered: itemCopyBtn.copied = false
-                                                    }
-                                                }
-
-                                                // Re-open in Assistant View
-                                                IconButton {
-                                                    type: IconButton.Tonal
-                                                    icon: "open_in_new"
-                                                    font: Tokens.font.icon.small
-                                                    implicitWidth: 30
-                                                    implicitHeight: 30
-                                                    onClicked: {
-                                                        Assistant.reopenItem(itemCard.itemData)
-                                                        root.backRequested()
                                                     }
                                                 }
 
