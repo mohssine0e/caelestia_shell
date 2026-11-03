@@ -107,6 +107,14 @@ FocusScope {
 
     readonly property int totalCount: (root.allCommands || []).length
     readonly property int starredCount: (root.allCommands || []).filter(c => !!c.starred).length
+    readonly property var availableCategories: {
+        const set = new Set()
+        for (let i = 0; i < (root.allCommands || []).length; i++) {
+            const cat = root.allCommands[i].category
+            if (cat && cat.length > 0) set.add(cat.toLowerCase())
+        }
+        return Array.from(set).sort()
+    }
 
     // ── Keyboard Navigation ──────────────────────────────────────
     Keys.onUpPressed: {
@@ -146,119 +154,142 @@ FocusScope {
         spacing: 12
 
         // ── Top Category Filter Pills ──────────────────────────────
-        RowLayout {
+        Flickable {
+            id: catFlick
             Layout.fillWidth: true
-            spacing: 6
+            Layout.preferredHeight: 34
+            contentWidth: catRow.implicitWidth
+            contentHeight: 34
+            clip: true
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
 
-            // 1. All Pill
-            StyledRect {
-                implicitHeight: 32
-                implicitWidth: allRow.implicitWidth + 18
-                radius: Tokens.rounding.full
-                color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
-                border.width: 1
-                border.color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+            WheelHandler {
+                target: catFlick
+                orientation: Qt.Horizontal
+            }
 
-                RowLayout {
-                    id: allRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: "apps"
-                        fontStyle: Tokens.font.icon.small
-                        color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                    }
-
-                    StyledText {
-                        text: qsTr("All")
-                        font: Tokens.font.label.medium
-                        color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.selectedCategory = "all"
-                        root.selectedIndex = 0
-                    }
+            WheelHandler {
+                target: catFlick
+                orientation: Qt.Vertical
+                onWheel: event => {
+                    catFlick.contentX = Math.max(0, Math.min(catFlick.contentWidth - catFlick.width, catFlick.contentX - event.angleDelta.y))
                 }
             }
 
-            // 2. Starred Pill
-            StyledRect {
-                implicitHeight: 32
-                implicitWidth: starredRow.implicitWidth + 18
-                radius: Tokens.rounding.full
-                color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.tPalette.m3surfaceContainer
-                border.width: 1
-                border.color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.palette.m3outlineVariant
+            RowLayout {
+                id: catRow
+                height: 32
+                spacing: 6
 
-                RowLayout {
-                    id: starredRow
-                    anchors.centerIn: parent
-                    spacing: 4
-
-                    MaterialIcon {
-                        text: "star"
-                        fontStyle: Tokens.font.icon.small
-                        color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
-                        fill: 1
-                    }
-
-                    StyledText {
-                        text: qsTr("Starred")
-                        font: Tokens.font.label.medium
-                        color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.selectedCategory = "starred"
-                        root.selectedIndex = 0
-                    }
-                }
-            }
-
-            // 3. Domain Tag Pills (#network, #bluetooth, #arch, #vpn, #files)
-            Repeater {
-                model: ["network", "bluetooth", "arch", "vpn", "files"]
-                delegate: StyledRect {
-                    required property string modelData
-                    readonly property bool active: root.selectedCategory === modelData
-
+                // 1. All Pill
+                StyledRect {
                     implicitHeight: 32
-                    implicitWidth: catLabel.implicitWidth + 18
+                    implicitWidth: allRow.implicitWidth + 18
                     radius: Tokens.rounding.full
-                    color: active ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
+                    color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
                     border.width: 1
-                    border.color: active ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+                    border.color: root.selectedCategory === "all" ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
 
-                    StyledText {
-                        id: catLabel
+                    RowLayout {
+                        id: allRow
                         anchors.centerIn: parent
-                        text: "#" + modelData
-                        font: Tokens.font.label.medium
-                        color: active ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        spacing: 4
+
+                        MaterialIcon {
+                            text: "apps"
+                            fontStyle: Tokens.font.icon.small
+                            color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        }
+
+                        StyledText {
+                            text: qsTr("All")
+                            font: Tokens.font.label.medium
+                            color: root.selectedCategory === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        }
                     }
 
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            root.selectedCategory = active ? "all" : modelData
+                            root.selectedCategory = "all"
                             root.selectedIndex = 0
                         }
                     }
                 }
-            }
 
-            Item { Layout.fillWidth: true }
+                // 2. Starred Pill
+                StyledRect {
+                    implicitHeight: 32
+                    implicitWidth: starredRow.implicitWidth + 18
+                    radius: Tokens.rounding.full
+                    color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.tPalette.m3surfaceContainer
+                    border.width: 1
+                    border.color: root.selectedCategory === "starred" ? Colours.palette.m3tertiary : Colours.palette.m3outlineVariant
+
+                    RowLayout {
+                        id: starredRow
+                        anchors.centerIn: parent
+                        spacing: 4
+
+                        MaterialIcon {
+                            text: "star"
+                            fontStyle: Tokens.font.icon.small
+                            color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
+                            fill: 1
+                        }
+
+                        StyledText {
+                            text: qsTr("Starred")
+                            font: Tokens.font.label.medium
+                            color: root.selectedCategory === "starred" ? Colours.palette.m3onTertiary : Colours.palette.m3tertiary
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.selectedCategory = "starred"
+                            root.selectedIndex = 0
+                        }
+                    }
+                }
+
+                // 3. Domain Tag Pills (Dynamic across all tools)
+                Repeater {
+                    model: root.availableCategories
+                    delegate: StyledRect {
+                        required property string modelData
+                        readonly property bool active: root.selectedCategory === modelData
+
+                        implicitHeight: 32
+                        implicitWidth: catLabel.implicitWidth + 18
+                        radius: Tokens.rounding.full
+                        color: active ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
+                        border.width: 1
+                        border.color: active ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
+
+                        StyledText {
+                            id: catLabel
+                            anchors.centerIn: parent
+                            text: "#" + modelData
+                            font: Tokens.font.label.medium
+                            color: active ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectedCategory = active ? "all" : modelData
+                                root.selectedIndex = 0
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // ── Command List ────────────────────────────────────────────
