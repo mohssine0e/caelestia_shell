@@ -311,13 +311,23 @@ StyledRect {
                 id: pillsFlick
                 Layout.preferredHeight: 28
                 Layout.fillWidth: true
-                Layout.maximumWidth: pillsRow.implicitWidth
-                contentWidth: pillsRow.implicitWidth
+                contentWidth: Math.max(width, pillsRow.implicitWidth)
                 contentHeight: 28
                 flickableDirection: Flickable.HorizontalFlick
                 boundsBehavior: Flickable.StopAtBounds
                 clip: true
                 Layout.alignment: Qt.AlignVCenter
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: -1
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.editingGroupId = ""
+                        root.deletingConfirmId = ""
+                        root.isExpanded = !root.isExpanded
+                    }
+                }
 
                 WheelHandler {
                     target: pillsFlick
@@ -613,22 +623,6 @@ StyledRect {
                                 }
                             }
                         }
-                    }
-                }
-            }
-
-            // Clickable header spacer (Toggles expand/shrink on click!)
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.editingGroupId = ""
-                        root.deletingConfirmId = ""
-                        root.isExpanded = !root.isExpanded
                     }
                 }
             }
