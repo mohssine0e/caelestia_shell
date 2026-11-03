@@ -84,7 +84,7 @@ FocusScope {
         })
     }
 
-    property string activePage: "tasks"
+    property string activePage: "commands"
     property string statusFilter: "all"
     property string searchQuery: ""
     property string commandSearchQuery: ""
