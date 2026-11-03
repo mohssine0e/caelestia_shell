@@ -189,7 +189,6 @@ Item {
         }
         // ── Background color states ──
         color: root.isSelected ? Colours.tPalette.m3surfaceContainerHigh
-             : rowHover.hovered ? Colours.tPalette.m3surfaceContainer
              : Colours.tPalette.m3surfaceContainerLow
 
         // ── Border ──
@@ -315,7 +314,7 @@ Item {
 
                 // ── Interactive Star Pin Button (Option 4) ─────
                 Item {
-                    visible: !root.isEditing && (root.isPinned || rowHover.hovered || root.isSelected)
+                    visible: !root.isEditing && (root.isPinned || root.isSelected)
                     Layout.preferredWidth: 20
                     Layout.preferredHeight: 20
                     Layout.alignment: Qt.AlignVCenter
@@ -326,13 +325,11 @@ Item {
                         fill: root.isPinned ? 1 : 0
                         fontStyle: Tokens.font.icon.small
                         color: root.isPinned ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
-                        opacity: root.isPinned ? 1.0 : (starHover.hovered ? 0.9 : 0.45)
+                        opacity: root.isPinned ? 1.0 : 0.65
 
                         Behavior on color { enabled: root.animate; CAnim {} }
                         Behavior on opacity { enabled: root.animate; CAnim {} }
                     }
-
-                    HoverHandler { id: starHover }
 
                     MouseArea {
                         anchors.fill: parent
@@ -564,7 +561,7 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (rowHover.hovered || root.isSelected) ? 1 : 0.3
+                    opacity: root.isSelected ? 1 : 0.65
                     Behavior on opacity { enabled: root.animate; Anim { type: Anim.DefaultEffects } }
 
                     // Copy the row's title to the clipboard; icon flips to
@@ -618,6 +615,7 @@ Item {
 
                     IconButton {
                         id: deleteButton
+                        visible: root.isSelected || root.isEditing
                         type: IconButton.Text
                         font: Tokens.font.icon.small
                         icon: "delete_outline"

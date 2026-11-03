@@ -248,10 +248,10 @@ Item {
             }
         }
 
-        // Actions (hover-reveal only)
+        // Actions
         RowLayout {
             spacing: 0
-            opacity: (hover.hovered || root.isSelected) ? 1 : 0.3
+            opacity: root.isSelected ? 1 : 0.65
             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
             // Copy this nested row's title to the clipboard; icon flips to
@@ -282,6 +282,7 @@ Item {
                 onClicked: root.editingStarted(root.nestedId)
             }
             IconButton {
+                visible: root.isSelected || root.isEditing
                 type: IconButton.Text
                 font: Tokens.font.icon.small
                 icon: "delete_outline"

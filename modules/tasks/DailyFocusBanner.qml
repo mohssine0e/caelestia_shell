@@ -357,22 +357,16 @@ StyledRect {
                             required property int index
                             readonly property bool isActive: root.activeNoteId === pillCard.modelData.id
                             readonly property bool isEditing: root.editingGroupId === pillCard.modelData.id
-                            readonly property bool isConfirmingDelete: root.deletingConfirmId === pillCard.modelData.id
                             readonly property bool hasNoteContent: !!(pillCard.modelData.note && pillCard.modelData.note.trim().length > 0)
                             readonly property bool canDelete: root.groups.length > 1 && pillCard.modelData.id !== "today"
 
                             implicitHeight: 26
-                            implicitWidth: pillInnerRow.implicitWidth + (isEditing ? 16 : (isConfirmingDelete ? 22 : (canDelete && (pillHover.hovered || isActive) ? 24 : 16)))
+                            implicitWidth: pillInnerRow.implicitWidth + 16
                             radius: Tokens.rounding.full
-                            color: isConfirmingDelete ? Qt.alpha(Colours.palette.m3error, 0.22)
-                                 : isActive ? Qt.alpha("#ffca1b", 0.22)
-                                 : pillHover.hovered ? "#3b3437"
-                                 : "#302b2d"
+                            color: isActive ? Qt.alpha("#ffca1b", 0.22) : "#302b2d"
 
                             border.width: 1
-                            border.color: isConfirmingDelete ? Colours.palette.m3error
-                                        : isActive ? "#ffca1b"
-                                        : Qt.alpha("#ffca1b", 0.18)
+                            border.color: isActive ? "#ffca1b" : Qt.alpha("#ffca1b", 0.18)
 
                             Behavior on color { CAnim {} }
                             Behavior on border.color { CAnim {} }
@@ -384,7 +378,7 @@ StyledRect {
 
                                 // Content indicator dot (shows when note contains text)
                                 StyledRect {
-                                    visible: pillCard.hasNoteContent && !pillCard.isEditing && !pillCard.isConfirmingDelete
+                                    visible: pillCard.hasNoteContent && !pillCard.isEditing
                                     implicitWidth: 5
                                     implicitHeight: 5
                                     radius: Tokens.rounding.full
@@ -394,19 +388,10 @@ StyledRect {
 
                                 // Note title text
                                 StyledText {
-                                    visible: !pillCard.isEditing && !pillCard.isConfirmingDelete
+                                    visible: !pillCard.isEditing
                                     text: pillCard.modelData.title || qsTr("Untitled")
                                     font: Tokens.font.label.medium
                                     color: pillCard.isActive ? "#ffca1b" : "#ede6df"
-                                    Layout.alignment: Qt.AlignVCenter
-                                }
-
-                                // Delete confirmation warning label
-                                StyledText {
-                                    visible: pillCard.isConfirmingDelete
-                                    text: qsTr("Delete?")
-                                    font: Tokens.font.label.medium
-                                    color: Colours.palette.m3error
                                     Layout.alignment: Qt.AlignVCenter
                                 }
 
@@ -445,33 +430,12 @@ StyledRect {
                                         onClicked: root.renameGroup(pillCard.modelData.id, renameInput.text)
                                     }
                                 }
-
-                                // Delete button
-                                MaterialIcon {
-                                    visible: pillCard.canDelete && !pillCard.isEditing && (pillHover.hovered || pillCard.isActive || pillCard.isConfirmingDelete)
-                                    text: pillCard.isConfirmingDelete ? "delete_forever" : "close"
-                                    fontStyle: Tokens.font.icon.small
-                                    color: pillCard.isConfirmingDelete ? Colours.palette.m3error : Colours.palette.m3outline
-                                    opacity: pillCard.isConfirmingDelete ? 1.0 : 0.7
-                                    Layout.alignment: Qt.AlignVCenter
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.requestRemoveGroup(pillCard.modelData.id)
-                                    }
-                                }
                             }
-
-                            HoverHandler { id: pillHover }
 
                             TapHandler {
                                 onTapped: {
                                     if (pillCard.isEditing) return
-                                    if (pillCard.isConfirmingDelete) {
-                                        root.deletingConfirmId = ""
-                                        return
-                                    }
+                                    root.deletingConfirmId = ""
                                     if (root.activeNoteId === pillCard.modelData.id) {
                                         // Clicking active group toggles expand/shrink
                                         root.isExpanded = !root.isExpanded
@@ -489,6 +453,15 @@ StyledRect {
                                     }
                                 }
                             }
+
+                            TapHandler {
+                                acceptedButtons: Qt.MiddleButton | Qt.RightButton
+                                onTapped: {
+                                    if (pillCard.canDelete) {
+                                        root.requestRemoveGroup(pillCard.modelData.id)
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -498,9 +471,9 @@ StyledRect {
                         implicitHeight: 26
                         implicitWidth: addPillRow.implicitWidth + 16
                         radius: Tokens.rounding.full
-                        color: addHover.hovered ? "#3b3437" : "#302b2d"
+                        color: "#302b2d"
                         border.width: 1
-                        border.color: addHover.hovered ? "#ffca1b" : Qt.alpha("#ffca1b", 0.22)
+                        border.color: Qt.alpha("#ffca1b", 0.22)
 
                         Behavior on color { CAnim {} }
                         Behavior on border.color { CAnim {} }
@@ -623,6 +596,49 @@ StyledRect {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Delete active note button (Shown only when active note is custom / deletable)
+            StyledRect {
+                id: deleteNoteBtn
+                readonly property bool canDelete: root.groups.length > 1 && root.activeNoteId !== "today"
+                readonly property bool isConfirming: root.deletingConfirmId === root.activeNoteId
+
+                visible: canDelete
+                implicitWidth: isConfirming ? 74 : 26
+                implicitHeight: 26
+                radius: Tokens.rounding.full
+                Layout.alignment: Qt.AlignVCenter
+                color: isConfirming ? Qt.alpha(Colours.palette.m3error, 0.22) : "transparent"
+                border.width: isConfirming ? 1 : 0
+                border.color: Colours.palette.m3error
+
+                Behavior on implicitWidth { Anim { type: Anim.FastSpatial } }
+                Behavior on color { CAnim {} }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 3
+
+                    MaterialIcon {
+                        text: deleteNoteBtn.isConfirming ? "delete_forever" : "delete_outline"
+                        fontStyle: Tokens.font.icon.small
+                        color: deleteNoteBtn.isConfirming ? Colours.palette.m3error : Qt.alpha("#ede6df", 0.55)
+                    }
+
+                    StyledText {
+                        visible: deleteNoteBtn.isConfirming
+                        text: qsTr("Delete?")
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3error
+                    }
+                }
+
+                TapHandler {
+                    onTapped: {
+                        root.requestRemoveGroup(root.activeNoteId)
                     }
                 }
             }

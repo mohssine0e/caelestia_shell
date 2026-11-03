@@ -390,7 +390,7 @@ Item {
                 RowLayout {
                     visible: !root.isEditing
                     spacing: 0
-                    opacity: (subRowHover.hovered || root.isSelected) ? 1 : 0.3
+                    opacity: root.isSelected ? 1 : 0.65
                     Behavior on opacity { Anim { type: Anim.DefaultEffects } }
 
                     // Copy this subtask's title to the clipboard; icon flips to
@@ -448,6 +448,7 @@ Item {
 
                     IconButton {
                         id: subDeleteButton
+                        visible: root.isSelected || root.isEditing
                         type: IconButton.Text
                         font: Tokens.font.icon.small
                         icon: "delete_outline"
