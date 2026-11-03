@@ -26,21 +26,31 @@ FocusScope {
     signal flagSearchRequested(string query)
 
     // ── Persistence via FileView ────────────────────────────────
+    function loadCommands() {
+        if (!commandsFile) return
+        try {
+            const raw = commandsFile.text()
+            if (raw && raw.length > 2) {
+                const parsed = JSON.parse(raw)
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    root.allCommands = parsed
+                }
+            }
+        } catch (e) {
+            // silent fallback
+        }
+    }
+
     FileView {
         id: commandsFile
         path: root.commandsPath
         printErrors: false
 
-        onLoaded: {
-            try {
-                const parsed = JSON.parse(text())
-                if (Array.isArray(parsed)) {
-                    root.allCommands = parsed
-                }
-            } catch (e) {
-                root.allCommands = []
-            }
-        }
+        onLoaded: root.loadCommands()
+    }
+
+    Component.onCompleted: {
+        root.loadCommands()
     }
 
     function saveCommands() {
@@ -96,6 +106,8 @@ FocusScope {
             case "cron": return "Cron & Automation · Scheduled Jobs"
             case "archive": return "Archives & Compression · Tar & Streams"
             case "binary": return "Binary Analysis · Strings & Tracing"
+            case "system": return "System Architecture · FHS & Kernel RAM"
+            case "advanced": return "Advanced Shell Techniques · Redirection & Subshells"
             default: return qsTr("Linux Command Catalog")
         }
     }
@@ -114,6 +126,8 @@ FocusScope {
             case "cron": return "Automate recurring maintenance tasks and inspect systemd timers."
             case "archive": return "Package tarballs, inspect magic bytes, and stream nested archives."
             case "binary": return "Inspect ELF headers, extract readable strings, and trace syscalls."
+            case "system": return "Inspect hardware, audit virtual /proc filesystems, and analyze disk."
+            case "advanced": return "Master I/O streams 2>&1, subshells, xargs parallelization, and loops."
             default: return qsTr("Comprehensive command reference and runbooks.")
         }
     }

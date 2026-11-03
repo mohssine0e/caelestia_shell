@@ -124,6 +124,7 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
                 implicitHeight: pageSwitch.implicitHeight + 4
                 leadingIcon: "search"
+                trailingIcon: root.commandSearchQuery.length > 0 ? "close" : ""
                 borderWidth: 1
                 placeholderText: qsTr("Search runbooks, commands, or flags (/)...")
                 text: root.commandSearchQuery
@@ -134,6 +135,19 @@ Item {
                     clear()
                     focus = false
                     root.escapePressed()
+                }
+
+                MouseArea {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: 36
+                    visible: root.commandSearchQuery.length > 0
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        commandSearchField.clear()
+                        root.commandSearchQuery = ""
+                    }
                 }
             }
 
