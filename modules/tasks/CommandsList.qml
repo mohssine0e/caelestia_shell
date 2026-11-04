@@ -200,6 +200,24 @@ FocusScope {
         return Array.from(set).sort()
     }
 
+    readonly property var sidebarItems: {
+        const q = root.searchQuery.trim()
+        if (q.length === 0 || root.filteredCommands.length >= 4) {
+            return root.filteredCommands
+        }
+        // Fill empty sidebar space with relevant suggestions from same category
+        const list = root.filteredCommands.slice()
+        const seen = new Set(list.map(c => c.id))
+        const cat = root.currentCommand ? root.currentCommand.category : ""
+        if (cat) {
+            const more = (root.allCommands || []).filter(c => c.category === cat && !seen.has(c.id)).slice(0, 4)
+            for (let i = 0; i < more.length; i++) {
+                list.push(Object.assign({}, more[i], { isSuggestion: true }))
+            }
+        }
+        return list
+    }
+
     readonly property string currentProTip: {
         if (!root.currentCommand || !root.currentCommand.pro_tip) return ""
         return root.currentCommand.pro_tip.replace(/[-=]{3,}.*$/, "").trim()
@@ -558,7 +576,7 @@ FocusScope {
                         Layout.preferredHeight: 0
                         clip: true
                         spacing: 4
-                        model: root.filteredCommands
+                        model: root.sidebarItems
 
                         StyledScrollBar.vertical: StyledScrollBar {
                             flickable: commandListView
@@ -568,7 +586,7 @@ FocusScope {
                             id: cmdRowItem
                             required property var modelData
                             required property int index
-                            readonly property bool isSelected: index === root.selectedIndex
+                            readonly property bool isSelected: !cmdRowItem.modelData.isSuggestion && index === root.selectedIndex
 
                             width: commandListView.width - 6
                             implicitHeight: 52
@@ -576,6 +594,7 @@ FocusScope {
                             color: isSelected ? Qt.alpha(Colours.palette.m3primary, 0.12) : (rowHover.hovered ? Colours.tPalette.m3surfaceContainer : "transparent")
                             border.width: isSelected ? 1.5 : 0
                             border.color: Colours.palette.m3primary
+                            opacity: cmdRowItem.modelData.isSuggestion ? 0.75 : 1.0
 
                             Behavior on color { CAnim {} }
 
@@ -597,12 +616,25 @@ FocusScope {
                                     Layout.fillWidth: true
                                     spacing: 1
 
-                                    StyledText {
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        text: cmdRowItem.modelData.name || cmdRowItem.modelData.title || ""
-                                        font: Tokens.font.title.small
-                                        color: cmdRowItem.isSelected ? Colours.palette.m3primary : Colours.palette.m3onSurface
-                                        elide: Text.ElideRight
+                                        spacing: 6
+
+                                        StyledText {
+                                            text: cmdRowItem.modelData.name || cmdRowItem.modelData.title || ""
+                                            font: Tokens.font.title.small
+                                            color: cmdRowItem.isSelected ? Colours.palette.m3primary : Colours.palette.m3onSurface
+                                            elide: Text.ElideRight
+                                        }
+
+                                        StyledText {
+                                            visible: !!cmdRowItem.modelData.isSuggestion
+                                            text: qsTr("related")
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3outline
+                                        }
+
+                                        Item { Layout.fillWidth: true }
                                     }
 
                                     StyledText {
@@ -625,7 +657,16 @@ FocusScope {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    root.selectedIndex = cmdRowItem.index
+                                    if (cmdRowItem.modelData.isSuggestion) {
+                                        root.selectedCategory = cmdRowItem.modelData.category
+                                        root.searchQuery = ""
+                                        Qt.callLater(() => {
+                                            const idx = root.filteredCommands.findIndex(c => c.id === cmdRowItem.modelData.id)
+                                            if (idx >= 0) root.selectedIndex = idx
+                                        })
+                                    } else {
+                                        root.selectedIndex = cmdRowItem.index
+                                    }
                                 }
                             }
                         }
@@ -821,8 +862,7 @@ FocusScope {
 
                                         StyledText {
                                             text: "#" + (root.currentCommand?.category || "") + " · " + root.getCategoryTitle(root.currentCommand?.category)
-                                            font: Tokens.font.label.medium
-                                            font.bold: true
+                                            font: Tokens.font.title.small
                                             color: Colours.palette.m3primary
                                         }
                                     }
