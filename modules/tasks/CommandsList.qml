@@ -200,6 +200,20 @@ FocusScope {
         return Array.from(set).sort()
     }
 
+    readonly property string currentProTip: {
+        if (!root.currentCommand || !root.currentCommand.pro_tip) return ""
+        return root.currentCommand.pro_tip.replace(/[-=]{3,}.*$/, "").trim()
+    }
+
+    readonly property var relatedCommands: {
+        if (!root.currentCommand) return []
+        const cat = root.currentCommand.category
+        const curId = root.currentCommand.id
+        return (root.allCommands || [])
+            .filter(c => c.category === cat && c.id !== curId)
+            .slice(0, 5)
+    }
+
     // ── Keyboard Navigation ──────────────────────────────────────
     Keys.onUpPressed: {
         if (root.selectedIndex > 0) {
@@ -450,7 +464,7 @@ FocusScope {
 
             // ── Left Column: Commands Sidebar ───────────────────────
             StyledRect {
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: 310
                 Layout.fillHeight: true
                 radius: Tokens.rounding.medium
                 color: Colours.tPalette.m3surfaceContainerLow
@@ -638,13 +652,13 @@ FocusScope {
                         color: Qt.alpha(Colours.palette.m3primary, 0.08)
                         border.width: 1
                         border.color: Qt.alpha(Colours.palette.m3primary, 0.25)
-                        visible: !!(root.currentCommand && root.currentCommand.pro_tip)
+                        visible: !!(root.currentCommand && root.currentProTip.length > 0)
 
                         StyledText {
                             id: proTipText
                             anchors.fill: parent
                             anchors.margins: 8
-                            text: "<font color=\"" + Colours.palette.m3primary + "\"><b>Pro tip:</b></font> " + (root.currentCommand ? root.currentCommand.pro_tip : "")
+                            text: "<font color=\"" + Colours.palette.m3primary + "\"><b>Pro tip:</b></font> " + root.currentProTip
                             textFormat: Text.RichText
                             font: Tokens.font.body.small
                             color: Colours.palette.m3onSurface
@@ -781,27 +795,90 @@ FocusScope {
                                 color: Colours.palette.m3onSurfaceVariant
                             }
 
-                            // Tags row
+                            // Category Badge (replacing filler tags)
                             RowLayout {
-                                spacing: 6
-                                Repeater {
-                                    model: root.currentCommand ? (root.currentCommand.tags || [root.currentCommand.category]) : []
-                                    delegate: StyledRect {
-                                        required property string modelData
-                                        implicitHeight: 24
-                                        implicitWidth: tagText.implicitWidth + 16
-                                        radius: Tokens.rounding.full
-                                        color: Colours.tPalette.m3surfaceContainer
-                                        border.width: 1
-                                        border.color: Colours.palette.m3outlineVariant
+                                spacing: 8
+                                visible: !!root.currentCommand
+
+                                StyledRect {
+                                    implicitHeight: 28
+                                    implicitWidth: catPillRow.implicitWidth + 20
+                                    radius: Tokens.rounding.full
+                                    color: Qt.alpha(Colours.palette.m3primary, 0.14)
+                                    border.width: 1
+                                    border.color: Qt.alpha(Colours.palette.m3primary, 0.4)
+
+                                    RowLayout {
+                                        id: catPillRow
+                                        anchors.centerIn: parent
+                                        spacing: 6
+
+                                        MaterialIcon {
+                                            text: root.getCategoryIcon(root.currentCommand?.category)
+                                            fontStyle: Tokens.font.icon.small
+                                            color: Colours.palette.m3primary
+                                        }
 
                                         StyledText {
-                                            id: tagText
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            font: Tokens.font.label.small
-                                            color: Colours.palette.m3onSurfaceVariant
+                                            text: "#" + (root.currentCommand?.category || "") + " · " + root.getCategoryTitle(root.currentCommand?.category)
+                                            font: Tokens.font.label.medium
+                                            font.bold: true
+                                            color: Colours.palette.m3primary
                                         }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.currentCommand) {
+                                                root.selectedCategory = root.currentCommand.category
+                                                root.searchQuery = ""
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Syntax Synopsis Card
+                            StyledRect {
+                                Layout.fillWidth: true
+                                implicitHeight: syntaxRow.implicitHeight + 14
+                                radius: Tokens.rounding.small
+                                color: Colours.tPalette.m3surfaceContainer
+                                border.width: 1
+                                border.color: Colours.palette.m3outlineVariant
+                                visible: !!(root.currentCommand && root.currentCommand.syntax)
+
+                                RowLayout {
+                                    id: syntaxRow
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 8
+
+                                    StyledText {
+                                        text: "$"
+                                        font.family: "monospace"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: Colours.palette.m3primary
+                                    }
+
+                                    StyledText {
+                                        Layout.fillWidth: true
+                                        text: root.currentCommand?.syntax || ""
+                                        font.family: "monospace"
+                                        font.pixelSize: 13
+                                        color: Colours.palette.m3onSurface
+                                        elide: Text.ElideRight
+                                    }
+
+                                    MaterialIcon {
+                                        text: "terminal"
+                                        fontStyle: Tokens.font.icon.small
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        opacity: 0.6
                                     }
                                 }
                             }
@@ -1011,6 +1088,82 @@ FocusScope {
                                                     Quickshell.clipboardText = exCard.modelData.cmd
                                                     exCard.isCopied = true
                                                     copyFeedbackTimer.restart()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 4: Related Tools in Category
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: root.relatedCommands.length > 0
+
+                            RowLayout {
+                                spacing: 6
+                                MaterialIcon {
+                                    text: "hub"
+                                    fontStyle: Tokens.font.icon.small
+                                    color: Colours.palette.m3primary
+                                }
+                                StyledText {
+                                    text: qsTr("Related Tools in #%1").arg(root.currentCommand?.category || "")
+                                    font: Tokens.font.title.small
+                                    color: Colours.palette.m3onSurface
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Repeater {
+                                    model: root.relatedCommands
+                                    delegate: StyledRect {
+                                        id: relChip
+                                        required property var modelData
+                                        implicitHeight: 30
+                                        implicitWidth: relText.implicitWidth + 24
+                                        radius: Tokens.rounding.full
+                                        color: relHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainer
+                                        border.width: 1
+                                        border.color: Colours.palette.m3outlineVariant
+
+                                        HoverHandler { id: relHover }
+
+                                        RowLayout {
+                                            id: relText
+                                            anchors.centerIn: parent
+                                            spacing: 5
+                                            MaterialIcon {
+                                                text: relChip.modelData.icon || "terminal"
+                                                fontStyle: Tokens.font.icon.small
+                                                color: Colours.palette.m3primary
+                                            }
+                                            StyledText {
+                                                text: relChip.modelData.name
+                                                font: Tokens.font.label.medium
+                                                color: Colours.palette.m3onSurface
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                const idx = root.filteredCommands.findIndex(c => c.id === relChip.modelData.id)
+                                                if (idx >= 0) {
+                                                    root.selectedIndex = idx
+                                                } else {
+                                                    root.selectedCategory = relChip.modelData.category
+                                                    root.searchQuery = ""
+                                                    Qt.callLater(() => {
+                                                        const newIdx = root.filteredCommands.findIndex(c => c.id === relChip.modelData.id)
+                                                        if (newIdx >= 0) root.selectedIndex = newIdx
+                                                    })
                                                 }
                                             }
                                         }
