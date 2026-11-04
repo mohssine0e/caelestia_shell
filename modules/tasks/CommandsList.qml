@@ -15,7 +15,7 @@ FocusScope {
     id: root
 
     property string searchQuery: ""
-    property string selectedCategory: "files" // Match photo default #files
+    property string selectedCategory: "all" // Default to all so all commands are visible
     property int selectedIndex: 0
     property string activeSubTab: "commands" // "commands" | "favorites"
     property var allCommands: []
@@ -94,6 +94,8 @@ FocusScope {
 
     function getCategoryTitle(cat) {
         switch (cat) {
+            case "all": return "All Linux Tools & Runbooks"
+            case "starred": return "Starred Favorites · Quick Access"
             case "files": return "Disk & Filesystem · Mount & Storage"
             case "nav": return "Core Navigation · Paths & Traversal"
             case "text": return "Text Processing · Grep, AWK & Sed"
@@ -114,6 +116,8 @@ FocusScope {
 
     function getCategoryDesc(cat) {
         switch (cat) {
+            case "all": return "Explore complete collection of Linux administration, shell, security, and developer utilities."
+            case "starred": return "Your pinned commands and daily reference shortcuts."
             case "files": return "Mount foreign drives, read NTFS partitions, and analyze disk visually."
             case "nav": return "Traverse directory trees, resolve symlinks, and search paths."
             case "text": return "Search with extended regex, slice columns, and stream edit in-place."
@@ -138,10 +142,11 @@ FocusScope {
         const cat = root.selectedCategory
         const favOnly = (root.activeSubTab === "favorites" || cat === "starred")
 
-        return (root.allCommands || []).filter(item => {
+        const list = (root.allCommands || []).filter(item => {
             if (favOnly && !item.starred) return false
 
-            if (cat !== "all" && cat !== "starred") {
+            // When searching (q.length > 0), search globally across ALL categories so "ssh", "tar", etc. are immediately found!
+            if (q.length === 0 && cat !== "all" && cat !== "starred") {
                 if ((item.category || "").toLowerCase() !== cat) return false
             }
 
@@ -158,6 +163,19 @@ FocusScope {
             }
 
             return true
+        })
+
+        if (q.length === 0) return list
+
+        // When searching, sort so exact and prefix name matches appear first!
+        return list.slice().sort((a, b) => {
+            const an = (a.name || "").toLowerCase()
+            const bn = (b.name || "").toLowerCase()
+            if (an === q && bn !== q) return -1
+            if (bn === q && an !== q) return 1
+            if (an.startsWith(q) && !bn.startsWith(q)) return -1
+            if (bn.startsWith(q) && !an.startsWith(q)) return 1
+            return 0
         })
     }
 
@@ -372,13 +390,15 @@ FocusScope {
                     spacing: 8
 
                     MaterialIcon {
-                        text: root.getCategoryIcon(root.selectedCategory)
+                        text: root.searchQuery.trim().length > 0 ? "search" : root.getCategoryIcon(root.selectedCategory)
                         fontStyle: Tokens.font.icon.small
                         color: Colours.palette.m3primary
                     }
 
                     StyledText {
-                        text: root.getCategoryTitle(root.selectedCategory)
+                        text: root.searchQuery.trim().length > 0
+                            ? qsTr("Search Results · \"%1\"").arg(root.searchQuery.trim())
+                            : root.getCategoryTitle(root.selectedCategory)
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
                     }
@@ -394,7 +414,7 @@ FocusScope {
                         StyledText {
                             id: catTag
                             anchors.centerIn: parent
-                            text: "#" + root.selectedCategory
+                            text: root.searchQuery.trim().length > 0 ? "#search" : ("#" + root.selectedCategory)
                             font: Tokens.font.label.small
                             color: Colours.palette.m3primary
                         }
@@ -411,7 +431,9 @@ FocusScope {
 
                 StyledText {
                     Layout.fillWidth: true
-                    text: root.getCategoryDesc(root.selectedCategory)
+                    text: root.searchQuery.trim().length > 0
+                        ? qsTr("Showing matching runbooks, commands, and flags across all categories.")
+                        : root.getCategoryDesc(root.selectedCategory)
                     font: Tokens.font.body.small
                     color: Colours.palette.m3onSurfaceVariant
                     elide: Text.ElideRight
