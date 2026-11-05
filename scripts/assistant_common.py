@@ -25,9 +25,7 @@ LEARNER_PROFILE_PATH = os.path.expanduser("~/.config/caelestia/learner_profile.j
 # Candidate Models
 # ---------------------------------------------------------
 GEMINI_CANDIDATE_MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
     "gemini-flash-latest"
 ]
 

@@ -1073,7 +1073,9 @@ FocusScope {
 
                             function onResultTextChanged() {
                                 if (Assistant.isStreaming && !chatList.userScrolledUp) {
-                                    chatList.positionViewAtEnd()
+                                    Qt.callLater(() => {
+                                        if (!chatList.userScrolledUp) chatList.positionViewAtEnd()
+                                    })
                                 }
                             }
 
@@ -1225,6 +1227,8 @@ FocusScope {
                                     border.width: 1
                                     border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
+                                    readonly property bool isCurrentStreaming: (index === chatList.count - 1 && Assistant.isGenerating)
+
                                     ColumnLayout {
                                         id: assistantMsgCol
                                         anchors.fill: parent
@@ -1234,7 +1238,7 @@ FocusScope {
                                         TextEdit {
                                             id: msgTextEdit
                                             Layout.fillWidth: true
-                                            text: (modelData.isStreaming && Assistant.isStreaming) ? Assistant.resultText : (modelData.text || "")
+                                            text: isCurrentStreaming ? Assistant.resultText : (modelData.text || "")
                                             readOnly: true
                                             selectByMouse: true
                                             selectByKeyboard: true
@@ -1257,7 +1261,7 @@ FocusScope {
 
                                         // Streaming Shimmer Indicator when waiting for first token
                                         RowLayout {
-                                            visible: Boolean(modelData && modelData.isStreaming) && (!msgTextEdit.text || msgTextEdit.text.length === 0)
+                                            visible: isCurrentStreaming && (!msgTextEdit.text || msgTextEdit.text.length === 0)
                                             spacing: 6
 
                                             MaterialIcon {
@@ -1270,7 +1274,7 @@ FocusScope {
                                                     to: 360
                                                     duration: 1000
                                                     loops: Animation.Infinite
-                                                    running: Boolean(modelData && modelData.isStreaming)
+                                                    running: isCurrentStreaming
                                                 }
                                             }
 
@@ -1285,7 +1289,7 @@ FocusScope {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 4
-                                            visible: !Boolean(modelData && modelData.isStreaming) && Boolean(modelData && modelData.text && modelData.text.length > 0)
+                                            visible: !isCurrentStreaming && Boolean(modelData && modelData.text && modelData.text.length > 0)
 
                                             StyledText {
                                                 text: modelData.timestamp || ""

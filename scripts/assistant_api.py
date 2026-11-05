@@ -94,9 +94,8 @@ def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None):
     return {"success": True}
 
 GEMINI_CANDIDATE_MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-flash-lite-latest"
+    "gemini-2.5-flash",
+    "gemini-flash-latest"
 ]
 
 GROQ_CANDIDATE_MODELS = [
@@ -784,10 +783,10 @@ def main():
         except urllib.error.HTTPError as e:
             last_http_code = e.code
             last_err_str = str(e)
-            if e.code in (400, 401, 403):
-                break  # Don't fallback on bad auth
+            continue
         except Exception as e:
             last_err_str = str(e)
+            continue
 
     elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 

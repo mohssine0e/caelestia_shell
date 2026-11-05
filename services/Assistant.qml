@@ -495,7 +495,7 @@ Singleton {
         if (!root._streamBuffer || root._streamBuffer.length === 0) return
         root.rawResultText += root._streamBuffer
         root._streamBuffer = ""
-        root.resultText = root.rawResultText
+        root.resultText = root.cleanMarkdown(root.rawResultText)
     }
 
     // ── Streaming AI Worker Process via SplitParser ──────────────
@@ -542,6 +542,17 @@ Singleton {
                             root.rawResultText += root._streamBuffer
                             root._streamBuffer = ""
                         }
+                        // Final markdown cleaning done once when finished
+                        root.resultText = root.cleanMarkdown(root.rawResultText)
+                        if (root.messages && root.messages.length > 0) {
+                            const msgs = root.messages.slice()
+                            const last = msgs[msgs.length - 1]
+                            if (last && last.role === "assistant") {
+                                last.text = root.resultText
+                                last.isStreaming = false
+                                root.messages = msgs
+                            }
+                        }
                         root.isLoading = false
                         root.isStreaming = false
                         root.providerUsed = msg.provider || root.providerUsed
@@ -558,18 +569,6 @@ Singleton {
                         root.errorMessage = ""
                         root.errorType = ""
                         root.hasApiKey = true
-
-                        // Final markdown cleaning done once when finished
-                        root.resultText = root.cleanMarkdown(root.rawResultText)
-                        if (root.messages && root.messages.length > 0) {
-                            const msgs = root.messages.slice()
-                            const last = msgs[msgs.length - 1]
-                            if (last && last.role === "assistant") {
-                                last.text = root.resultText
-                                last.isStreaming = false
-                                root.messages = msgs
-                            }
-                        }
 
                         // Cache completed response
                         const cacheKey = root.getCacheKey(root.activeAction, root.selectedText, "")
