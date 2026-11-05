@@ -1227,7 +1227,9 @@ FocusScope {
                                     border.width: 1
                                     border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-                                    readonly property bool isCurrentStreaming: (index === chatList.count - 1 && Assistant.isGenerating)
+                                    readonly property bool isLastItem: (index === chatList.count - 1)
+                                    readonly property bool isCurrentStreaming: (isLastItem && Assistant.isGenerating)
+                                    readonly property string displayText: (isLastItem && Assistant.resultText.length > 0) ? Assistant.resultText : (modelData.text || "")
 
                                     ColumnLayout {
                                         id: assistantMsgCol
@@ -1238,7 +1240,7 @@ FocusScope {
                                         TextEdit {
                                             id: msgTextEdit
                                             Layout.fillWidth: true
-                                            text: isCurrentStreaming ? Assistant.resultText : (modelData.text || "")
+                                            text: displayText
                                             readOnly: true
                                             selectByMouse: true
                                             selectByKeyboard: true
@@ -1289,7 +1291,7 @@ FocusScope {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 4
-                                            visible: !isCurrentStreaming && Boolean(modelData && modelData.text && modelData.text.length > 0)
+                                            visible: !isCurrentStreaming && Boolean(displayText && displayText.length > 0)
 
                                             StyledText {
                                                 text: modelData.timestamp || ""
@@ -1300,7 +1302,7 @@ FocusScope {
                                             Item { Layout.fillWidth: true }
 
                                             MessageActionBar {
-                                                text: modelData.text
+                                                text: displayText
                                                 action: modelData.action || "ask"
                                                 sourceText: Assistant.selectedText || Assistant.activePrompt
                                             }
@@ -1512,7 +1514,7 @@ FocusScope {
                     placeholderText: root.askBoundToSelection ? qsTr("Ask about this selection...") : qsTr("Ask a custom question...")
                     placeholderFloats: false
 
-                    Keys.onReturnPressed: {
+                    function submit() {
                         if (!Assistant.isGenerating && text.trim().length > 0) {
                             if (root.askBoundToSelection) {
                                 Assistant.clearThread()
@@ -1522,6 +1524,9 @@ FocusScope {
                             root.askBoundToSelection = false
                         }
                     }
+
+                    onAccepted: submit()
+                    Keys.onReturnPressed: submit()
                 }
 
                 IconButton {

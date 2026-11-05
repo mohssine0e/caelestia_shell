@@ -550,8 +550,10 @@ Singleton {
                             const msgs = root.messages.slice()
                             const last = msgs[msgs.length - 1]
                             if (last && last.role === "assistant") {
-                                last.text = root.resultText
-                                last.isStreaming = false
+                                msgs[msgs.length - 1] = Object.assign({}, last, {
+                                    text: root.resultText,
+                                    isStreaming: false
+                                })
                                 root.messages = msgs
                             }
                         }
@@ -606,8 +608,10 @@ Singleton {
                             const msgs = root.messages.slice()
                             const last = msgs[msgs.length - 1]
                             if (last && last.role === "assistant" && (!last.text || last.text.length === 0)) {
-                                last.text = "⚠️ " + (msg.message || "An error occurred.")
-                                last.isStreaming = false
+                                msgs[msgs.length - 1] = Object.assign({}, last, {
+                                    text: "⚠️ " + (msg.message || "An error occurred."),
+                                    isStreaming: false
+                                })
                                 root.messages = msgs
                             }
                         }
@@ -628,8 +632,10 @@ Singleton {
                 const msgs = root.messages.slice()
                 const last = msgs[msgs.length - 1]
                 if (last && last.role === "assistant" && last.isStreaming) {
-                    last.text = root.resultText || last.text
-                    last.isStreaming = false
+                    msgs[msgs.length - 1] = Object.assign({}, last, {
+                        text: root.resultText || last.text,
+                        isStreaming: false
+                    })
                     root.messages = msgs
                 }
             }
