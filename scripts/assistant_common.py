@@ -25,13 +25,14 @@ LEARNER_PROFILE_PATH = os.path.expanduser("~/.config/caelestia/learner_profile.j
 # Candidate Models
 # ---------------------------------------------------------
 GEMINI_CANDIDATE_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest"
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash"
 ]
 
 GROQ_CANDIDATE_MODELS = [
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b"
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b"
 ]
 
 # ---------------------------------------------------------

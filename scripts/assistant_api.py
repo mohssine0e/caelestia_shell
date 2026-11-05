@@ -94,8 +94,9 @@ def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None):
     return {"success": True}
 
 GEMINI_CANDIDATE_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest"
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash"
 ]
 
 GROQ_CANDIDATE_MODELS = [
@@ -108,16 +109,20 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
     last_err = None
     for model_name in GEMINI_CANDIDATE_MODELS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
+        gen_config = {
+            "temperature": 0.4,
+            "maxOutputTokens": 8192
+        }
+        if "2.5" in model_name or "2.0" in model_name:
+            gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+
         payload = {
             "contents": contents if contents else [
                 {
                     "parts": [{"text": f"Instructions: {system_instruction}\n\nText:\n{user_text}"}]
                 }
             ],
-            "generationConfig": {
-                "temperature": 0.4,
-                "maxOutputTokens": 8192
-            }
+            "generationConfig": gen_config
         }
         req = urllib.request.Request(
             url,
@@ -127,7 +132,7 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
         )
         emitted_any = False
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=12) as resp:
                 for line in resp:
                     line_str = line.decode("utf-8", errors="replace").strip()
                     if line_str.startswith("data:"):
@@ -505,6 +510,7 @@ def generate_chat_title_and_tags(prompt_text, answer_text):
                 "generationConfig": {
                     "temperature": 0.2,
                     "maxOutputTokens": 150,
+                    "thinkingConfig": {"thinkingBudget": 0},
                     "responseMimeType": "application/json",
                     "responseSchema": {
                         "type": "OBJECT",

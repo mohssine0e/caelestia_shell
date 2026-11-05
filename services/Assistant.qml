@@ -495,7 +495,7 @@ Singleton {
         if (!root._streamBuffer || root._streamBuffer.length === 0) return
         root.rawResultText += root._streamBuffer
         root._streamBuffer = ""
-        root.resultText = root.cleanMarkdown(root.rawResultText)
+        root.resultText = root.rawResultText
     }
 
     // ── Streaming AI Worker Process via SplitParser ──────────────
@@ -533,7 +533,9 @@ Singleton {
                         root.isLoading = false
                         root.isStreaming = true
                         root._streamBuffer += msg.text
-                        if (!streamBatchTimer.running) {
+                        if (root.rawResultText.length === 0) {
+                            root._flushStreamBuffer()
+                        } else if (!streamBatchTimer.running) {
                             streamBatchTimer.restart()
                         }
                     } else if (msg.type === "done") {
