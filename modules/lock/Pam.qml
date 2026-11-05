@@ -147,6 +147,10 @@ Scope {
         availCommand: ["sh", "-c", "command -v howdy"]
         enabled: GlobalConfig.lock.enableHowdy
         maxTries: GlobalConfig.lock.maxHowdyTries
+        onAvailProcExited: code => {
+            if (code === 0 && howdy.canAttempt && !howdy.active)
+                howdy.start();
+        }
     }
 
     Connections {
