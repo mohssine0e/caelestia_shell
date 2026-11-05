@@ -486,6 +486,56 @@ def find_relevant_history(current_text, current_prompt):
 
     return best_item
 
+def generate_chat_title_and_tags(prompt_text, answer_text):
+    prompt_snippet = (prompt_text or "").strip()[:500]
+    answer_snippet = (answer_text or "").strip()[:500]
+
+    config = load_config()
+    gemini_key = config.get("gemini_key", "").strip()
+
+    title_prompt = (
+        f"User: {prompt_snippet}\n"
+        f"Assistant: {answer_snippet}"
+    )
+
+    if gemini_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            body = json.dumps({
+                "contents": [{"parts": [{"text": title_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 150,
+                    "responseMimeType": "application/json",
+                    "responseSchema": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "title": {"type": "STRING", "description": "3 to 5 word topic title"},
+                            "tags": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "1 to 3 lowercase topic tags"}
+                        },
+                        "required": ["title", "tags"]
+                    }
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                content = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and "title" in parsed:
+                    clean_title = str(parsed.get("title", "")).strip().strip('"').strip("'")
+                    raw_tags = parsed.get("tags", [])
+                    clean_tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()] if isinstance(raw_tags, list) else []
+                    if clean_title:
+                        return {"title": clean_title, "tags": clean_tags}
+        except Exception:
+            pass
+
+    # Fallback heuristic
+    words = re.sub(r'[\n\r`#*]+', ' ', prompt_snippet).strip().split()
+    fallback = " ".join(words[:5]) if len(words) > 5 else " ".join(words)
+    return {"title": (fallback.capitalize() or "New Chat"), "tags": ["general"]}
+
 def main():
     if len(sys.argv) < 2:
         emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
@@ -508,6 +558,13 @@ def main():
             emit(save_profile(profile_data))
         except Exception as e:
             emit({"type": "error", "message": f"Failed to save profile: {e}"})
+        sys.exit(0)
+
+    if cmd == "title_chat":
+        prompt_text = sys.argv[2] if len(sys.argv) > 2 else ""
+        answer_text = sys.argv[3] if len(sys.argv) > 3 else ""
+        res = generate_chat_title_and_tags(prompt_text, answer_text)
+        print(json.dumps(res), flush=True)
         sys.exit(0)
 
     action = cmd

@@ -137,8 +137,8 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
-        if (event.key === Qt.Key_L && (event.modifiers & Qt.ControlModifier)) {
-            Assistant.clearThread(true)
+        if ((event.key === Qt.Key_N || event.key === Qt.Key_L) && (event.modifiers & Qt.ControlModifier)) {
+            Assistant.startNewChat()
             event.accepted = true
             return
         }
@@ -291,6 +291,44 @@ FocusScope {
                         color: Colours.palette.m3onSurface
                     }
 
+                    StyledRect {
+                        id: activeChatBadge
+                        readonly property var activeChat: (Assistant.chats || []).find(c => c && String(c.id) === String(Assistant.activeChatId))
+                        visible: !!activeChat && !!activeChat.title
+                        implicitHeight: 24
+                        implicitWidth: titleRow.implicitWidth + Tokens.padding.small * 2
+                        radius: Tokens.rounding.full
+                        color: activeChatHover.hovered ? Colours.palette.m3surfaceContainerHigh : "transparent"
+
+                        HoverHandler { id: activeChatHover }
+
+                        RowLayout {
+                            id: titleRow
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            MaterialIcon {
+                                text: "forum"
+                                fontStyle: Tokens.font.label.small
+                                color: activeChatHover.hovered ? Colours.palette.m3primary : Colours.palette.m3outline
+                            }
+
+                            StyledText {
+                                text: activeChatBadge.activeChat ? activeChatBadge.activeChat.title : ""
+                                font: Tokens.font.body.small
+                                color: activeChatHover.hovered ? Colours.palette.m3primary : Colours.palette.m3outline
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: 240
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.currentView = "history"
+                        }
+                    }
+
                     Item { Layout.fillWidth: true }
 
                     // Word Count Badge in Header
@@ -377,13 +415,12 @@ FocusScope {
                     }
 
                     IconButton {
-                        visible: Assistant.hasThread
                         type: IconButton.Text
-                        icon: "add_comment"
+                        icon: "add"
                         font: Tokens.font.icon.small
                         implicitWidth: 28
                         implicitHeight: 28
-                        onClicked: Assistant.clearThread(true)
+                        onClicked: Assistant.startNewChat()
                     }
 
                     IconButton {
@@ -1220,7 +1257,7 @@ FocusScope {
 
                                         // Streaming Shimmer Indicator when waiting for first token
                                         RowLayout {
-                                            visible: modelData.isStreaming && (!msgTextEdit.text || msgTextEdit.text.length === 0)
+                                            visible: Boolean(modelData && modelData.isStreaming) && (!msgTextEdit.text || msgTextEdit.text.length === 0)
                                             spacing: 6
 
                                             MaterialIcon {
@@ -1233,7 +1270,7 @@ FocusScope {
                                                     to: 360
                                                     duration: 1000
                                                     loops: Animation.Infinite
-                                                    running: modelData.isStreaming
+                                                    running: Boolean(modelData && modelData.isStreaming)
                                                 }
                                             }
 
@@ -1248,7 +1285,7 @@ FocusScope {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 4
-                                            visible: !modelData.isStreaming && modelData.text && modelData.text.length > 0
+                                            visible: !Boolean(modelData && modelData.isStreaming) && Boolean(modelData && modelData.text && modelData.text.length > 0)
 
                                             StyledText {
                                                 text: modelData.timestamp || ""
@@ -1407,7 +1444,57 @@ FocusScope {
                         }
                     }
 
+                    // Token count & turn count metrics badge
+                    StyledRect {
+                        visible: (Assistant.messages || []).length > 0
+                        implicitHeight: 22
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+                        implicitWidth: metricsRow.implicitWidth + 14
+
+                        RowLayout {
+                            id: metricsRow
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            StyledText {
+                                readonly property int turnCount: Math.ceil(((Assistant.messages || []).filter(m => m.role === "user").length) || 0)
+                                readonly property int charTotal: (Assistant.messages || []).reduce((acc, m) => acc + (m.text ? m.text.length : 0), 0)
+                                readonly property int estTokens: Math.round(charTotal / 4)
+                                text: {
+                                    const tokenStr = estTokens >= 1000 ? (estTokens / 1000).toFixed(1) + "k" : estTokens
+                                    return `${turnCount} ${turnCount === 1 ? 'turn' : 'turns'} · ~${tokenStr} tokens`
+                                }
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3outline
+                            }
+                        }
+                    }
+
                     Item { Layout.fillWidth: true }
+
+                    // Export chat thread to Markdown
+                    IconButton {
+                        visible: (Assistant.messages || []).length > 0
+                        type: IconButton.Text
+                        icon: "content_copy"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 22
+                        implicitHeight: 22
+                        padding: 0
+                        onClicked: {
+                            const msgs = Assistant.messages || []
+                            const activeChat = (Assistant.chats || []).find(c => c && String(c.id) === String(Assistant.activeChatId))
+                            let md = `# ${activeChat ? activeChat.title : "Assistant Chat"}\n\n`
+                            md += `*Exported on ${new Date().toLocaleString()}*\n\n---\n\n`
+                            for (let i = 0; i < msgs.length; i++) {
+                                const m = msgs[i]
+                                const role = m.role === "assistant" ? "**Assistant**" : "**You**"
+                                md += `### ${role} (${m.timestamp || ""})\n\n${m.text}\n\n`
+                            }
+                            Quickshell.execDetached(["wl-copy", md])
+                        }
+                    }
                 }
 
                 // Input Row

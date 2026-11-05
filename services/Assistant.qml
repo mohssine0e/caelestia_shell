@@ -34,6 +34,13 @@ Singleton {
     property string inputMode: "auto"    // "auto" | "followup" | "standalone"
     readonly property bool hasThread: thread.length > 0 || messages.length > 0
 
+    // Chats & Multi-turn Sessions (File 1.5)
+    property var chats: []
+    property string activeChatId: ""
+    readonly property string chatsPath: Quickshell.env("HOME") + "/.config/caelestia/chats.json"
+    property string _lastSavedChatsJson: ""
+    property bool _isSavingChats: false
+
     // History & Raw Log (File 1)
     property var history: []
     property int unDistilledCount: 0
@@ -135,6 +142,31 @@ Singleton {
             root.history = []
             if (err === FileViewError.FileNotFound) {
                 Qt.callLater(() => historyStorage.setText("[]"))
+            }
+        }
+    }
+
+    FileView {
+        id: chatsStorage
+        printErrors: false
+        path: root.chatsPath
+        onLoaded: {
+            const raw = text()
+            if (root._isSavingChats || raw === root._lastSavedChatsJson) return
+            try {
+                const parsed = JSON.parse(raw)
+                if (Array.isArray(parsed)) {
+                    root.chats = parsed
+                }
+            } catch (e) {
+                root.chats = []
+            }
+        }
+        onLoadFailed: err => {
+            if (root._isSavingChats) return
+            root.chats = []
+            if (err === FileViewError.FileNotFound) {
+                Qt.callLater(() => chatsStorage.setText("[]"))
             }
         }
     }
@@ -556,6 +588,9 @@ Singleton {
                         if (root.activeAction === "ask" && root.resultText.length > 0) {
                             root.pushTurn(root.activePrompt, root.resultText)
                         }
+
+                        // Sync with persistent chat sessions
+                        root.syncActiveChat()
                     } else if (msg.type === "error") {
                         streamBatchTimer.stop()
                         root._streamBuffer = ""
@@ -717,6 +752,190 @@ Singleton {
                 root.trigger()
             }
         }
+    }
+
+    // ── Chat Session Persistence & Management ────────────────────
+    function saveChats() {
+        if (chatsStorage) {
+            root._isSavingChats = true
+            const jsonStr = JSON.stringify(root.chats, null, 2)
+            root._lastSavedChatsJson = jsonStr
+            chatsStorage.setText(jsonStr)
+            Qt.callLater(() => { root._isSavingChats = false })
+        }
+    }
+
+    function startNewChat() {
+        root.activeChatId = "t_" + Date.now().toString(36)
+        root.currentThreadId = root.activeChatId
+        root.messages = []
+        root.thread = []
+        root.selectedText = ""
+        root.rawResultText = ""
+        root.resultText = ""
+        root.activePrompt = ""
+        root.errorMessage = ""
+        root.errorType = ""
+        root.activeAction = "ask"
+    }
+
+    function loadChat(chatId) {
+        if (!chatId || !root.chats) return
+        const chat = root.chats.find(c => c && String(c.id) === String(chatId))
+        if (!chat) return
+
+        root.activeChatId = String(chat.id)
+        root.currentThreadId = String(chat.id)
+        root.activeAction = "ask"
+        root.selectedText = ""
+        root.errorMessage = ""
+        root.errorType = ""
+
+        const msgs = (chat.messages || []).map(m => Object.assign({}, m))
+        root.messages = msgs
+
+        // Reconstruct conversation thread context for the LLM follow-ups
+        const threadList = []
+        for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i]
+            if (m.role === "user") {
+                threadList.push({ role: "user", content: m.text || "" })
+            } else if (m.role === "assistant") {
+                threadList.push({ role: "assistant", content: root.distillEssentials(m.text || "") })
+            }
+        }
+        root.thread = threadList
+
+        const lastAssistant = msgs.slice().reverse().find(m => m.role === "assistant")
+        root.resultText = lastAssistant ? lastAssistant.text : ""
+        root.rawResultText = root.resultText
+
+        // Switch directly to main chat view
+        root.requestedView = "assistant"
+    }
+
+    function deleteChat(chatId) {
+        if (!root.chats || !chatId) return
+        root.chats = root.chats.filter(c => c && String(c.id) !== String(chatId))
+        root.saveChats()
+        if (root.activeChatId === String(chatId)) {
+            root.startNewChat()
+        }
+    }
+
+    function renameChat(chatId, newTitle) {
+        if (!root.chats || !chatId || !newTitle) return
+        const list = root.chats.slice()
+        const target = list.find(c => c && String(c.id) === String(chatId))
+        if (target) {
+            target.title = newTitle.trim()
+            root.chats = list
+            root.saveChats()
+        }
+    }
+
+    function togglePinChat(chatId) {
+        if (!root.chats || !chatId) return
+        const list = root.chats.slice()
+        const target = list.find(c => c && String(c.id) === String(chatId))
+        if (target) {
+            target.pinned = !target.pinned
+            target.starred = target.pinned
+            root.chats = list
+            root.saveChats()
+        }
+    }
+
+    function syncActiveChat() {
+        if (!root.messages || root.messages.length === 0) return
+
+        if (!root.activeChatId) {
+            root.activeChatId = "t_" + Date.now().toString(36)
+            root.currentThreadId = root.activeChatId
+        }
+
+        const list = root.chats ? root.chats.slice() : []
+        let chat = list.find(c => c && String(c.id) === String(root.activeChatId))
+        const nowIso = new Date().toISOString()
+
+        const cleanMsgs = root.messages.map(m => ({
+            id: m.id || ("m_" + Math.random().toString(36).slice(2, 7)),
+            role: m.role || "user",
+            action: m.action || "ask",
+            text: (m.text || "").trim(),
+            timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        })).filter(m => m.text.length > 0)
+
+        if (cleanMsgs.length === 0) return
+
+        if (!chat) {
+            const firstUser = cleanMsgs.find(m => m.role === "user")
+            let title = (firstUser ? firstUser.text : "New Chat").replace(/[\n\r`#*]+/g, " ").trim()
+            if (title.length > 45) title = title.slice(0, 42) + "..."
+
+            chat = {
+                id: root.activeChatId,
+                title: title,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+                pinned: false,
+                starred: false,
+                tags: root.getAutonomousTags("ask", firstUser ? firstUser.text : "", ""),
+                messages: cleanMsgs
+            }
+            list.unshift(chat)
+
+            // Trigger autonomous AI titling
+            root.requestAiChatTitle(root.activeChatId, firstUser ? firstUser.text : "", cleanMsgs[1] ? cleanMsgs[1].text : "")
+        } else {
+            chat.messages = cleanMsgs
+            chat.updatedAt = nowIso
+            const idx = list.findIndex(c => String(c.id) === String(chat.id))
+            if (idx > 0) {
+                list.splice(idx, 1)
+                list.unshift(chat)
+            }
+        }
+
+        root.chats = list
+        root.saveChats()
+    }
+
+    property string _pendingTitleChatId: ""
+
+    Process {
+        id: titleProc
+        command: []
+        stdout: StdioCollector {
+            id: titleCollector
+            onStreamFinished: {
+                const output = titleCollector.text ? titleCollector.text.trim() : ""
+                if (!output || !root._pendingTitleChatId) return
+                try {
+                    const parsed = JSON.parse(output)
+                    if (parsed && parsed.title && root.chats) {
+                        const list = root.chats.slice()
+                        const target = list.find(c => c && String(c.id) === String(root._pendingTitleChatId))
+                        if (target) {
+                            target.title = parsed.title.trim()
+                            if (parsed.tags && parsed.tags.length > 0) {
+                                target.tags = parsed.tags
+                            }
+                            root.chats = list
+                            root.saveChats()
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+
+    function requestAiChatTitle(chatId, promptText, answerText) {
+        if (!chatId || !promptText || titleProc.running) return
+        root._pendingTitleChatId = chatId
+        const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
+        titleProc.command = ["python3", scriptPath, "title_chat", promptText.slice(0, 500), answerText.slice(0, 500)]
+        titleProc.running = true
     }
 
     // ── History Persistence & Management ────────────────────────
@@ -1054,7 +1273,10 @@ Singleton {
             mode = root.resolveMode(customPrompt)
             if (mode === "standalone") {
                 root.clearThread(false)
-                root.currentThreadId = "t_" + Date.now().toString(36)
+                if (!root.activeChatId) {
+                    root.activeChatId = "t_" + Date.now().toString(36)
+                }
+                root.currentThreadId = root.activeChatId
                 root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
                 if (shift) {
                     const msgs = (root.messages || []).slice()

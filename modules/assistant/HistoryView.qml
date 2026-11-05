@@ -19,10 +19,14 @@ FocusScope {
 
     property var windowRef: null
     property string selectedTag: "all"
-    property string expandedId: ""
+    property string searchQuery: ""
+    property string editingChatId: ""
+    property string editingTitleText: ""
 
-    function formatTime(ts) {
-        if (!ts) return ""
+    function formatTime(isoStr) {
+        if (!isoStr) return ""
+        const ts = new Date(isoStr).getTime()
+        if (isNaN(ts) || ts <= 0) return ""
         const diff = Math.floor((Date.now() - ts) / 1000)
         if (diff < 60) return qsTr("just now")
         if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
@@ -31,34 +35,22 @@ FocusScope {
         return new Date(ts).toLocaleDateString(Qt.locale(), "MMM d")
     }
 
-    function getActionIcon(action) {
-        switch (action) {
-            case "translate": return "translate"
-            case "explain": return "lightbulb"
-            case "tldr": return "notes"
-            case "rephrase": return "sync"
-            case "examples": return "format_list_bulleted"
-            case "ask": return "chat"
-            default: return "auto_awesome"
+    function exportChatToMarkdown(chat) {
+        if (!chat || !chat.messages) return
+        let md = `# ${chat.title || "Chat"}\n\n`
+        md += `*Exported on ${new Date().toLocaleString()}*\n\n---\n\n`
+        for (let i = 0; i < chat.messages.length; i++) {
+            const m = chat.messages[i]
+            const role = m.role === "assistant" ? "**Assistant**" : "**You**"
+            md += `### ${role} (${m.timestamp || ""})\n\n${m.text}\n\n`
         }
+        Quickshell.execDetached(["wl-copy", md])
     }
 
-    function getActionLabel(action) {
-        switch (action) {
-            case "translate": return qsTr("Translate")
-            case "explain": return qsTr("Explain")
-            case "tldr": return qsTr("TL;DR")
-            case "rephrase": return qsTr("Rephrase")
-            case "examples": return qsTr("Examples")
-            case "ask": return qsTr("Question")
-            default: return qsTr("AI")
-        }
-    }
-
-    // Extract unique tags from all history items
+    // Extract unique tags from all chat sessions
     readonly property var allTags: {
         const set = {}
-        const items = Assistant.history || []
+        const items = Assistant.chats || []
         for (let i = 0; i < items.length; i++) {
             const tags = items[i].tags || []
             for (let j = 0; j < tags.length; j++) {
@@ -70,31 +62,37 @@ FocusScope {
         return Object.keys(set).sort()
     }
 
-    // Filter items based on selectedTag
-    readonly property var filteredHistory: {
-        const items = Assistant.history || []
+    // Filter chat sessions based on selectedTag and searchQuery
+    readonly property var filteredChats: {
+        let list = Assistant.chats || []
         if (root.selectedTag === "starred") {
-            return items.filter(item => !!item.starred)
+            list = list.filter(c => !!c.starred || !!c.pinned)
         } else if (root.selectedTag !== "all") {
-            return items.filter(item => {
-                const tags = item.tags || []
-                return tags.some(t => t.toLowerCase() === root.selectedTag.toLowerCase())
+            const tag = root.selectedTag.toLowerCase()
+            list = list.filter(c => (c.tags || []).some(t => t.toLowerCase() === tag))
+        }
+
+        const q = root.searchQuery.trim().toLowerCase()
+        if (q.length > 0) {
+            list = list.filter(c => {
+                if ((c.title || "").toLowerCase().includes(q)) return true
+                if ((c.tags || []).some(t => t.toLowerCase().includes(q))) return true
+                const msgs = c.messages || []
+                return msgs.some(m => (m.text || "").toLowerCase().includes(q))
             })
         }
-        return items
+        return list
     }
 
     property int visibleLimit: 30
     onSelectedTagChanged: visibleLimit = 30
-    readonly property var displayedHistory: (root.filteredHistory || []).slice(0, root.visibleLimit)
-
-    function focusSearch() {}
+    readonly property var displayedChats: (root.filteredChats || []).slice(0, root.visibleLimit)
 
     ColumnLayout {
         anchors.fill: parent
         spacing: Tokens.spacing.small
 
-        // ── 1. History Header ─────────────────────────────────────────
+        // ── 1. Header Bar ─────────────────────────────────────────────
         Item {
             id: headerContainer
             Layout.fillWidth: true
@@ -123,36 +121,29 @@ FocusScope {
                     type: IconButton.Text
                     icon: "arrow_back"
                     font: Tokens.font.icon.small
-                    implicitWidth: 32
-                    implicitHeight: 32
+                    implicitWidth: 28
+                    implicitHeight: 28
                     onClicked: root.backRequested()
                 }
 
                 MaterialIcon {
-                    text: "history"
+                    text: "forum"
                     fontStyle: Tokens.font.icon.medium
                     color: Colours.palette.m3primary
                 }
 
-                StyledText {
-                    text: qsTr("Memory")
-                    font: Tokens.font.title.small
-                    color: Colours.palette.m3onSurface
-                }
-
-                // Total count pill
-                StyledRect {
-                    implicitWidth: countText.implicitWidth + Tokens.padding.small * 2
-                    implicitHeight: 22
-                    radius: Tokens.rounding.full
-                    color: Colours.palette.m3surfaceContainerHigh
+                ColumnLayout {
+                    spacing: 0
+                    StyledText {
+                        text: qsTr("Chats & History")
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                    }
 
                     StyledText {
-                        id: countText
-                        anchors.centerIn: parent
                         text: {
-                            const count = (Assistant.history || []).length
-                            return count === 1 ? qsTr("1 item") : qsTr("%1 items").arg(count)
+                            const count = (Assistant.chats || []).length
+                            return count === 1 ? qsTr("1 conversation") : qsTr("%1 conversations").arg(count)
                         }
                         font: Tokens.font.label.small
                         color: Colours.palette.m3outline
@@ -160,6 +151,18 @@ FocusScope {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                // New Chat Button
+                IconTextButton {
+                    type: IconTextButton.Tonal
+                    icon: "add"
+                    text: qsTr("New Chat")
+                    font: Tokens.font.label.small
+                    onClicked: {
+                        Assistant.startNewChat()
+                        root.backRequested()
+                    }
+                }
 
                 IconButton {
                     type: IconButton.Text
@@ -172,30 +175,86 @@ FocusScope {
             }
         }
 
-        // ── 2. Tag Filter Chips Row ───────────────────────────────────
-        Flickable {
-            id: tagFlick
+        // ── 2. Search & Tag Filter Bar ────────────────────────────────
+        StyledRect {
             Layout.fillWidth: true
-            implicitHeight: 30
-            contentWidth: tagRow.implicitWidth
-            contentHeight: 30
-            clip: true
+            implicitHeight: 36
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3surfaceContainerHigh
+            border.width: 1
+            border.color: searchInput.activeFocus ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outlineVariant, 0.25)
 
             RowLayout {
-                id: tagRow
-                spacing: 6
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 8
+
+                MaterialIcon {
+                    text: "search"
+                    fontStyle: Tokens.font.icon.small
+                    color: searchInput.text.length > 0 ? Colours.palette.m3primary : Colours.palette.m3outline
+                }
+
+                TextInput {
+                    id: searchInput
+                    Layout.fillWidth: true
+                    clip: true
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3onSurface
+                    text: root.searchQuery
+                    onTextChanged: root.searchQuery = text
+
+                    Text {
+                        anchors.fill: parent
+                        visible: !parent.text && !parent.activeFocus
+                        text: qsTr("Search chats by title, content, or tag...")
+                        font: Tokens.font.body.small
+                        color: Colours.palette.m3outline
+                    }
+                }
+
+                IconButton {
+                    visible: root.searchQuery.length > 0
+                    type: IconButton.Text
+                    icon: "close"
+                    font: Tokens.font.icon.small
+                    implicitWidth: 20
+                    implicitHeight: 20
+                    padding: 0
+                    onClicked: {
+                        root.searchQuery = ""
+                        searchInput.text = ""
+                    }
+                }
+            }
+        }
+
+        // ── 3. Horizontal Tags Filter Row ─────────────────────────────
+        Flickable {
+            id: tagsFlick
+            Layout.fillWidth: true
+            implicitHeight: 28
+            contentWidth: tagsRow.implicitWidth
+            flickableDirection: Flickable.HorizontalFlick
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            RowLayout {
+                id: tagsRow
+                spacing: Tokens.spacing.extraSmall
 
                 // "All" filter chip
                 StyledRect {
                     id: allChip
                     readonly property bool isSelected: root.selectedTag === "all"
-                    implicitWidth: allChipText.implicitWidth + Tokens.padding.medium * 2
+                    implicitWidth: allText.implicitWidth + Tokens.padding.medium * 2
                     implicitHeight: 28
                     radius: Tokens.rounding.full
                     color: isSelected ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
 
                     StyledText {
-                        id: allChipText
+                        id: allText
                         anchors.centerIn: parent
                         text: qsTr("All")
                         font: Tokens.font.label.small
@@ -210,7 +269,7 @@ FocusScope {
                     }
                 }
 
-                // "★ Starred" filter chip
+                // "★ Pinned" filter chip
                 StyledRect {
                     id: starChip
                     readonly property bool isSelected: root.selectedTag === "starred"
@@ -231,7 +290,7 @@ FocusScope {
                         }
 
                         StyledText {
-                            text: qsTr("Starred")
+                            text: qsTr("Pinned")
                             font: Tokens.font.label.small
                             color: starChip.isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
                         }
@@ -245,7 +304,7 @@ FocusScope {
                     }
                 }
 
-                // Dynamic AI Organized Tags
+                // Dynamic Tags
                 Repeater {
                     model: root.allTags
 
@@ -253,511 +312,372 @@ FocusScope {
                         id: tagChip
                         required property string modelData
                         readonly property bool isSelected: root.selectedTag === tagChip.modelData
-                        implicitWidth: tagChipRow.implicitWidth + Tokens.padding.small * 2
+                        implicitWidth: tagChipText.implicitWidth + Tokens.padding.small * 2
                         implicitHeight: 28
                         radius: Tokens.rounding.full
                         color: isSelected ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
 
-                        RowLayout {
-                            id: tagChipRow
+                        StyledText {
+                            id: tagChipText
                             anchors.centerIn: parent
-                            spacing: 2
+                            text: `#${tagChip.modelData}`
+                            font: Tokens.font.label.small
+                            color: tagChip.isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                        }
 
-                            Item {
-                                implicitWidth: tagChipText.implicitWidth + Tokens.padding.extraSmall
-                                implicitHeight: 28
-
-                                StyledText {
-                                    id: tagChipText
-                                    anchors.centerIn: parent
-                                    text: `#${tagChip.modelData}`
-                                    font: Tokens.font.label.small
-                                    color: tagChip.isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                                }
-
-                                StateLayer {
-                                    anchors.fill: parent
-                                    radius: Tokens.rounding.full
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.selectedTag = (tagChip.isSelected ? "all" : tagChip.modelData)
-                                }
-                            }
-
-                            // Delete tag entirely from all items
-                            IconButton {
-                                type: IconButton.Text
-                                icon: "close"
-                                font: Tokens.font.icon.small
-                                implicitWidth: 18
-                                implicitHeight: 18
-                                padding: 0
-                                activeColour: "transparent"
-                                inactiveColour: "transparent"
-                                activeOnColour: tagChip.isSelected ? Colours.palette.m3onPrimary : Colours.palette.m3error
-                                inactiveOnColour: tagChip.isSelected ? Qt.alpha(Colours.palette.m3onPrimary, 0.7) : Colours.palette.m3outline
-                                onClicked: {
-                                    if (root.selectedTag === tagChip.modelData) {
-                                        root.selectedTag = "all"
-                                    }
-                                    Assistant.deleteTagEntirely(tagChip.modelData)
-                                }
-                            }
+                        StateLayer {
+                            anchors.fill: parent
+                            radius: Tokens.rounding.full
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.selectedTag = (tagChip.isSelected ? "all" : tagChip.modelData)
                         }
                     }
                 }
             }
         }
 
-        // ── 4. Scrollable History Items (Accordion List) ──────────────
+        // ── 4. Scrollable Chat Cards List ─────────────────────────────
         Item {
             id: listContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
             implicitHeight: 400
 
-            // Empty state view
+            // Empty state
             ColumnLayout {
                 anchors.centerIn: parent
-                visible: root.filteredHistory.length === 0
+                visible: (root.displayedChats || []).length === 0
                 spacing: Tokens.spacing.small
-                width: parent.width - Tokens.padding.large * 2
 
                 MaterialIcon {
                     Layout.alignment: Qt.AlignHCenter
-                    text: root.selectedTag === "starred" ? "star_outline" : "history_toggle_off"
+                    text: root.selectedTag === "starred" ? "star_outline" : "chat_bubble_outline"
                     fontStyle: Tokens.font.icon.large
                     color: Colours.palette.m3outline
                 }
 
                 StyledText {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
+                    Layout.alignment: Qt.AlignHCenter
                     text: {
-                        if ((Assistant.history || []).length === 0) {
-                            return qsTr("No history saved yet. Completed answers will be stored here.")
+                        if ((Assistant.chats || []).length === 0) {
+                            return qsTr("No conversations yet. Start chatting to save sessions here.")
                         }
                         if (root.selectedTag === "starred") {
-                            return qsTr("No starred items yet. Star any answer with the star icon.")
+                            return qsTr("No pinned conversations yet.")
                         }
-                        return qsTr("No items found under tag '#%1'.").arg(root.selectedTag)
+                        return qsTr("No conversations matching \"%1\"").arg(root.searchQuery || root.selectedTag)
                     }
                     font: Tokens.font.body.small
                     color: Colours.palette.m3outline
                 }
             }
 
-            // History List
+            // Chat List
             Flickable {
                 id: historyFlick
                 anchors.fill: parent
-                anchors.margins: Tokens.padding.small
-                visible: root.filteredHistory.length > 0
-                contentHeight: historyColumn.implicitHeight
                 clip: true
+                visible: (root.displayedChats || []).length > 0
+                contentWidth: width
+                contentHeight: chatColumn.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
 
                 StyledScrollBar.vertical: StyledScrollBar {
                     flickable: historyFlick
                 }
 
                 ColumnLayout {
-                    id: historyColumn
+                    id: chatColumn
                     width: historyFlick.width - Tokens.padding.small
                     spacing: 8
 
                     Repeater {
-                        model: root.displayedHistory
+                        model: root.displayedChats
 
                         delegate: StyledRect {
-                            id: itemCard
+                            id: chatCard
                             required property var modelData
-                            readonly property var itemData: modelData || ({})
-                            readonly property bool expanded: itemData.id ? root.expandedId === String(itemData.id) : false
+                            readonly property var chatData: modelData || ({})
+                            readonly property bool isCurrent: String(Assistant.activeChatId) === String(chatCard.chatData.id)
+                            readonly property bool isEditing: root.editingChatId === String(chatCard.chatData.id)
 
                             Layout.fillWidth: true
-                            implicitHeight: cardContent.implicitHeight + Tokens.padding.small * 2
+                            implicitHeight: cardLayout.implicitHeight + Tokens.padding.small * 2
                             radius: Tokens.rounding.small
-                            color: Colours.palette.m3surfaceContainerHigh
-                            border.width: 1
+                            color: isCurrent ? Qt.alpha(Colours.palette.m3primary, 0.08) : Colours.palette.m3surfaceContainerHigh
+                            border.width: isCurrent ? 1.5 : 1
                             border.color: {
-                                if (itemCard.expanded || cardHover.hovered) return Qt.alpha(Colours.palette.m3primary, 0.5)
-                                if (itemCard.itemData.context_excluded) return Qt.alpha(Colours.palette.m3error, 0.25)
+                                if (isCurrent) return Colours.palette.m3primary
+                                if (cardHover.hovered) return Qt.alpha(Colours.palette.m3primary, 0.4)
                                 return Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
                             }
 
-                            Behavior on border.color {
-                                ColorAnimation { duration: Tokens.anim.durations.expressiveDefaultEffects }
-                            }
+                            Behavior on border.color { CAnim {} }
+                            Behavior on color { CAnim {} }
 
-                            Behavior on implicitHeight {
-                                Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
-                            }
-
-                            HoverHandler {
-                                id: cardHover
-                            }
+                            HoverHandler { id: cardHover }
 
                             MouseArea {
-                                anchors.top: parent.top
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                height: 42
+                                anchors.fill: parent
+                                enabled: !chatCard.isEditing
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    const sid = itemCard.itemData.id ? String(itemCard.itemData.id) : ""
-                                    if (sid) {
-                                        root.expandedId = (root.expandedId === sid) ? "" : sid
-                                    }
-                                }
-                                onDoubleClicked: {
-                                    Assistant.reopenItem(itemCard.itemData)
+                                    Assistant.loadChat(chatCard.chatData.id)
                                     root.backRequested()
                                 }
                             }
 
                             ColumnLayout {
-                                id: cardContent
+                                id: cardLayout
                                 anchors.top: parent.top
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.margins: Tokens.padding.small
-                                spacing: Tokens.spacing.small
+                                spacing: 6
 
-                                // Header Summary (Always Visible)
+                                // Row 1: Title, Time & Pinned Star
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 8
 
-                                    // Action Icon
+                                    // Chat Icon Pill
                                     StyledRect {
                                         implicitWidth: 26
                                         implicitHeight: 26
                                         radius: Tokens.rounding.full
-                                        color: Colours.palette.m3surfaceContainerHighest
+                                        color: chatCard.isCurrent ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHighest
 
                                         MaterialIcon {
                                             anchors.centerIn: parent
-                                            text: root.getActionIcon(itemCard.itemData.action)
+                                            text: chatCard.chatData.pinned ? "star" : "chat"
                                             fontStyle: Tokens.font.icon.small
-                                            color: Colours.palette.m3primary
+                                            color: chatCard.isCurrent ? Colours.palette.m3onPrimary : (chatCard.chatData.pinned ? Colours.palette.m3tertiary : Colours.palette.m3primary)
                                         }
                                     }
 
-                                    // Snippet Text (1 line)
-                                    StyledText {
+                                    // Editable or Normal Title
+                                    Item {
                                         Layout.fillWidth: true
-                                        text: {
-                                            const t = (itemCard.itemData.text || itemCard.itemData.prompt || "").trim()
-                                            return t.replace(/\s+/g, " ")
+                                        implicitHeight: 26
+
+                                        StyledText {
+                                            visible: !chatCard.isEditing
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: chatCard.chatData.title || qsTr("Untitled Chat")
+                                            font: Tokens.font.title.small
+                                            color: chatCard.isCurrent ? Colours.palette.m3primary : Colours.palette.m3onSurface
+                                            elide: Text.ElideRight
                                         }
-                                        elide: Text.ElideRight
-                                        font: Tokens.font.body.small
-                                        color: Colours.palette.m3onSurface
+
+                                        RowLayout {
+                                            visible: chatCard.isEditing
+                                            anchors.fill: parent
+                                            spacing: 4
+
+                                            TextInput {
+                                                id: renameField
+                                                Layout.fillWidth: true
+                                                font: Tokens.font.title.small
+                                                color: Colours.palette.m3onSurface
+                                                text: root.editingTitleText
+                                                onTextChanged: root.editingTitleText = text
+                                                onAccepted: {
+                                                    Assistant.renameChat(chatCard.chatData.id, renameField.text)
+                                                    root.editingChatId = ""
+                                                }
+                                            }
+
+                                            IconButton {
+                                                type: IconButton.Text
+                                                icon: "check"
+                                                font: Tokens.font.icon.small
+                                                implicitWidth: 22
+                                                implicitHeight: 22
+                                                onClicked: {
+                                                    Assistant.renameChat(chatCard.chatData.id, renameField.text)
+                                                    root.editingChatId = ""
+                                                }
+                                            }
+
+                                            IconButton {
+                                                type: IconButton.Text
+                                                icon: "close"
+                                                font: Tokens.font.icon.small
+                                                implicitWidth: 22
+                                                implicitHeight: 22
+                                                onClicked: root.editingChatId = ""
+                                            }
+                                        }
                                     }
 
-                                    // Timestamp
+                                    // Time Elapsed
                                     StyledText {
-                                        text: root.formatTime(itemCard.itemData.timestamp)
+                                        text: root.formatTime(chatCard.chatData.updatedAt || chatCard.chatData.createdAt)
                                         font: Tokens.font.label.small
                                         color: Colours.palette.m3outline
                                     }
 
-                                    // Star Button
+                                    // Pin / Star Button
                                     IconButton {
                                         type: IconButton.Text
-                                        icon: itemCard.itemData.starred ? "star" : "star_outline"
+                                        icon: chatCard.chatData.pinned ? "star" : "star_outline"
                                         font: Tokens.font.icon.small
-                                        implicitWidth: 26
-                                        implicitHeight: 26
-                                        onClicked: {
-                                            if (itemCard.itemData.id) Assistant.toggleStar(itemCard.itemData.id)
-                                        }
-                                    }
-
-                                    // Continue / Focus in Chat Button
-                                    IconButton {
-                                        type: IconButton.Text
-                                        icon: "forum"
-                                        font: Tokens.font.icon.small
-                                        implicitWidth: 26
-                                        implicitHeight: 26
-                                        activeColour: "transparent"
-                                        inactiveColour: "transparent"
-                                        activeOnColour: Colours.palette.m3primary
+                                        implicitWidth: 24
+                                        implicitHeight: 24
+                                        padding: 0
+                                        activeOnColour: Colours.palette.m3tertiary
                                         inactiveOnColour: Colours.palette.m3outline
-                                        onClicked: {
-                                            Assistant.reopenItem(itemCard.itemData)
-                                            root.backRequested()
-                                        }
-                                    }
-
-                                    // Expand Chevron
-                                    MaterialIcon {
-                                        text: itemCard.expanded ? "expand_less" : "expand_more"
-                                        fontStyle: Tokens.font.icon.small
-                                        color: Colours.palette.m3onSurfaceVariant
+                                        onClicked: Assistant.togglePinChat(chatCard.chatData.id)
                                     }
                                 }
 
-                                // Expanded Content (Collapsible Details - Loaded on demand for instant performance)
-                                Loader {
+                                // Row 2: Snippet preview of last message
+                                StyledText {
                                     Layout.fillWidth: true
-                                    active: itemCard.expanded
-                                    visible: itemCard.expanded
+                                    text: {
+                                        const msgs = chatCard.chatData.messages || []
+                                        if (msgs.length === 0) return qsTr("Empty conversation")
+                                        const last = msgs[msgs.length - 1]
+                                        const clean = (last.text || "").replace(/[\n\r`#*]+/g, " ").trim()
+                                        return (last.role === "assistant" ? "AI: " : "You: ") + (clean.slice(0, 110) + (clean.length > 110 ? "..." : ""))
+                                    }
+                                    font: Tokens.font.body.small
+                                    color: Colours.palette.m3onSurfaceVariant
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
 
-                                    sourceComponent: Component {
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: Tokens.spacing.small
+                                // Row 3: Turn count badge, Tags & Quick Action Bar
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
-                                            // Divider Line
-                                            Rectangle {
-                                                Layout.fillWidth: true
-                                                height: 1
-                                                color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                                    // Turn Counter Badge
+                                    StyledRect {
+                                        implicitWidth: turnCountText.implicitWidth + 12
+                                        implicitHeight: 20
+                                        radius: Tokens.rounding.full
+                                        color: Colours.palette.m3surfaceContainerHighest
+
+                                        StyledText {
+                                            id: turnCountText
+                                            anchors.centerIn: parent
+                                            text: {
+                                                const len = (chatCard.chatData.messages || []).length
+                                                const turns = Math.max(1, Math.floor(len / 2))
+                                                return turns === 1 ? qsTr("1 turn") : qsTr("%1 turns").arg(turns)
                                             }
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3outline
+                                        }
+                                    }
 
-                                            // Original Text / Question Box
-                                            StyledRect {
-                                                Layout.fillWidth: true
-                                                implicitHeight: promptText.implicitHeight + Tokens.padding.small * 2
-                                                radius: Tokens.rounding.extraSmall
-                                                color: Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.45)
+                                    // Tags (up to 3)
+                                    Repeater {
+                                        model: (chatCard.chatData.tags || []).slice(0, 3)
 
-                                                StyledText {
-                                                    id: promptText
-                                                    anchors.fill: parent
-                                                    anchors.margins: Tokens.padding.small
-                                                    text: {
-                                                        let str = ""
-                                                        if (itemCard.itemData.prompt && itemCard.itemData.prompt.length > 0) {
-                                                            str += "Q: " + itemCard.itemData.prompt + "\n\n"
-                                                        }
-                                                        if (itemCard.itemData.text && itemCard.itemData.text.length > 0) {
-                                                            str += itemCard.itemData.text
-                                                        }
-                                                        return str.trim()
-                                                    }
-                                                    wrapMode: Text.Wrap
-                                                    font: Tokens.font.body.small
-                                                    color: Colours.palette.m3onSurfaceVariant
-                                                }
+                                        delegate: StyledRect {
+                                            required property string modelData
+                                            implicitWidth: chatTagText.implicitWidth + 10
+                                            implicitHeight: 20
+                                            radius: Tokens.rounding.full
+                                            color: Colours.palette.m3surfaceContainerHighest
+
+                                            StyledText {
+                                                id: chatTagText
+                                                anchors.centerIn: parent
+                                                text: `#${modelData}`
+                                                font: Tokens.font.label.small
+                                                color: Colours.palette.m3primary
                                             }
+                                        }
+                                    }
 
-                                            // Full AI Answer (Selectable Markdown)
-                                            StyledRect {
-                                                Layout.fillWidth: true
-                                                implicitHeight: answerText.implicitHeight + Tokens.padding.small * 2
-                                                radius: Tokens.rounding.extraSmall
-                                                color: Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.45)
+                                    Item { Layout.fillWidth: true }
 
-                                                TextEdit {
-                                                    id: answerText
-                                                    anchors.left: parent.left
-                                                    anchors.right: parent.right
-                                                    anchors.top: parent.top
-                                                    anchors.margins: Tokens.padding.small
-                                                    text: Assistant.cleanMarkdown(itemCard.itemData.answer || "")
-                                                    readOnly: true
-                                                    selectByMouse: true
-                                                    selectByKeyboard: true
-                                                    cursorVisible: false
-                                                    textFormat: TextEdit.MarkdownText
-                                                    wrapMode: TextEdit.Wrap
-                                                    font: Tokens.font.body.small
-                                                    color: Colours.palette.m3onSurface
-                                                    selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
-                                                    selectedTextColor: Colours.palette.m3onSurface
-                                                    renderType: TextEdit.NativeRendering
-                                                    readonly property bool isArabicResult: {
-                                                        const act = itemCard.itemData.action || ""
-                                                        if (act !== "translate" || !text) return false
-                                                        const arabicMatches = text.match(/[\u0600-\u06FF]/g)
-                                                        const latinMatches = text.match(/[A-Za-z]/g)
-                                                        const arabicCount = arabicMatches ? arabicMatches.length : 0
-                                                        const latinCount = latinMatches ? latinMatches.length : 0
-                                                        return arabicCount > latinCount
-                                                    }
-                                                    horizontalAlignment: isArabicResult ? TextEdit.AlignRight : TextEdit.AlignLeft
-                                                }
-                                            }
+                                    // Quick Action Buttons
+                                    RowLayout {
+                                        spacing: 2
+                                        visible: cardHover.hovered || chatCard.isCurrent
 
-                                            // Tags Pills (if present)
+                                        // Resume Action Pill
+                                        StyledRect {
+                                            implicitWidth: resumeRow.implicitWidth + 10
+                                            implicitHeight: 24
+                                            radius: Tokens.rounding.full
+                                            color: Colours.palette.m3primary
+
                                             RowLayout {
-                                                Layout.fillWidth: true
-                                                visible: itemCard.itemData.tags && itemCard.itemData.tags.length > 0
+                                                id: resumeRow
+                                                anchors.centerIn: parent
                                                 spacing: 4
 
-                                                Repeater {
-                                                    model: itemCard.itemData.tags || []
+                                                MaterialIcon {
+                                                    text: "play_arrow"
+                                                    fontStyle: Tokens.font.icon.small
+                                                    color: Colours.palette.m3onPrimary
+                                                }
 
-                                                    delegate: StyledRect {
-                                                        id: tagBadge
-                                                        required property string modelData
-                                                        implicitWidth: tagBadgeRow.implicitWidth + 8
-                                                        implicitHeight: 22
-                                                        radius: Tokens.rounding.full
-                                                        color: Qt.alpha(Colours.palette.m3primary, 0.15)
-
-                                                        RowLayout {
-                                                            id: tagBadgeRow
-                                                            anchors.centerIn: parent
-                                                            spacing: 2
-
-                                                            StyledText {
-                                                                id: tagBadgeText
-                                                                text: `#${tagBadge.modelData}`
-                                                                font: Tokens.font.label.small
-                                                                color: Colours.palette.m3primary
-                                                            }
-
-                                                            IconButton {
-                                                                type: IconButton.Text
-                                                                icon: "close"
-                                                                font: Tokens.font.icon.small
-                                                                implicitWidth: 16
-                                                                implicitHeight: 16
-                                                                padding: 0
-                                                                activeColour: "transparent"
-                                                                inactiveColour: "transparent"
-                                                                activeOnColour: Colours.palette.m3error
-                                                                inactiveOnColour: Qt.alpha(Colours.palette.m3primary, 0.7)
-                                                                onClicked: {
-                                                                    if (itemCard.itemData.id) Assistant.removeTagFromItem(itemCard.itemData.id, tagBadge.modelData)
-                                                                }
-                                                            }
-                                                        }
-                                                    }
+                                                StyledText {
+                                                    text: qsTr("Resume")
+                                                    font: Tokens.font.label.small
+                                                    color: Colours.palette.m3onPrimary
                                                 }
                                             }
 
-                                            // Per-Item Actions Footer
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: Tokens.spacing.small
-
-                                                // Context Exclusion Toggle Pill ("Forget this")
-                                                StyledRect {
-                                                    implicitWidth: excludePillRow.implicitWidth + Tokens.padding.small * 2
-                                                    implicitHeight: 28
-                                                    radius: Tokens.rounding.full
-                                                    color: itemCard.itemData.context_excluded
-                                                        ? Qt.alpha(Colours.palette.m3error, 0.15)
-                                                        : Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.6)
-                                                    border.width: 1
-                                                    border.color: itemCard.itemData.context_excluded
-                                                        ? Qt.alpha(Colours.palette.m3error, 0.4)
-                                                        : Qt.alpha(Colours.palette.m3outlineVariant, 0.2)
-
-                                                    RowLayout {
-                                                        id: excludePillRow
-                                                        anchors.centerIn: parent
-                                                        spacing: 4
-
-                                                        MaterialIcon {
-                                                            text: itemCard.itemData.context_excluded ? "visibility_off" : "visibility"
-                                                            fontStyle: Tokens.font.icon.small
-                                                            color: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3primary
-                                                        }
-
-                                                        StyledText {
-                                                            text: itemCard.itemData.context_excluded ? qsTr("Excluded from AI context") : qsTr("Active in AI context")
-                                                            font: Tokens.font.label.small
-                                                            color: itemCard.itemData.context_excluded ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
-                                                        }
-                                                    }
-
-                                                    StateLayer {
-                                                        anchors.fill: parent
-                                                        radius: parent.radius
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: {
-                                                            if (itemCard.itemData.id) Assistant.toggleContextExcluded(itemCard.itemData.id)
-                                                        }
-                                                    }
-                                                }
-
-                                                Item { Layout.fillWidth: true }
-
-                                                // Copy Answer
-                                                IconButton {
-                                                    id: itemCopyBtn
-                                                    property bool copied: false
-                                                    type: IconButton.Tonal
-                                                    icon: copied ? "check" : "content_copy"
-                                                    font: Tokens.font.icon.small
-                                                    implicitWidth: 30
-                                                    implicitHeight: 30
-                                                    onClicked: {
-                                                        const ans = itemCard.itemData.answer || ""
-                                                        Quickshell.clipboardText = ans
-                                                        Assistant.lastSeenClipboard = ans.trim()
-                                                        copied = true
-                                                        resetItemCopy.restart()
-                                                    }
-
-                                                    Timer {
-                                                        id: resetItemCopy
-                                                        interval: 1800
-                                                        onTriggered: itemCopyBtn.copied = false
-                                                    }
-                                                }
-
-                                                // Delete Item
-                                                IconButton {
-                                                    type: IconButton.Tonal
-                                                    icon: "delete"
-                                                    font: Tokens.font.icon.small
-                                                    implicitWidth: 30
-                                                    implicitHeight: 30
-                                                    onClicked: {
-                                                        if (itemCard.itemData.id) Assistant.deleteHistoryItem(itemCard.itemData.id)
-                                                    }
+                                            StateLayer {
+                                                anchors.fill: parent
+                                                radius: parent.radius
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    Assistant.loadChat(chatCard.chatData.id)
+                                                    root.backRequested()
                                                 }
                                             }
+                                        }
+
+                                        // Rename Button
+                                        IconButton {
+                                            type: IconButton.Text
+                                            icon: "edit"
+                                            font: Tokens.font.icon.small
+                                            implicitWidth: 24
+                                            implicitHeight: 24
+                                            padding: 0
+                                            onClicked: {
+                                                root.editingChatId = String(chatCard.chatData.id)
+                                                root.editingTitleText = chatCard.chatData.title || ""
+                                            }
+                                        }
+
+                                        // Copy Markdown Button
+                                        IconButton {
+                                            type: IconButton.Text
+                                            icon: "content_copy"
+                                            font: Tokens.font.icon.small
+                                            implicitWidth: 24
+                                            implicitHeight: 24
+                                            padding: 0
+                                            onClicked: root.exportChatToMarkdown(chatCard.chatData)
+                                        }
+
+                                        // Delete Button
+                                        IconButton {
+                                            type: IconButton.Text
+                                            icon: "delete_outline"
+                                            font: Tokens.font.icon.small
+                                            implicitWidth: 24
+                                            implicitHeight: 24
+                                            padding: 0
+                                            activeOnColour: Colours.palette.m3error
+                                            inactiveOnColour: Colours.palette.m3outline
+                                            onClicked: Assistant.deleteChat(chatCard.chatData.id)
                                         }
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    // Load more button for pagination
-                    StyledRect {
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.topMargin: Tokens.spacing.small
-                        Layout.bottomMargin: Tokens.spacing.medium
-                        visible: root.filteredHistory.length > root.visibleLimit
-                        implicitWidth: showMoreRow.implicitWidth + Tokens.padding.medium * 2
-                        implicitHeight: 32
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3surfaceContainerHigh
-                        border.width: 1
-                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-
-                        RowLayout {
-                            id: showMoreRow
-                            anchors.centerIn: parent
-                            spacing: 6
-
-                            MaterialIcon {
-                                text: "expand_more"
-                                fontStyle: Tokens.font.icon.small
-                                color: Colours.palette.m3primary
-                            }
-
-                            StyledText {
-                                text: qsTr("Show More (%1 remaining)").arg(root.filteredHistory.length - root.visibleLimit)
-                                font: Tokens.font.label.small
-                                color: Colours.palette.m3primary
-                            }
-                        }
-
-                        StateLayer {
-                            anchors.fill: parent
-                            radius: parent.radius
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.visibleLimit += 30
                         }
                     }
                 }
