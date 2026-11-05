@@ -48,7 +48,7 @@ StyledRect {
 
     implicitWidth: {
         const baseW = Math.round(centerWidth * 0.85);
-        const minW = inputField.placeholderWidth + iconWrapper.implicitWidth + enterButton.implicitWidth + kbLayoutBadge.implicitWidth + (isCapsLockOn ? 70 : 0) + input.spacing * 4 + Tokens.padding.medium * 2;
+        const minW = inputField.placeholderWidth + iconWrapper.implicitWidth + enterButton.implicitWidth + kbLayoutBadge.implicitWidth + (isCapsLockOn ? Math.round(enterButton.implicitHeight * 0.85) + input.spacing : 0) + input.spacing * 4 + Tokens.padding.medium * 2;
         return Math.max(baseW, minW);
     }
     implicitHeight: input.implicitHeight + Tokens.padding.small
@@ -277,7 +277,7 @@ StyledRect {
             visible: root.isCapsLockOn
             Layout.alignment: Qt.AlignVCenter
             implicitHeight: Math.round(enterButton.implicitHeight * 0.85)
-            implicitWidth: visible ? Math.round(capsContent.implicitWidth + Tokens.padding.small * 2) : 0
+            implicitWidth: visible ? implicitHeight : 0
             radius: Tokens.rounding.full
             color: Colours.palette.m3errorContainer
 
@@ -294,22 +294,11 @@ StyledRect {
                 Anim { type: Anim.FastSpatial }
             }
 
-            RowLayout {
-                id: capsContent
+            MaterialIcon {
                 anchors.centerIn: parent
-                spacing: Tokens.spacing.extraSmall
-
-                MaterialIcon {
-                    text: "keyboard_capslock"
-                    color: Colours.palette.m3onErrorContainer
-                    fontStyle: Tokens.font.icon.builders.small.scale(root.centerScale * 0.9).build()
-                }
-
-                StyledText {
-                    text: Tr.tr("CAPS")
-                    color: Colours.palette.m3onErrorContainer
-                    font: Tokens.font.label.builders.small.scale(root.centerScale * 0.9).weight(Font.Bold).build()
-                }
+                text: "keyboard_capslock"
+                color: Colours.palette.m3onErrorContainer
+                fontStyle: Tokens.font.icon.builders.small.scale(root.centerScale * 0.9).build()
             }
         }
 

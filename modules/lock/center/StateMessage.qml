@@ -15,27 +15,23 @@ Item {
     readonly property string msg: {
         // Errors
         if (pam.fprint.state === Pam.Error)
-            return Tr.tr("FP ERROR: %1").arg(pam.fprint.message);
+            return Tr.tr("Fingerprint error. Try again.");
         if (pam.howdy.state === Pam.Error)
-            return Tr.tr("FACE ERROR: %1").arg(pam.howdy.message);
+            return Tr.tr("Face recognition error. Try again.");
         if (pam.state === Pam.Error)
-            return Tr.tr("PW ERROR: %1").arg(pam.passwd.message);
+            return Tr.tr("Authentication error: %1").arg(pam.passwd.message);
 
         // Fprint/howdy fail
         if (pam.state !== Pam.MaxTries) {
             if (pam.fprint.state === Pam.Failed)
-                // TRANSLATORS: %1 = attempts used so far, %2 = maximum attempts allowed
-                return Tr.tr("Fingerprint not recognised (%1/%2). Please try again or use password.").arg(pam.fprint.tries).arg(GlobalConfig.lock.maxFprintTries);
+                return Tr.tr("Fingerprint not recognized (%1/%2)").arg(pam.fprint.tries).arg(GlobalConfig.lock.maxFprintTries);
             if (pam.howdy.state === Pam.Failed)
-                // TRANSLATORS: %1 = attempts used so far, %2 = maximum attempts allowed
-                return Tr.tr("Face not recognised (%1/%2). Please try again or use password.").arg(pam.howdy.tries).arg(GlobalConfig.lock.maxHowdyTries);
+                return Tr.tr("Face not recognized (%1/%2)").arg(pam.howdy.tries).arg(GlobalConfig.lock.maxHowdyTries);
         } else {
             if (pam.fprint.state === Pam.Failed)
-                // TRANSLATORS: %1 = attempts used so far, %2 = maximum attempts allowed
-                return Tr.tr("Fingerprint not recognised (%1/%2). Please try again.").arg(pam.fprint.tries).arg(GlobalConfig.lock.maxFprintTries);
+                return Tr.tr("Fingerprint not recognized (%1/%2)").arg(pam.fprint.tries).arg(GlobalConfig.lock.maxFprintTries);
             if (pam.howdy.state === Pam.Failed)
-                // TRANSLATORS: %1 = attempts used so far, %2 = maximum attempts allowed
-                return Tr.tr("Face not recognised (%1/%2). Please try again.").arg(pam.howdy.tries).arg(GlobalConfig.lock.maxHowdyTries);
+                return Tr.tr("Face not recognized (%1/%2)").arg(pam.howdy.tries).arg(GlobalConfig.lock.maxHowdyTries);
         }
 
         if (pam.lockMessage) // Password max tries message
@@ -61,9 +57,9 @@ Item {
             return Tr.tr("Maximum password attempts reached.");
         }
         if (pam.fprint.state === Pam.MaxTries)
-            return Tr.tr("Maximum fingerprint attempts reached. Please use password.");
+            return Tr.tr("Fingerprint limit reached. Use password.");
         if (pam.howdy.state === Pam.MaxTries)
-            return Tr.tr("Maximum face attempts reached. Please use password.");
+            return Tr.tr("Face limit reached. Use password.");
 
         return "";
     }
@@ -131,7 +127,7 @@ Item {
         opacity: root.stateMsgShouldBeVisible && !root.msg ? 1 : 0
         color: Colours.palette.m3onSurfaceVariant
 
-        font: Tokens.font.body.small
+        font: Tokens.font.label.small
         horizontalAlignment: Qt.AlignHCenter
         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
         lineHeight: 1.2
@@ -157,7 +153,7 @@ Item {
         opacity: 0
         color: Colours.palette.m3error
 
-        font: Tokens.font.body.small
+        font: Tokens.font.label.small
         horizontalAlignment: Qt.AlignHCenter
         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
 
