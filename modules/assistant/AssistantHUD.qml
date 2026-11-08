@@ -33,6 +33,28 @@ FocusScope {
     property bool askBoundToSelection: false
     property string activeSelectedText: ""
 
+    function requestStatusLabel() {
+        switch (Assistant.requestState) {
+        case "waiting": return qsTr("Thinking")
+        case "streaming": return qsTr("Streaming")
+        case "completed": return qsTr("Done")
+        case "failed": return qsTr("Failed")
+        case "cancelled": return qsTr("Cancelled")
+        default: return ""
+        }
+    }
+
+    function providerStatusLabel() {
+        const provider = Assistant.providerUsed || ""
+        if (!provider) return ""
+        const actual = provider.toLowerCase()
+        const preferred = (Assistant.preferredProvider || "").toLowerCase()
+        const isFallback = (preferred === "gemini" && actual.indexOf("groq") >= 0)
+            || (preferred === "groq" && actual.indexOf("gemini") >= 0)
+        const label = isFallback ? qsTr("Fallback · %1").arg(provider) : provider
+        return Assistant.latencyMs > 0 ? `${label} · ${(Assistant.latencyMs / 1000).toFixed(1)}s` : label
+    }
+
     Connections {
         target: Assistant
         function onSelectedTextChanged() {
@@ -375,11 +397,11 @@ FocusScope {
                             }
 
                             StyledText {
-                                text: Assistant.latencyMs > 0
-                                    ? `${Assistant.providerUsed} • ${(Assistant.latencyMs / 1000).toFixed(1)}s`
-                                    : Assistant.providerUsed
+                                Layout.maximumWidth: 180
+                                text: root.providerStatusLabel()
                                 font: Tokens.font.label.small
                                 color: Colours.palette.m3onSurfaceVariant
+                                elide: Text.ElideRight
                             }
                         }
 
@@ -1367,6 +1389,38 @@ FocusScope {
                     spacing: 4
 
                     StyledRect {
+                        visible: Assistant.requestState !== "idle"
+                        implicitWidth: requestStatusText.implicitWidth + 16
+                        implicitHeight: 22
+                        radius: Tokens.rounding.full
+                        color: Assistant.requestState === "failed"
+                            ? Colours.palette.m3errorContainer
+                            : Colours.palette.m3surfaceContainerHigh
+
+                        StyledText {
+                            id: requestStatusText
+                            anchors.centerIn: parent
+                            text: root.requestStatusLabel()
+                            font: Tokens.font.label.small
+                            color: Assistant.requestState === "failed"
+                                ? Colours.palette.m3onErrorContainer
+                                : (Assistant.requestState === "streaming" || Assistant.requestState === "waiting"
+                                   ? Colours.palette.m3primary : Colours.palette.m3outline)
+                        }
+                    }
+
+                    IconButton {
+                        visible: Assistant.isGenerating
+                        type: IconButton.Text
+                        icon: "stop"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 24
+                        implicitHeight: 24
+                        padding: 0
+                        onClicked: Assistant.cancelCurrentRequest()
+                    }
+
+                    StyledRect {
                         id: contextChip
                         implicitHeight: 22
                         radius: Tokens.rounding.full
@@ -1400,29 +1454,22 @@ FocusScope {
                                     id: chipText
                                     anchors.centerIn: parent
                                     text: {
+                                        let modeText = ""
+                                        if (Assistant.inputMode === "followup") modeText = qsTr("↩ Follow-up")
+                                        else if (Assistant.inputMode === "standalone") modeText = qsTr("🌐 Standalone")
+                                        else modeText = qsTr("↻ Auto")
                                         if (root.askBoundToSelection) {
-                                            return "📌 Selection"
+                                            return qsTr("📌 Selection · %1").arg(modeText)
                                         }
-                                        if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
-                                            return "🌐 Standalone"
-                                        }
-                                        if (Assistant.inputMode === "followup") {
-                                            return "↩ Follow-up"
-                                        }
-                                        return "↩ Auto (Follow-up)"
+                                        return modeText
                                     }
                                     font: Tokens.font.label.small
                                     color: {
-                                        if (root.askBoundToSelection) {
-                                            return Colours.palette.m3primary
-                                        }
-                                        if (!Assistant.hasThread || Assistant.inputMode === "standalone") {
-                                            return Colours.palette.m3outline
-                                        }
                                         if (Assistant.inputMode === "followup") {
                                             return Colours.palette.m3primary
                                         }
-                                        return Colours.palette.m3secondary
+                                        return Assistant.inputMode === "standalone"
+                                            ? Colours.palette.m3outline : Colours.palette.m3secondary
                                     }
                                 }
                             }

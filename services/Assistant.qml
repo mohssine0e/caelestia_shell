@@ -1402,6 +1402,8 @@ Singleton {
         root.errorMessage = ""
         root.errorType = ""
         root.requestState = "waiting"
+        root.providerUsed = ""
+        root.latencyMs = 0
         root.rawResultText = ""
         root.resultText = ""
         root.isTruncated = false
