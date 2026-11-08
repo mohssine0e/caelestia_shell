@@ -10,6 +10,9 @@ import os
 import json
 import ast
 import re
+import tempfile
+import shutil
+import subprocess
 from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------
@@ -20,6 +23,9 @@ HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
 MEMORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_memory.json")
 PROFILE_PATH = os.path.expanduser("~/.config/caelestia/assistant_profile.json")
 LEARNER_PROFILE_PATH = os.path.expanduser("~/.config/caelestia/learner_profile.json")
+SECRETS_PATH = os.path.expanduser("~/.config/caelestia/assistant_secrets.json")
+SECRET_SERVICE_NAME = "caelestia-assistant"
+SECRET_PROVIDERS = ("gemini", "groq")
 
 # ---------------------------------------------------------
 # Candidate Models
@@ -81,26 +87,112 @@ def emit(obj):
     except BrokenPipeError:
         pass
 
-def load_config():
-    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini", "max_chars": 12000}
+def atomic_write_json(path, data):
+    """Write private JSON atomically so a crash cannot truncate the prior file."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as current_file:
+                json.load(current_file)
+        except Exception:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup_path = path + ".corrupt." + stamp
+            shutil.copy2(path, backup_path)
+            os.chmod(backup_path, 0o600)
+    fd, temp_path = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", dir=directory)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+        os.chmod(path, 0o600)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+def load_config_document():
+    data = {}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    cfg.update(data)
-                    if "gemini_api_key" in data and not cfg.get("gemini_key"):
-                        cfg["gemini_key"] = data["gemini_api_key"]
-                    if "groq_api_key" in data and not cfg.get("groq_key"):
-                        cfg["groq_key"] = data["groq_api_key"]
-                    if "preferred_provider" in data and not data.get("primary"):
-                        cfg["primary"] = data["preferred_provider"]
+                parsed = json.load(f)
+                if isinstance(parsed, dict):
+                    data = parsed
         except Exception:
             pass
-    if not cfg.get("gemini_key"):
-        cfg["gemini_key"] = os.environ.get("GEMINI_API_KEY", "")
-    if not cfg.get("groq_key"):
-        cfg["groq_key"] = os.environ.get("GROQ_API_KEY", "")
+    return data
+
+def _secret_tool_enabled():
+    return bool(shutil.which("secret-tool") and os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
+
+def _secret_tool_lookup(provider):
+    if provider not in SECRET_PROVIDERS or not _secret_tool_enabled():
+        return ""
+    try:
+        result = subprocess.run(
+            ["secret-tool", "lookup", "service", SECRET_SERVICE_NAME, "provider", provider],
+            capture_output=True, text=True, timeout=4, check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+def _load_private_file_credentials():
+    try:
+        with open(SECRETS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {p: str(data.get(p, "")).strip() for p in SECRET_PROVIDERS if str(data.get(p, "")).strip()}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+def credential_status(include_values=False):
+    raw = load_config_document()
+    private = _load_private_file_credentials()
+    values, sources = {}, {}
+    for provider, env_name in (("gemini", "GEMINI_API_KEY"), ("groq", "GROQ_API_KEY")):
+        legacy = str(raw.get(f"{provider}_key") or raw.get(f"{provider}_api_key") or "").strip()
+        candidates = (
+            (os.environ.get(env_name, "").strip(), "environment"),
+            (_secret_tool_lookup(provider), "secret-service"),
+            (private.get(provider, ""), "private-file"),
+            (legacy, "legacy-config"),
+        )
+        values[provider], sources[provider] = next(((v, s) for v, s in candidates if v), ("", "none"))
+    active = {s for s in sources.values() if s != "none"}
+    backend = next((s for s in ("legacy-config", "private-file", "secret-service", "environment") if s in active),
+                   "secret-service" if _secret_tool_enabled() else "private-file")
+    status = {
+        "backend": backend,
+        "gemini_configured": bool(values["gemini"]), "groq_configured": bool(values["groq"]),
+        "gemini_source": sources["gemini"], "groq_source": sources["groq"],
+        "needs_migration": "legacy-config" in active,
+    }
+    if include_values:
+        status["values"] = values
+    return status
+
+def load_config():
+    data = load_config_document()
+    cfg = {"gemini_key": "", "groq_key": "", "primary": "gemini", "max_chars": 12000}
+    cfg.update(data)
+    if "preferred_provider" in data and not data.get("primary"):
+        cfg["primary"] = data["preferred_provider"]
+    credentials = credential_status(include_values=True)
+    cfg["gemini_key"] = credentials["values"]["gemini"]
+    cfg["groq_key"] = credentials["values"]["groq"]
+    cfg["credential_backend"] = credentials["backend"]
     return cfg
 
 def load_profile():
@@ -116,9 +208,7 @@ def load_profile():
     return None
 
 def save_profile(profile_data):
-    os.makedirs(os.path.dirname(PROFILE_PATH), exist_ok=True)
-    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
-        json.dump(profile_data, f, indent=2, ensure_ascii=False)
+    atomic_write_json(PROFILE_PATH, profile_data)
     return {"type": "success", "message": "Profile saved."}
 
 def load_learner_profile():
@@ -140,11 +230,7 @@ def load_learner_profile():
     }
 
 def save_learner_profile(profile_data):
-    os.makedirs(os.path.dirname(LEARNER_PROFILE_PATH), exist_ok=True)
-    temp_path = f"{LEARNER_PROFILE_PATH}.tmp.{os.getpid()}"
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(profile_data, f, indent=2, ensure_ascii=False)
-    os.replace(temp_path, LEARNER_PROFILE_PATH)
+    atomic_write_json(LEARNER_PROFILE_PATH, profile_data)
 
 # ---------------------------------------------------------
 # Token & Keyword Extraction

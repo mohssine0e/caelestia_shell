@@ -556,6 +556,20 @@ FocusScope {
                                 implicitHeight: 38
                                 onClicked: root.showGeminiKey = !root.showGeminiKey
                             }
+
+                            IconButton {
+                                visible: root.editGeminiKey.length > 0
+                                type: IconButton.Text
+                                icon: "delete_outline"
+                                font: Tokens.font.icon.small
+                                implicitWidth: 38
+                                implicitHeight: 38
+                                onClicked: {
+                                    root.editGeminiKey = ""
+                                    Assistant.saveSettings("", root.editGroqKey, root.editProvider, root.editMaxChars, true, false)
+                                    root.triggerSavedFeedback()
+                                }
+                            }
                         }
                     }
 
@@ -616,6 +630,20 @@ FocusScope {
                                 implicitWidth: 38
                                 implicitHeight: 38
                                 onClicked: root.showGroqKey = !root.showGroqKey
+                            }
+
+                            IconButton {
+                                visible: root.editGroqKey.length > 0
+                                type: IconButton.Text
+                                icon: "delete_outline"
+                                font: Tokens.font.icon.small
+                                implicitWidth: 38
+                                implicitHeight: 38
+                                onClicked: {
+                                    root.editGroqKey = ""
+                                    Assistant.saveSettings(root.editGeminiKey, "", root.editProvider, root.editMaxChars, false, true)
+                                    root.triggerSavedFeedback()
+                                }
                             }
                         }
                     }

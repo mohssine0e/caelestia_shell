@@ -14,9 +14,22 @@ from assistant_common import (
     CONFIG_PATH, HISTORY_PATH, MEMORY_PATH, PROFILE_PATH, LEARNER_PROFILE_PATH,
     GEMINI_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS, STOP_WORDS,
     CODE_TOKEN_PATTERN, WORD_PATTERN,
-    emit, load_config, load_profile, save_profile,
+    emit as _emit, load_config, load_profile, save_profile,
+    SECRETS_PATH, SECRET_SERVICE_NAME, atomic_write_json,
+    load_config_document, credential_status, _load_private_file_credentials,
+    _secret_tool_enabled, _secret_tool_lookup,
     extract_keywords, extract_code_tokens, normalize_concept_key
 )
+
+_request_id = ""
+
+
+def emit(payload):
+    """Attach the originating UI request ID to streamed events."""
+    if _request_id:
+        payload = dict(payload)
+        payload["request_id"] = _request_id
+    _emit(payload)
 
 PROMPTS = {
     "translate": (
@@ -75,13 +88,47 @@ def get_provider_ceiling(primary, gemini_key, groq_key):
     # Both configured and it's auto (or fallback): smaller of the two caps
     return 100000
 
-def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None):
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    cfg = load_config()
-    if gemini_key is not None and gemini_key.strip():
-        cfg["gemini_key"] = gemini_key.strip()
-    if groq_key is not None and groq_key.strip():
-        cfg["groq_key"] = groq_key.strip()
+def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None,
+                clear_gemini_key=False, clear_groq_key=False):
+    cfg = load_config_document()
+    private = _load_private_file_credentials()
+    for name, value, clear in (
+        ("gemini", gemini_key, clear_gemini_key), ("groq", groq_key, clear_groq_key)
+    ):
+        value = str(value or "").strip()
+        if clear:
+            if _secret_tool_enabled():
+                try:
+                    subprocess.run(["secret-tool", "clear", "service", SECRET_SERVICE_NAME, "provider", name],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=8, check=False)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            private.pop(name, None)
+            cfg.pop(f"{name}_key", None)
+            cfg.pop(f"{name}_api_key", None)
+        elif value:
+            stored = False
+            if _secret_tool_enabled():
+                try:
+                    result = subprocess.run(
+                        ["secret-tool", "store", "--label", f"Caelestia Assistant ({name.title()})",
+                         "service", SECRET_SERVICE_NAME, "provider", name],
+                        input=value + "\n", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        text=True, timeout=15, check=False,
+                    )
+                    stored = result.returncode == 0 and _secret_tool_lookup(name) == value
+                except (OSError, subprocess.SubprocessError):
+                    stored = False
+            cfg.pop(f"{name}_key", None)
+            cfg.pop(f"{name}_api_key", None)
+            if stored:
+                private.pop(name, None)
+            else:
+                private[name] = value
+    if private:
+        atomic_write_json(SECRETS_PATH, private)
+    elif os.path.exists(SECRETS_PATH):
+        os.unlink(SECRETS_PATH)
     if provider:
         cfg["primary"] = provider.strip().lower()
     if max_chars:
@@ -89,9 +136,9 @@ def save_config(gemini_key=None, groq_key=None, provider=None, max_chars=None):
             cfg["max_chars"] = int(max_chars)
         except (ValueError, TypeError):
             pass
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-    return {"success": True}
+    cfg["credential_backend"] = credential_status().get("backend", "private-file")
+    atomic_write_json(CONFIG_PATH, cfg)
+    return {"success": True, **credential_status()}
 
 GEMINI_CANDIDATE_MODELS = [
     "gemini-3.5-flash-lite",
@@ -542,18 +589,39 @@ def generate_chat_title_and_tags(prompt_text, answer_text):
     return {"title": (fallback.capitalize() or "New Chat"), "tags": ["general"]}
 
 def main():
+    global _request_id
     if len(sys.argv) < 2:
         emit({"type": "error", "error_type": "generic", "message": "Usage: assistant_api.py <action> [args...]"})
         sys.exit(1)
 
     cmd = sys.argv[1]
+    stdin_payload = {}
+    stdin_json = "--stdin-json" in sys.argv[2:]
+    if stdin_json:
+        try:
+            stdin_payload = json.loads(sys.stdin.readline() or "{}")
+            if not isinstance(stdin_payload, dict):
+                stdin_payload = {}
+        except (ValueError, OSError):
+            stdin_payload = {}
 
     if cmd == "save_config":
-        gemini_key = sys.argv[2] if len(sys.argv) > 2 else ""
-        groq_key = sys.argv[3] if len(sys.argv) > 3 else ""
-        provider = sys.argv[4] if len(sys.argv) > 4 else None
-        max_chars = sys.argv[5] if len(sys.argv) > 5 else None
-        emit(save_config(gemini_key, groq_key, provider, max_chars))
+        if stdin_json:
+            emit(save_config(
+                stdin_payload.get("gemini_key", ""), stdin_payload.get("groq_key", ""),
+                stdin_payload.get("provider"), stdin_payload.get("max_chars"),
+                bool(stdin_payload.get("clear_gemini_key")), bool(stdin_payload.get("clear_groq_key")),
+            ))
+        else:
+            gemini_key = sys.argv[2] if len(sys.argv) > 2 else ""
+            groq_key = sys.argv[3] if len(sys.argv) > 3 else ""
+            provider = sys.argv[4] if len(sys.argv) > 4 else None
+            max_chars = sys.argv[5] if len(sys.argv) > 5 else None
+            emit(save_config(gemini_key, groq_key, provider, max_chars))
+        sys.exit(0)
+
+    if cmd == "credential_status":
+        emit(credential_status(include_values=stdin_payload.get("include_values") is True))
         sys.exit(0)
 
     if cmd == "save_profile":
@@ -573,40 +641,48 @@ def main():
         sys.exit(0)
 
     action = cmd
-    mode = "auto"
-    thread_raw = "[]"
-    topic_anchor = ""
-    extra_context = ""
-    positional = []
-    i = 2
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == "--mode" and i + 1 < len(sys.argv):
-            mode = sys.argv[i + 1]
-            i += 2
-        elif arg == "--thread" and i + 1 < len(sys.argv):
-            thread_raw = sys.argv[i + 1]
-            i += 2
-        elif arg == "--anchor" and i + 1 < len(sys.argv):
-            topic_anchor = sys.argv[i + 1]
-            i += 2
-        elif arg == "--context" and i + 1 < len(sys.argv):
-            extra_context = sys.argv[i + 1]
-            i += 2
-        else:
-            positional.append(arg)
-            i += 1
-
-    text = positional[0] if len(positional) > 0 else ""
-    custom_prompt = positional[1] if len(positional) > 1 else ""
+    if stdin_json:
+        _request_id = str(stdin_payload.get("request_id", ""))
+        mode = str(stdin_payload.get("mode", "auto"))
+        text = str(stdin_payload.get("text", ""))
+        custom_prompt = str(stdin_payload.get("custom_prompt", ""))
+        topic_anchor = str(stdin_payload.get("anchor", ""))
+        extra_context = str(stdin_payload.get("context", ""))
+        parsed_thread = stdin_payload.get("thread", [])
+    else:
+        mode = "auto"
+        thread_raw = "[]"
+        topic_anchor = ""
+        extra_context = ""
+        positional = []
+        i = 2
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == "--mode" and i + 1 < len(sys.argv):
+                mode = sys.argv[i + 1]
+                i += 2
+            elif arg == "--thread" and i + 1 < len(sys.argv):
+                thread_raw = sys.argv[i + 1]
+                i += 2
+            elif arg == "--anchor" and i + 1 < len(sys.argv):
+                topic_anchor = sys.argv[i + 1]
+                i += 2
+            elif arg == "--context" and i + 1 < len(sys.argv):
+                extra_context = sys.argv[i + 1]
+                i += 2
+            else:
+                positional.append(arg)
+                i += 1
+        text = positional[0] if len(positional) > 0 else ""
+        custom_prompt = positional[1] if len(positional) > 1 else ""
+        try:
+            parsed_thread = json.loads(thread_raw)
+        except Exception:
+            parsed_thread = []
 
     thread = []
-    try:
-        parsed_thread = json.loads(thread_raw)
-        if isinstance(parsed_thread, list):
-            thread = parsed_thread
-    except Exception:
-        thread = []
+    if isinstance(parsed_thread, list):
+        thread = parsed_thread
 
     config = load_config()
     gemini_key = config.get("gemini_key", "").strip()
@@ -640,7 +716,7 @@ def main():
     else:
         text_to_process = text
 
-    if action == "ask" and len(thread) > 0 and mode != "standalone":
+    if action == "ask" and len(thread) > 0 and mode == "auto":
         if is_topic_shift(custom_prompt, thread, topic_anchor):
             mode = "standalone"
             thread = []

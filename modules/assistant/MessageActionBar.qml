@@ -34,7 +34,7 @@ RowLayout {
 
     IconButton {
         id: cardBtn
-        visible: root.showSaveCard && root.text.length > 0
+        visible: root.showSaveCard && root.text.length > 0 && root.sourceText.trim().length > 0
         type: root.btnType
         property bool saved: false
         icon: saved ? "bookmark_added" : "bookmark_add"
@@ -42,7 +42,7 @@ RowLayout {
         implicitWidth: root.btnSize
         implicitHeight: root.btnSize
         onClicked: {
-            Memory.createCardFromAssistant(root.sourceText || Assistant.selectedText || Assistant.activePrompt, root.text, root.action)
+            Memory.createCardFromAssistant(root.sourceText, root.text, root.action)
             saved = true
             resetSavedTimer.restart()
         }
@@ -76,4 +76,3 @@ RowLayout {
         }
     }
 }
-

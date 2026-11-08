@@ -22,6 +22,9 @@ Singleton {
     property string errorMessage: ""
     property string errorType: "" // "network", "auth", "rate_limit", "no_selection", "generic"
     property bool hasApiKey: true
+    property bool geminiConfigured: false
+    property bool groqConfigured: false
+    property string credentialBackend: "unknown"
     property bool isTruncated: false
     property int truncatedAt: 12000
     property bool isWindowActive: false
@@ -45,6 +48,9 @@ Singleton {
     property var history: []
     property int unDistilledCount: 0
     property string activePrompt: ""
+    property var _activeRequest: null
+    property int _requestSerial: 0
+    property string requestState: "idle" // idle | waiting | streaming | completed | failed | cancelled
     property var recalledContext: null
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
 
@@ -171,14 +177,13 @@ Singleton {
         }
     }
 
-    // In-memory query response cache
-    property var responseCache: ({})
-
     readonly property string configPath: Quickshell.env("HOME") + "/.config/caelestia/assistant.json"
     property string preferredProvider: "gemini"
     property int maxChars: 12000
     property string geminiKey: ""
     property string groqKey: ""
+    property var _pendingApiInput: ({})
+    property var _pendingSettingsInput: ({})
 
     FileView {
         id: configStorage
@@ -192,9 +197,30 @@ Singleton {
                     root.maxChars = parsed.max_chars || 12000
                     root.geminiKey = parsed.gemini_key || ""
                     root.groqKey = parsed.groq_key || ""
-                    root.hasApiKey = !!(root.geminiKey || root.groqKey)
                 }
             } catch (e) {}
+        }
+    }
+
+    Process {
+        id: credentialStatusProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py", "credential_status", "--stdin-json"]
+        stdinEnabled: true
+        running: true
+        onStarted: write("{\"include_values\":true}\n")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const status = JSON.parse(text.trim())
+                    const values = status.values || ({})
+                    root.geminiKey = values.gemini || ""
+                    root.groqKey = values.groq || ""
+                    root.geminiConfigured = !!status.gemini_configured
+                    root.groqConfigured = !!status.groq_configured
+                    root.credentialBackend = status.backend || "unknown"
+                    root.hasApiKey = root.geminiConfigured || root.groqConfigured
+                } catch (e) {}
+            }
         }
     }
 
@@ -457,6 +483,7 @@ Singleton {
 
         // Cancel any pending in-flight streaming
         root.cancelCurrentRequest()
+        root._activeRequest = null
         root.errorMessage = ""
         root.errorType = ""
         root.clearThread()
@@ -501,12 +528,17 @@ Singleton {
     // ── Streaming AI Worker Process via SplitParser ──────────────
     Process {
         id: apiProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._pendingApiInput) + "\n")
         stdout: SplitParser {
             onRead: data => {
                 const line = data.trim()
                 if (!line) return
                 try {
                     const msg = JSON.parse(line)
+                    // Every generation event belongs to the request that produced it.
+                    // Ignore output from a process that was cancelled or superseded.
+                    if (!root._activeRequest || !msg.request_id || msg.request_id !== root._activeRequest.id) return
                     if (msg.type === "topic_shift") {
                         root.thread = []
                         root.currentThreadId = "t_" + Date.now().toString(36)
@@ -530,6 +562,7 @@ Singleton {
                             root.recalledContext = msg.recalled_from
                         }
                     } else if (msg.type === "chunk") {
+                        root.requestState = "streaming"
                         root.isLoading = false
                         root.isStreaming = true
                         root._streamBuffer += msg.text
@@ -573,23 +606,20 @@ Singleton {
                         root.errorMessage = ""
                         root.errorType = ""
                         root.hasApiKey = true
-
-                        // Cache completed response
-                        const cacheKey = root.getCacheKey(root.activeAction, root.selectedText, "")
-                        root.responseCache[cacheKey] = {
-                            resultText: root.resultText,
-                            provider: root.providerUsed,
-                            latencyMs: root.latencyMs,
-                            isTruncated: root.isTruncated,
-                            truncatedAt: root.truncatedAt
-                        }
+                        root.requestState = "completed"
 
                         // Save to persistent history
-                        root.addToHistory(root.activeAction, root.selectedText, root.resultText, root.activePrompt)
+                        const request = root._activeRequest || ({ action: root.activeAction, sourceText: root.selectedText, prompt: root.activePrompt })
+                        root.addToHistory(request.action, request.sourceText, root.resultText, request.prompt)
 
                         // Active multi-turn thread is only for custom conversational questions ("ask")
-                        if (root.activeAction === "ask" && root.resultText.length > 0) {
-                            root.pushTurn(root.activePrompt, root.resultText)
+                        if (request.action === "ask" && request.mode === "standalone") {
+                            root.clearThread(false)
+                            root.topicAnchor = request.newAnchor || request.prompt || request.sourceText
+                            root.currentThreadId = root.activeChatId
+                        }
+                        if (request.action === "ask" && root.resultText.length > 0) {
+                            root.pushTurn(request.prompt || request.sourceText, root.resultText)
                         }
 
                         // Sync with persistent chat sessions
@@ -599,6 +629,7 @@ Singleton {
                         root._streamBuffer = ""
                         root.isLoading = false
                         root.isStreaming = false
+                        root.requestState = "failed"
                         root.errorMessage = msg.message || "An error occurred."
                         root.errorType = msg.error_type || "generic"
                         if (msg.error_type === "auth") {
@@ -622,6 +653,10 @@ Singleton {
             }
         }
         onExited: {
+            // A stopped/superseded process can exit after a new request has begun.
+            // The API's tagged terminal event owns normal completion; only handle
+            // an exit as failure if the current request still has no terminal state.
+            if (root.apiProc.running || (root.requestState !== "waiting" && root.requestState !== "streaming")) return
             streamBatchTimer.stop()
             if (root._streamBuffer && root._streamBuffer.length > 0) {
                 root.rawResultText += root._streamBuffer
@@ -641,14 +676,16 @@ Singleton {
             }
             root.isLoading = false
             root.isStreaming = false
+            root.requestState = "failed"
+            root.errorType = "generic"
+            root.errorMessage = qsTr("The assistant request ended unexpectedly.")
         }
     }
 
-    function getCacheKey(action, text, customPrompt) {
-        return `${action}:::${text.trim()}:::${(customPrompt || "").trim()}`
-    }
-
     function cancelCurrentRequest() {
+        if (root.requestState === "waiting" || root.requestState === "streaming") {
+            root.requestState = "cancelled"
+        }
         if (apiProc.running) {
             apiProc.running = false
         }
@@ -661,7 +698,10 @@ Singleton {
     }
 
     function retryAction() {
-        if (root.activeAction && root.activeAction.length > 0) {
+        if (root._activeRequest && root._activeRequest.action) {
+            const request = root._activeRequest
+            root.runAction(request.action, request.prompt, request.sourceText)
+        } else if (root.activeAction && root.activeAction.length > 0) {
             root.runAction(root.activeAction, root.activePrompt)
         } else if (root.selectedText && root.selectedText.length > 0) {
             root.runAction("explain", "")
@@ -697,18 +737,21 @@ Singleton {
     // ── Config write process (Safe argv execution) ────────────────
     Process {
         id: saveConfigProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._pendingSettingsInput) + "\n")
         onExited: {
             configStorage.reload()
+            if (!credentialStatusProc.running) credentialStatusProc.running = true
             if (root.activeAction) {
                 root.runAction(root.activeAction, root.activePrompt)
             }
         }
     }
 
-    function saveSettings(geminiKey, groqKey, provider, maxChars) {
+    function saveSettings(geminiKey, groqKey, provider, maxChars, clearGeminiKey = false, clearGroqKey = false) {
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
-        const gKey = (geminiKey !== undefined && geminiKey !== "" ? geminiKey : root.geminiKey || "").trim()
-        const qKey = (groqKey !== undefined && groqKey !== "" ? groqKey : root.groqKey || "").trim()
+        const gKey = clearGeminiKey ? "" : (geminiKey !== undefined && geminiKey !== "" ? geminiKey : root.geminiKey || "").trim()
+        const qKey = clearGroqKey ? "" : (groqKey !== undefined && groqKey !== "" ? groqKey : root.groqKey || "").trim()
         const prov = (provider || root.preferredProvider || "gemini").toLowerCase()
         const mChars = String(maxChars || root.maxChars || 12000)
 
@@ -716,15 +759,19 @@ Singleton {
         root.groqKey = qKey
         root.preferredProvider = prov
         root.maxChars = parseInt(mChars) || 12000
-        root.hasApiKey = !!(gKey || qKey)
+        if (clearGeminiKey) root.geminiConfigured = false
+        else if (gKey) root.geminiConfigured = true
+        if (clearGroqKey) root.groqConfigured = false
+        else if (qKey) root.groqConfigured = true
+        root.hasApiKey = root.geminiConfigured || root.groqConfigured
 
         saveConfigProc.command = [
-            "python3", scriptPath, "save_config",
-            gKey,
-            qKey,
-            prov,
-            mChars
+            "python3", scriptPath, "save_config", "--stdin-json"
         ]
+        root._pendingSettingsInput = {
+            gemini_key: gKey, groq_key: qKey, provider: prov, max_chars: mChars,
+            clear_gemini_key: clearGeminiKey, clear_groq_key: clearGroqKey
+        }
         saveConfigProc.running = true
         root.errorMessage = ""
         root.errorType = ""
@@ -773,6 +820,8 @@ Singleton {
     }
 
     function startNewChat() {
+        root.cancelCurrentRequest()
+        root._activeRequest = null
         root.activeChatId = "t_" + Date.now().toString(36)
         root.currentThreadId = root.activeChatId
         root.messages = []
@@ -870,6 +919,8 @@ Singleton {
             role: m.role || "user",
             action: m.action || "ask",
             text: (m.text || "").trim(),
+            sourceText: m.sourceText || "",
+            prompt: m.prompt || "",
             timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         })).filter(m => m.text.length > 0)
 
@@ -1138,12 +1189,16 @@ Singleton {
                         role: "user",
                         action: h.action || "ask",
                         text: hDisplay,
+                        sourceText: h.text || "",
+                        prompt: hPrompt,
                         timestamp: hTime
                     })
                     msgs.push({
                         id: "a_" + (h.id || i),
                         role: "assistant",
                         action: h.action || "ask",
+                        sourceText: h.text || "",
+                        prompt: hPrompt,
                         text: hAnswer,
                         isStreaming: false,
                         timestamp: hTime
@@ -1259,13 +1314,15 @@ Singleton {
         root.proposedProfile = null
     }
 
-    function runAction(action, customPrompt) {
+    function runAction(action, customPrompt, retrySourceText) {
         customPrompt = customPrompt || ""
+        const sourceText = String(retrySourceText !== undefined ? retrySourceText : (root.selectedText || ""))
         root.activeAction = action
         root.activePrompt = customPrompt
+        root._activeRequest = {action: action, prompt: customPrompt, sourceText: sourceText}
 
         const isAsk = (action === "ask" && customPrompt && customPrompt.trim().length > 0)
-        const hasText = (root.selectedText && root.selectedText.trim().length > 0)
+        const hasText = sourceText.trim().length > 0
 
         if (!hasText && !isAsk) {
             root.errorType = "no_selection"
@@ -1275,17 +1332,17 @@ Singleton {
         }
 
         let mode = "standalone"
+        let newAnchor = root.topicAnchor
+        let topicShift = false
         if (action === "ask") {
-            const shift = (root.thread.length > 0 && root.isTopicShift(customPrompt, root.thread, root.topicAnchor))
+            topicShift = (root.inputMode === "auto" && root.thread.length > 0 && root.isTopicShift(customPrompt, root.thread, root.topicAnchor))
             mode = root.resolveMode(customPrompt)
             if (mode === "standalone") {
-                root.clearThread(false)
                 if (!root.activeChatId) {
                     root.activeChatId = "t_" + Date.now().toString(36)
                 }
-                root.currentThreadId = root.activeChatId
-                root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
-                if (shift) {
+                newAnchor = (customPrompt || sourceText).trim().replace(/\s+/g, " ").slice(0, 350)
+                if (topicShift && retrySourceText === undefined) {
                     const msgs = (root.messages || []).slice()
                     msgs.push({
                         id: "shift_" + Date.now(),
@@ -1295,61 +1352,43 @@ Singleton {
                     root.messages = msgs
                 }
             } else if (!root.topicAnchor || root.thread.length === 0) {
-                if (root.selectedText && root.selectedText.trim().length > 0) {
-                    const raw = root.selectedText.trim().replace(/\s+/g, " ")
-                    root.topicAnchor = raw.slice(0, 350)
+                if (sourceText.trim().length > 0) {
+                    const raw = sourceText.trim().replace(/\s+/g, " ")
+                    newAnchor = raw.slice(0, 350)
                 } else if (customPrompt && customPrompt.trim().length > 0) {
-                    root.topicAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
+                    newAnchor = customPrompt.trim().replace(/\s+/g, " ").slice(0, 350)
                 }
             }
         }
+        root._activeRequest = {
+            action: action, prompt: customPrompt, sourceText: sourceText, mode: mode,
+            newAnchor: newAnchor, topicShift: topicShift
+        }
 
         const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        const promptSnippet = root.selectedText ? (root.selectedText.trim().slice(0, 140) + (root.selectedText.trim().length > 140 ? "…" : "")) : ""
+        const promptSnippet = sourceText ? (sourceText.trim().slice(0, 140) + (sourceText.trim().length > 140 ? "…" : "")) : ""
         const userMsg = {
             id: "u_" + Date.now(),
             role: "user",
             action: action,
             text: customPrompt ? customPrompt : (action && action !== "ask" ? (action.toUpperCase() + ": " + promptSnippet) : promptSnippet),
+            sourceText: sourceText,
+            prompt: customPrompt,
             timestamp: nowStr
-        }
-
-        // Check in-memory cache for instant replay
-        const cacheKey = root.getCacheKey(action, root.selectedText, customPrompt)
-        const cached = root.responseCache[cacheKey]
-        if (cached && !customPrompt) {
-            root.cancelCurrentRequest()
-            root.resultText = cached.resultText
-            root.providerUsed = cached.provider + " (cached)"
-            root.latencyMs = 0
-            root.isTruncated = !!cached.isTruncated
-            root.truncatedAt = cached.truncatedAt || 12000
-            root.errorMessage = ""
-            root.errorType = ""
-            root.isLoading = false
-
-            const assistantMsg = {
-                id: "a_" + Date.now(),
-                role: "assistant",
-                action: action,
-                text: cached.resultText,
-                isStreaming: false,
-                timestamp: nowStr
-            }
-            const msgsList = (root.messages || []).slice()
-            msgsList.push(userMsg)
-            msgsList.push(assistantMsg)
-            root.messages = msgsList
-            return
         }
 
         // Cancel previous request if still running
         root.cancelCurrentRequest()
+        root._requestSerial += 1
+        const requestId = "assistant_" + root._requestSerial
+        root._activeRequest.id = requestId
 
         const assistantMsg = {
             id: "a_" + Date.now(),
             role: "assistant",
             action: action,
+            sourceText: sourceText,
+            prompt: customPrompt,
             text: "",
             isStreaming: true,
             timestamp: nowStr
@@ -1362,31 +1401,25 @@ Singleton {
         root.isLoading = true
         root.errorMessage = ""
         root.errorType = ""
+        root.requestState = "waiting"
         root.rawResultText = ""
         root.resultText = ""
         root.isTruncated = false
         root.recalledContext = null
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
-        const args = ["python3", "-u", scriptPath, action, root.selectedText]
-        if (customPrompt.length > 0) {
-            args.push(customPrompt)
-        }
-        if (action === "ask") {
-            args.push("--mode", mode)
-            args.push("--thread", JSON.stringify(root.thread || []))
-            if (root.topicAnchor && root.topicAnchor.length > 0) {
-                args.push("--anchor", root.topicAnchor)
-            }
-        }
-
-        const queryForContext = (action === "ask") ? (customPrompt || root.selectedText) : root.selectedText
+        const queryForContext = (action === "ask") ? (customPrompt || sourceText) : sourceText
         const memContext = Memory.getPromptInjection(queryForContext)
-        if (memContext && memContext.length > 0) {
-            args.push("--context", memContext)
+        apiProc.command = ["python3", "-u", scriptPath, action, "--stdin-json"]
+        root._pendingApiInput = {
+            request_id: requestId,
+            text: sourceText,
+            custom_prompt: customPrompt,
+            mode: mode,
+            thread: (action === "ask" && mode === "followup") ? (root.thread || []) : [],
+            anchor: (action === "ask" && mode === "followup") ? (root.topicAnchor || newAnchor || "") : "",
+            context: memContext || ""
         }
-
-        apiProc.command = args
         apiProc.running = true
     }
 }

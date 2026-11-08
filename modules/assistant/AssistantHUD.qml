@@ -203,7 +203,7 @@ FocusScope {
 
         if (event.key === Qt.Key_S && (event.modifiers & Qt.AltModifier)) {
             if (Assistant.resultText.length > 0 && !Assistant.isGenerating && !Memory.isCreatingQuickCard) {
-                Memory.createCardFromAssistant(Assistant.selectedText || Assistant.activePrompt, Assistant.resultText, Assistant.activeAction)
+                Memory.createCardFromAssistant(Assistant._activeRequest?.sourceText || Assistant.activePrompt, Assistant.resultText, Assistant.activeAction)
                 event.accepted = true
                 return
             }
@@ -1218,8 +1218,9 @@ FocusScope {
                                 }
 
                                 // 3. Assistant Answer Card
-                                StyledRect {
-                                    visible: modelData.role === "assistant"
+                                    StyledRect {
+                                        id: assistantMessageCard
+                                        visible: modelData.role === "assistant"
                                     Layout.fillWidth: true
                                     implicitHeight: assistantMsgCol.implicitHeight + 16
                                     radius: Tokens.rounding.medium
@@ -1240,7 +1241,7 @@ FocusScope {
                                         TextEdit {
                                             id: msgTextEdit
                                             Layout.fillWidth: true
-                                            text: displayText
+                                            text: assistantMessageCard.displayText
                                             readOnly: true
                                             selectByMouse: true
                                             selectByKeyboard: true
@@ -1263,7 +1264,7 @@ FocusScope {
 
                                         // Streaming Shimmer Indicator when waiting for first token
                                         RowLayout {
-                                            visible: isCurrentStreaming && (!msgTextEdit.text || msgTextEdit.text.length === 0)
+                                            visible: assistantMessageCard.isCurrentStreaming && (!msgTextEdit.text || msgTextEdit.text.length === 0)
                                             spacing: 6
 
                                             MaterialIcon {
@@ -1276,7 +1277,7 @@ FocusScope {
                                                     to: 360
                                                     duration: 1000
                                                     loops: Animation.Infinite
-                                                    running: isCurrentStreaming
+                                                    running: assistantMessageCard.isCurrentStreaming
                                                 }
                                             }
 
@@ -1291,7 +1292,7 @@ FocusScope {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 4
-                                            visible: !isCurrentStreaming && Boolean(displayText && displayText.length > 0)
+                                            visible: !assistantMessageCard.isCurrentStreaming && Boolean(assistantMessageCard.displayText && assistantMessageCard.displayText.length > 0)
 
                                             StyledText {
                                                 text: modelData.timestamp || ""
@@ -1302,9 +1303,9 @@ FocusScope {
                                             Item { Layout.fillWidth: true }
 
                                             MessageActionBar {
-                                                text: displayText
+                                                text: assistantMessageCard.displayText
                                                 action: modelData.action || "ask"
-                                                sourceText: Assistant.selectedText || Assistant.activePrompt
+                                                sourceText: modelData.sourceText || modelData.prompt || ""
                                             }
                                         }
                                     }
