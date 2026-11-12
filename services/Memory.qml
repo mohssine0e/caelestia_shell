@@ -561,7 +561,9 @@ Singleton {
             try {
                 const res = JSON.parse(fullText)
                 if (res.success) {
-                    root.distillMessage = "Distilled " + (res.new_cards || 0) + " new, " + (res.updated_cards || 0) + " updated."
+                    root.distillMessage = (res.new_cards || 0) > 0
+                        ? "Found " + res.new_cards + " memory suggestion(s) for review."
+                        : (res.message || "No new memory suggestions.")
                     root.reload()
                 } else {
                     root.distillError = res.error || "Distill failed."

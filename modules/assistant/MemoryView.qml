@@ -18,11 +18,9 @@ FocusScope {
     signal closeRequested()
 
     property var windowRef: null
-    property string typeFilter: "all" // "all" | "knowledge" | "fact" | "context"
+    property string typeFilter: "all" // "all" | "knowledge" | "fact"
     property string searchQuery: ""
     property string debouncedSearchQuery: ""
-    property string statusFilter: "all" // "all" | "learning" | "mastered"
-    property string selectedConcept: ""
     property string editingCardId: ""
     property string editingTopic: ""
     property string editingLinesText: ""
@@ -46,16 +44,21 @@ FocusScope {
         return cnt
     }
 
-    readonly property int contextCount: {
-        const list = Memory.cards || []
-        let cnt = 0
-        for (let i = 0; i < list.length; i++) {
-            if (list[i] && list[i].type === "context") cnt++
-        }
-        return cnt
-    }
+    readonly property var pendingProposals: (Memory.proposals || []).filter(p => p && p.type !== "context" && p.review_status !== "dismissed")
+    readonly property var currentProposal: root.pendingProposals.length ? root.pendingProposals[0] : null
 
-    readonly property var pendingProposals: (Memory.proposals || []).filter(p => p && p.review_status !== "dismissed")
+    function proposalSource(proposal) {
+        const ids = proposal && Array.isArray(proposal.sources) ? proposal.sources : []
+        const history = Assistant.history || []
+        for (let i = 0; i < ids.length; i++) {
+            for (let j = 0; j < history.length; j++) {
+                if (String(history[j].id) === String(ids[i])) {
+                    return history[j].prompt || history[j].text || history[j].original || ""
+                }
+            }
+        }
+        return qsTr("Source conversation unavailable")
+    }
 
     Timer {
         id: searchDebounceTimer
@@ -69,57 +72,6 @@ FocusScope {
     function resetGauntlet() {
         if (gauntletView) gauntletView.reset()
     }
-
-    // Dynamic Topics & Concepts Extraction
-    readonly property int uniqueTopicCount: {
-        const list = Memory.cards || []
-        const set = new Set()
-        for (let i = 0; i < list.length; i++) {
-            if (list[i] && list[i].topic) set.add(String(list[i].topic).trim().toLowerCase())
-        }
-        return set.size
-    }
-
-    readonly property var availableConcepts: {
-        const counts = {}
-        const list = Memory.cards || []
-        for (let i = 0; i < list.length; i++) {
-            const c = list[i]
-            if (!c) continue
-            const tags = Array.isArray(c.tags) ? c.tags : []
-            for (let j = 0; j < tags.length; j++) {
-                const t = String(tags[j]).trim().toLowerCase()
-                if (!t) continue
-                counts[t] = (counts[t] || 0) + 1
-            }
-        }
-        const result = []
-        const keys = Object.keys(counts)
-        for (let i = 0; i < keys.length; i++) {
-            result.push({ name: keys[i], count: counts[keys[i]] })
-        }
-        result.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-        return result
-    }
-
-    readonly property var filterChips: {
-        const chips = [{
-            name: qsTr("All"),
-            tag: "",
-            count: Memory.totalCount
-        }]
-        const concepts = root.availableConcepts
-        for (let i = 0; i < concepts.length; i++) {
-            chips.push({
-                name: concepts[i].name,
-                tag: concepts[i].name,
-                count: concepts[i].count
-            })
-        }
-        return chips
-    }
-
-
 
     Keys.onEscapePressed: event => {
         if (root.isInChallengeMode) {
@@ -139,8 +91,6 @@ FocusScope {
     function jumpToCard(cardId) {
         if (!cardId) return
         const targetId = String(cardId)
-        root.statusFilter = "all"
-        root.selectedConcept = ""
         root.searchQuery = ""
         root.debouncedSearchQuery = ""
         if (searchInput) searchInput.text = ""
@@ -192,77 +142,22 @@ FocusScope {
         root.cancelEditing()
     }
 
-    function getCardTimestamp(card) {
-        if (!card) return 0
-        let maxTime = 0
-        if (card.updated) {
-            const t = Date.parse(card.updated)
-            if (!isNaN(t)) maxTime = Math.max(maxTime, t)
-        }
-        if (card.created) {
-            const t = Date.parse(card.created)
-            if (!isNaN(t)) maxTime = Math.max(maxTime, t)
-        }
-        return maxTime
-    }
-
-    function formatCardTime(card) {
-        const ts = root.getCardTimestamp(card)
-        if (!ts) return ""
-        const diff = Math.floor((Date.now() - ts) / 1000)
-        if (diff < 60) return qsTr("just now")
-        if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
-        if (diff < 86400) return qsTr("%1h ago").arg(Math.floor(diff / 86400))
-        if (diff < 604800) return qsTr("%1d ago").arg(Math.floor(diff / 86400))
-        return new Date(ts).toLocaleDateString(Qt.locale(), "MMM d")
-    }
-
     readonly property var filteredCards: {
         const all = Memory.cards || []
         const tf = root.typeFilter
-        const sf = root.statusFilter
-        const sc = root.selectedConcept ? root.selectedConcept.toLowerCase() : ""
         const q = (root.debouncedSearchQuery || "").trim().toLowerCase()
-
-        if (tf === "all" && sf === "all" && sc.length === 0 && q.length === 0) {
-            return all.slice().sort((a, b) => (b._ts || 0) - (a._ts || 0))
-        }
 
         const list = []
         for (let i = 0; i < all.length; i++) {
             const card = all[i]
-            if (!card) continue
+            if (!card || card.type === "context") continue
 
-            // 1. Type Filter [All] [Deep Knowledge] [Flash Facts] [Context]
             if (tf !== "all") {
                 const ctype = card.type || "knowledge"
                 if (tf === "knowledge" && ctype !== "knowledge") continue
                 if (tf === "fact" && ctype !== "fact") continue
-                if (tf === "context" && ctype !== "context") continue
             }
 
-            // 2. Status Filter
-            if (card.type !== "context") {
-                if (sf === "mastered" && card.status !== "mastered") continue
-                if (sf === "learning" && card.status === "mastered") continue
-            } else if (sf !== "all") {
-                continue
-            }
-
-            // 3. Concept Filter
-            if (sc.length > 0) {
-                const tags = card.tags || []
-                let matchConcept = false
-                for (let j = 0; j < tags.length; j++) {
-                    if (String(tags[j]).toLowerCase() === sc) {
-                        matchConcept = true
-                        break
-                    }
-                }
-                if (!matchConcept) continue
-            }
-
-            // 4. Search Query
             if (q.length > 0) {
                 const topic = (card.title || card.topic || card.front || card.project_path || "").toLowerCase()
                 const back = (card.back || "").toLowerCase()
@@ -375,41 +270,15 @@ FocusScope {
                         spacing: 5
 
                         StyledText {
-                            text: qsTr("%1 cards").arg(Memory.totalCount)
+                            text: qsTr("%1 saved").arg(root.knowledgeCount + root.factCount)
                             font: Tokens.font.label.small
                             color: Colours.palette.m3onSurface
                         }
 
-                        StyledText {
-                            text: "•"
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3outline
-                        }
-
-                        StyledText {
-                            text: qsTr("%1 topics").arg(root.uniqueTopicCount)
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
                     }
                 }
 
                 Item { Layout.fillWidth: true }
-
-                // Daily Gauntlet Action (Compact 28x28 button saving maximum header space)
-                IconButton {
-                    visible: !Memory.isDistilling && !root.isInChallengeMode
-                    icon: Memory.isDailyGauntletLoading ? "progress_activity" : "psychology_alt"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    type: IconButton.Tonal
-                    enabled: Memory.memoryWritesAllowed && !Memory.isDailyGauntletLoading
-                    onClicked: {
-                        root.resetGauntlet()
-                        Memory.startDailyGauntlet()
-                    }
-                }
 
                 // Distill Actions
                 RowLayout {
@@ -523,10 +392,10 @@ FocusScope {
         }
 
         StyledRect {
-            visible: !root.isInChallengeMode && root.pendingProposals.length > 0
+            visible: !root.isInChallengeMode && root.currentProposal !== null
             Layout.fillWidth: true
             implicitHeight: proposalColumn.implicitHeight + 16
-            radius: Tokens.rounding.medium
+            radius: Tokens.rounding.small
             color: Colours.palette.m3surfaceContainerLow
 
             ColumnLayout {
@@ -538,69 +407,65 @@ FocusScope {
                     Layout.fillWidth: true
                     StyledText {
                         Layout.fillWidth: true
-                        text: qsTr("Review suggestions (%1)").arg(root.pendingProposals.length)
-                        font: Tokens.font.title.small
+                        text: qsTr("Memory suggestion · %1 remaining").arg(root.pendingProposals.length)
+                        font: Tokens.font.label.large
                         color: Colours.palette.m3onSurface
                     }
+                }
+                StyledText {
+                    Layout.fillWidth: true
+                    text: (root.currentProposal && (root.currentProposal.title || root.currentProposal.front)) || qsTr("Knowledge suggestion")
+                    font: Tokens.font.body.medium
+                    color: Colours.palette.m3onSurface
+                    wrapMode: Text.Wrap
+                }
+                StyledText {
+                    visible: !!(root.currentProposal && (root.currentProposal.mental_model || root.currentProposal.summary || root.currentProposal.back))
+                    Layout.fillWidth: true
+                    text: root.currentProposal && root.currentProposal.type === "fact"
+                        ? root.currentProposal.back
+                        : (root.currentProposal ? (root.currentProposal.mental_model || root.currentProposal.summary || "") : "")
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3onSurfaceVariant
+                    wrapMode: Text.Wrap
+                }
+                Repeater {
+                    model: root.currentProposal ? (root.currentProposal.invariants || []).slice(0, 2) : []
+                    delegate: StyledText {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        text: "• " + modelData
+                        font: Tokens.font.body.small
+                        color: Colours.palette.m3onSurfaceVariant
+                        wrapMode: Text.Wrap
+                    }
+                }
+                StyledText {
+                    Layout.fillWidth: true
+                    text: root.currentProposal ? qsTr("From: %1").arg(root.proposalSource(root.currentProposal)) : ""
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3outline
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                }
+                RowLayout {
+                    Layout.fillWidth: true
                     StyledText {
-                        text: qsTr("Preferences belong in Profile")
+                        Layout.fillWidth: true
+                        text: root.currentProposal && root.currentProposal.scope === "project" ? qsTr("Project knowledge") : qsTr("General knowledge")
                         font: Tokens.font.label.small
                         color: Colours.palette.m3onSurfaceVariant
                     }
-                }
-                Repeater {
-                    model: root.pendingProposals
-                    delegate: StyledRect {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: proposalRow.implicitHeight + 12
-                        radius: Tokens.rounding.small
-                        color: Colours.palette.m3surfaceContainer
-                        RowLayout {
-                            id: proposalRow
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 8
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: modelData.title || modelData.front || qsTr("Knowledge suggestion")
-                                    font: Tokens.font.label.large
-                                    color: Colours.palette.m3onSurface
-                                    elide: Text.ElideRight
-                                }
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: modelData.scope === "project" ? qsTr("Project knowledge") : qsTr("General knowledge")
-                                    font: Tokens.font.label.small
-                                    color: Colours.palette.m3onSurfaceVariant
-                                }
-                            }
-                            TextButton {
-                                text: qsTr("Change scope")
-                                type: TextButton.Tonal
-                                onClicked: {
-                                    const next = (Memory.proposals || []).slice()
-                                    const i = next.findIndex(p => String(p.id) === String(modelData.id))
-                                    if (i >= 0) {
-                                        next[i].scope = next[i].scope === "project" ? "general" : "project"
-                                        Memory.proposals = next
-                                        Memory.saveProposals()
-                                    }
-                                }
-                            }
-                            TextButton {
-                                text: qsTr("Dismiss")
-                                type: TextButton.Text
-                                onClicked: Memory.reviewProposal(modelData.id, false)
-                            }
-                            TextButton {
-                                text: qsTr("Accept")
-                                type: TextButton.Tonal
-                                onClicked: Memory.reviewProposal(modelData.id, true)
-                            }
-                        }
+                    TextButton {
+                        text: qsTr("Dismiss")
+                        type: TextButton.Text
+                        onClicked: Memory.reviewProposal(root.currentProposal.id, false)
+                    }
+                    TextButton {
+                        text: qsTr("Keep in memory")
+                        type: TextButton.Tonal
+                        onClicked: Memory.reviewProposal(root.currentProposal.id, true)
                     }
                 }
             }
@@ -627,17 +492,16 @@ FocusScope {
             spacing: 8
             visible: !root.isInChallengeMode
 
-            // Row 0: Type Selector Pills [All] [Deep Knowledge] [Flash Facts] [Context]
+            // Simple type filters; workspace context remains out of the knowledge list.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
 
                 Repeater {
                     model: [
-                        { id: "all", label: qsTr("All"), count: Memory.totalCount, icon: "apps" },
-                        { id: "knowledge", label: qsTr("Deep Knowledge"), count: root.knowledgeCount, icon: "psychology" },
-                        { id: "fact", label: qsTr("Flash Facts"), count: root.factCount, icon: "bolt" },
-                        { id: "context", label: qsTr("Context"), count: root.contextCount, icon: "folder_special" }
+                        { id: "all", label: qsTr("All"), count: root.knowledgeCount + root.factCount, icon: "apps" },
+                        { id: "knowledge", label: qsTr("Knowledge"), count: root.knowledgeCount, icon: "psychology" },
+                        { id: "fact", label: qsTr("Facts"), count: root.factCount, icon: "bolt" }
                     ]
 
                     delegate: StyledRect {
@@ -686,6 +550,20 @@ FocusScope {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                IconTextButton {
+                    visible: !Memory.isDistilling
+                    enabled: Memory.memoryWritesAllowed && !Memory.isDailyGauntletLoading
+                    text: Memory.dueCount > 0 ? qsTr("Practice · %1 due").arg(Memory.dueCount) : qsTr("Practice")
+                    icon: Memory.isDailyGauntletLoading ? "progress_activity" : "psychology_alt"
+                    type: IconTextButton.Tonal
+                    implicitHeight: 28
+                    horizontalPadding: Tokens.padding.small
+                    onClicked: {
+                        root.resetGauntlet()
+                        Memory.startDueChallenge()
+                    }
+                }
             }
 
             // Row 1: Search Bar & Segmented Status Capsule
@@ -733,7 +611,7 @@ FocusScope {
 
                             StyledText {
                                 visible: searchInput.text.length === 0
-                                text: qsTr("Search cards, topics, or code…")
+                                text: qsTr("Search saved knowledge…")
                                 font: Tokens.font.body.small
                                 color: Colours.palette.m3outline
                             }
@@ -756,211 +634,6 @@ FocusScope {
                     }
                 }
 
-                // Compact Segmented Status Capsule (Counts + Filter)
-                StyledRect {
-                    implicitHeight: 34
-                    implicitWidth: statusSegmentRow.implicitWidth + 8
-                    radius: Tokens.rounding.full
-                    color: Colours.palette.m3surfaceContainerLow
-                    border.width: 1
-                    border.color: Colours.palette.m3outlineVariant
-
-                    RowLayout {
-                        id: statusSegmentRow
-                        anchors.centerIn: parent
-                        spacing: 3
-
-                        // All Segment
-                        StyledRect {
-                            implicitHeight: 26
-                            implicitWidth: allText.implicitWidth + 14
-                            radius: Tokens.rounding.full
-                            color: root.statusFilter === "all" ? Colours.palette.m3primary : "transparent"
-
-                            StyledText {
-                                id: allText
-                                anchors.centerIn: parent
-                                text: qsTr("All %1").arg(Memory.totalCount)
-                                font: Tokens.font.label.small
-                                color: root.statusFilter === "all" ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.statusFilter = "all"
-                            }
-                        }
-
-                        // Learning Segment
-                        StyledRect {
-                            implicitHeight: 26
-                            implicitWidth: learningRow.implicitWidth + 14
-                            radius: Tokens.rounding.full
-                            color: root.statusFilter === "learning" ? Qt.alpha(Qt.color("#fbbf24"), 0.2) : "transparent"
-                            border.width: root.statusFilter === "learning" ? 1 : 0
-                            border.color: "#fbbf24"
-
-                            RowLayout {
-                                id: learningRow
-                                anchors.centerIn: parent
-                                spacing: 4
-
-                                Rectangle {
-                                    width: 7; height: 7; radius: 3.5
-                                    color: "#fbbf24"
-                                }
-
-                                StyledText {
-                                    text: String(Memory.learningCount)
-                                    font: Tokens.font.label.small
-                                    color: root.statusFilter === "learning" ? "#fbbf24" : Colours.palette.m3onSurfaceVariant
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.statusFilter = "learning"
-                            }
-                        }
-
-                        // Mastered Segment
-                        StyledRect {
-                            implicitHeight: 26
-                            implicitWidth: masteredRow.implicitWidth + 14
-                            radius: Tokens.rounding.full
-                            color: root.statusFilter === "mastered" ? Qt.alpha(Qt.color("#4ade80"), 0.2) : "transparent"
-                            border.width: root.statusFilter === "mastered" ? 1 : 0
-                            border.color: "#4ade80"
-
-                            RowLayout {
-                                id: masteredRow
-                                anchors.centerIn: parent
-                                spacing: 4
-
-                                Rectangle {
-                                    width: 7; height: 7; radius: 3.5
-                                    color: "#4ade80"
-                                }
-
-                                StyledText {
-                                    text: String(Memory.masteredCount)
-                                    font: Tokens.font.label.small
-                                    color: root.statusFilter === "mastered" ? "#4ade80" : Colours.palette.m3onSurfaceVariant
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.statusFilter = "mastered"
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Row 2: Concepts / Topics Filter Strip (Horizontal scrolling chips)
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                visible: root.filterChips.length > 1
-
-                MaterialIcon {
-                    text: "label"
-                    fontStyle: Tokens.font.icon.small
-                    color: Colours.palette.m3outline
-                }
-
-                ListView {
-                    id: conceptListView
-                    Layout.fillWidth: true
-                    implicitHeight: 30
-                    orientation: ListView.Horizontal
-                    spacing: 6
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-
-                    model: root.filterChips
-
-                    delegate: StyledRect {
-                        id: chipRect
-                        required property var modelData
-                        required property int index
-
-                        readonly property bool isSelected: (modelData.tag === "" && root.selectedConcept === "") || (modelData.tag !== "" && root.selectedConcept === modelData.tag)
-
-                        implicitHeight: 26
-                        implicitWidth: chipInner.implicitWidth + 14
-                        radius: Tokens.rounding.full
-                        color: isSelected
-                            ? (modelData.tag === "" ? Colours.palette.m3primary : Colours.palette.m3secondaryContainer)
-                            : (chipMouse.containsMouse ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLow)
-                        border.width: 1
-                        border.color: isSelected
-                            ? (modelData.tag === "" ? Colours.palette.m3primary : Colours.palette.m3secondary)
-                            : Colours.palette.m3outlineVariant
-
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Behavior on border.color { ColorAnimation { duration: 120 } }
-
-                        RowLayout {
-                            id: chipInner
-                            anchors.centerIn: parent
-                            spacing: 4
-
-                            StyledText {
-                                text: modelData.name
-                                font: Tokens.font.label.small
-                                color: chipRect.isSelected
-                                    ? (modelData.tag === "" ? Colours.palette.m3onPrimary : Colours.palette.m3onSecondaryContainer)
-                                    : Colours.palette.m3onSurfaceVariant
-                            }
-
-                            StyledText {
-                                text: String(modelData.count)
-                                font: Tokens.font.label.small
-                                color: chipRect.isSelected
-                                    ? (modelData.tag === "" ? Colours.palette.m3onPrimary : Colours.palette.m3secondary)
-                                    : Colours.palette.m3outline
-                            }
-
-                            MaterialIcon {
-                                visible: chipRect.isSelected && modelData.tag !== ""
-                                text: "close"
-                                fontStyle: Tokens.font.icon.small
-                                color: Colours.palette.m3onSecondaryContainer
-                            }
-                        }
-
-                        MouseArea {
-                            id: chipMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (chipRect.modelData.tag === "") {
-                                    root.selectedConcept = ""
-                                } else if (root.selectedConcept === chipRect.modelData.tag) {
-                                    root.selectedConcept = ""
-                                } else {
-                                    root.selectedConcept = chipRect.modelData.tag
-                                }
-                            }
-                        }
-                    }
-                }
-
-                IconButton {
-                    visible: root.selectedConcept.length > 0
-                    type: IconButton.Text
-                    icon: "filter_alt_off"
-                    font: Tokens.font.icon.small
-                    implicitWidth: 24
-                    implicitHeight: 24
-                    onClicked: root.selectedConcept = ""
-                }
             }
         }
 
@@ -987,31 +660,30 @@ FocusScope {
 
                     MaterialIcon {
                         Layout.alignment: Qt.AlignHCenter
-                        text: (Memory.totalCount === 0) ? "menu_book" : "find_in_page"
+                        text: (root.knowledgeCount + root.factCount === 0) ? "menu_book" : "find_in_page"
                         fontStyle: Tokens.font.icon.large
                         color: Colours.palette.m3outline
                     }
 
                     StyledText {
                         Layout.alignment: Qt.AlignHCenter
-                        text: (Memory.totalCount === 0)
-                            ? qsTr("No memory cards yet. Distill conversations to extract cards.")
-                            : qsTr("No cards match your filter criteria.")
+                        text: (root.knowledgeCount + root.factCount === 0)
+                            ? qsTr("No saved knowledge yet. Extract suggestions from your conversations.")
+                            : qsTr("No saved knowledge matches this search.")
                         font: Tokens.font.body.small
                         color: Colours.palette.m3outline
                     }
 
                     TextButton {
-                        visible: Memory.totalCount > 0
+                        visible: root.searchQuery.length > 0 || root.typeFilter !== "all"
                         Layout.alignment: Qt.AlignHCenter
-                        text: qsTr("Reset Filters")
+                        text: qsTr("Clear search")
                         type: TextButton.Tonal
                         onClicked: {
                             searchInput.text = ""
                             root.searchQuery = ""
                             root.debouncedSearchQuery = ""
-                            root.statusFilter = "all"
-                            root.selectedConcept = ""
+                            root.typeFilter = "all"
                         }
                     }
                 }
@@ -1040,7 +712,6 @@ FocusScope {
                     width: cardsListView.width
                     editingCardId: root.editingCardId
                     expandedCardId: root.expandedCardId
-                    selectedConcept: root.selectedConcept
                     editingLinesText: root.editingLinesText
                     onStartEditingRequested: cardData => root.startEditing(cardData)
                     onCancelEditingRequested: root.cancelEditing()
@@ -1054,9 +725,6 @@ FocusScope {
                     onStartChallengeRequested: cardId => {
                         root.resetGauntlet()
                         Memory.startChallenge(cardId)
-                    }
-                    onSelectConceptRequested: concept => {
-                        root.selectedConcept = (root.selectedConcept === concept ? "" : concept)
                     }
                     onEditLinesTextChanged: text => {
                         root.editingLinesText = text

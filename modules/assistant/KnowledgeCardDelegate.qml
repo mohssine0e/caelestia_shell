@@ -66,24 +66,6 @@ StyledRect {
         return []
     }
 
-    function formatTime(t) {
-        if (!t) return ""
-        let ts = 0
-        if (t.updated) {
-            const parsed = Date.parse(t.updated)
-            if (!isNaN(parsed)) ts = Math.max(ts, parsed)
-        }
-        if (t.created) {
-            const parsed = Date.parse(t.created)
-            if (!isNaN(parsed)) ts = Math.max(ts, parsed)
-        }
-        if (!ts) return ""
-        const diff = Math.floor((Date.now() - ts) / 1000)
-        if (diff < 60) return qsTr("just now")
-        if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
-        if (diff < 86400) return qsTr("%1h ago").arg(Math.floor(diff / 86400))
-        return new Date(ts).toLocaleDateString(Qt.locale(), "MMM d")
-    }
 
     width: parent ? parent.width : 0
     implicitHeight: mainCol.implicitHeight + 18
@@ -143,12 +125,6 @@ StyledRect {
                 tone: Colours.palette.m3tertiary
             }
 
-            StyledText {
-                text: root.formatTime(root.card)
-                font: Tokens.font.label.small
-                color: Colours.palette.m3outline
-            }
-
             MaterialIcon {
                 text: root.isExpanded ? "expand_less" : "expand_more"
                 fontStyle: Tokens.font.icon.small
@@ -174,29 +150,6 @@ StyledRect {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
-
-                StyledRect {
-                    implicitWidth: primerTagRow.implicitWidth + 10
-                    implicitHeight: 22
-                    radius: Tokens.rounding.full
-                    color: root.card?.primer ? Qt.alpha(Colours.palette.m3primary, 0.12) : Colours.palette.m3surfaceContainerHigh
-
-                    RowLayout {
-                        id: primerTagRow
-                        anchors.centerIn: parent
-                        spacing: 4
-                        MaterialIcon {
-                            text: root.card?.primer ? "auto_awesome" : "notes"
-                            fontStyle: Tokens.font.icon.small
-                            color: root.card?.primer ? Colours.palette.m3primary : Colours.palette.m3outline
-                        }
-                        StyledText {
-                            text: root.card?.primer ? qsTr("Enriched ✨") : qsTr("Basic")
-                            font: Tokens.font.label.small
-                            color: root.card?.primer ? Colours.palette.m3primary : Colours.palette.m3outline
-                        }
-                    }
-                }
 
                 Flickable {
                     Layout.fillWidth: true
@@ -487,4 +440,3 @@ StyledRect {
         }
     }
 }
-

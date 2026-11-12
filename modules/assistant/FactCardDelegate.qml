@@ -28,24 +28,6 @@ StyledRect {
     readonly property bool isExpanded: (cardId.length > 0 && expandedCardId === cardId) || isEditing
     readonly property bool isEditing: cardId.length > 0 && editingCardId === cardId
 
-    function formatTime(t) {
-        if (!t) return ""
-        let ts = 0
-        if (t.updated) {
-            const parsed = Date.parse(t.updated)
-            if (!isNaN(parsed)) ts = Math.max(ts, parsed)
-        }
-        if (t.created) {
-            const parsed = Date.parse(t.created)
-            if (!isNaN(parsed)) ts = Math.max(ts, parsed)
-        }
-        if (!ts) return ""
-        const diff = Math.floor((Date.now() - ts) / 1000)
-        if (diff < 60) return qsTr("just now")
-        if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
-        if (diff < 86400) return qsTr("%1h ago").arg(Math.floor(diff / 86400))
-        return new Date(ts).toLocaleDateString(Qt.locale(), "MMM d")
-    }
 
     width: parent ? parent.width : 0
     implicitHeight: mainCol.implicitHeight + 18
@@ -90,20 +72,6 @@ StyledRect {
                 font: Tokens.font.title.small
                 color: Colours.palette.m3onSurface
                 elide: Text.ElideRight
-            }
-
-            // Badge
-            AssistantBadge {
-                icon: "bolt"
-                text: qsTr("Flash Fact")
-                tone: Colours.palette.m3secondary
-            }
-
-            // Timestamp
-            StyledText {
-                text: root.formatTime(root.card)
-                font: Tokens.font.label.small
-                color: Colours.palette.m3outline
             }
 
             // Expand Chevron
@@ -282,4 +250,3 @@ StyledRect {
         }
     }
 }
-

@@ -491,11 +491,11 @@ def get_context(query_text):
 # ---------------------------------------------------------
 DISTILL_PROMPT = """You are a strict knowledge classifier. Analyze the chat history and propose durable technical knowledge only.
 
-Do not create cards for personal preferences, response style, identity, or general instructions about how the assistant should behave; those belong in the user's separate Profile settings. For every knowledge/fact card, set scope to 'general' or 'project'. Use 'project' only when the source explicitly concerns a named/path-specific project; include project_path when known. Do not infer a project path. Workspace context proposals are project scoped.
+Do not create cards for personal preferences, response style, identity, or general instructions about how the assistant should behave; those belong in the user's separate Profile settings. For every knowledge/fact card, set scope to 'general' or 'project'. Use 'project' only when the source explicitly concerns a named/path-specific project; include project_path when known. Do not infer a project path.
 
 If it is a DEEP CONCEPT, you MUST extract a Mental Model, at least 2 Invariants, a valid Code Snippet, and at least 1 personal trap. Output as type 'knowledge'.
 If it is a QUICK FACT, output only a 1-sentence question and a 1-sentence answer. Output as type 'fact'.
-If it is a WORKSPACE CONTEXT, extract project_path and git_branch. Output as type 'context'.
+Do not create standalone workspace-context cards. Add project scope to a technical knowledge card only when the conversation contains durable project-specific knowledge.
 
 DO NOT output generic summaries. Output STRICT JSON.
 
@@ -529,14 +529,6 @@ OUTPUT JSON SCHEMA:
       "back": "1-sentence authoritative answer.",
       "tags": ["relevant", "tags"],
       "sources": ["source_interaction_id"]
-    },
-    {
-      "id": "ctx_<slug>",
-      "type": "context",
-      "scope": "project",
-      "project_path": "/path/to/project",
-      "git_branch": "main",
-      "last_active": "ISO8601"
     }
   ]
 }
@@ -649,6 +641,8 @@ def distill():
         if not isinstance(nc, dict):
             continue
         ctype = nc.get("type", "knowledge")
+        if ctype not in ("knowledge", "fact"):
+            continue
         scope = "project" if ctype == "context" else (nc.get("scope") if nc.get("scope") in ("general", "project") else "general")
         title = nc.get("title") or nc.get("topic") or nc.get("front") or "Workspace Context"
         sources = list(dict.fromkeys(str(s) for s in nc.get("sources", []) if s))

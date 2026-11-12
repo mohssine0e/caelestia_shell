@@ -10,7 +10,6 @@ Item {
     property bool showArchived: false
     property string editingCardId: ""
     property string expandedCardId: ""
-    property string selectedConcept: ""
     property string editingLinesText: ""
 
     signal startEditingRequested(var cardData)
@@ -18,7 +17,6 @@ Item {
     signal saveEditingRequested(string cardId, string text)
     signal toggleExpandRequested(string cardId)
     signal startChallengeRequested(string cardId)
-    signal selectConceptRequested(string concept)
     signal editLinesTextChanged(string text)
 
     readonly property string cardType: card ? (card.type || "knowledge") : "knowledge"
