@@ -4,7 +4,7 @@
 #include "settings/singleton.hpp"
 #include "common.hpp"
 
-namespace caelestia::state {
+namespace caelestia::shell::state {
 
 class PStateRoot : public settings::RootNode {
     STATE_NODE_NO_CTOR(PStateRoot, settings::RootNode)
@@ -29,7 +29,7 @@ public:
     explicit RStateRoot(const QString& path, RStateRoot* fallback = nullptr, QObject* parent = nullptr);
 };
 
-SETTINGS_SINGLETON_DECL(PersistentState, PStateRoot, PersistentState)
-SETTINGS_SINGLETON_DECL(RuntimeState, RStateRoot, RuntimeState)
+SETTINGS_SINGLETON_DECL(PersistentState, caelestia::shell::state::PStateRoot, PersistentState)
+SETTINGS_SINGLETON_DECL(RuntimeState, caelestia::shell::state::RStateRoot, RuntimeState)
 
-} // namespace caelestia::state
+} // namespace caelestia::shell::state

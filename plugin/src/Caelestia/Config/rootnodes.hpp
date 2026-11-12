@@ -22,7 +22,7 @@
 #include "userpaths.hpp"
 #include "utilitiesconfig.hpp"
 
-namespace caelestia::config {
+namespace caelestia::shell::config {
 
 class ConfigRoot : public settings::RootNode {
     CONFIG_NODE_NO_CTOR(ConfigRoot, settings::RootNode)
@@ -100,7 +100,7 @@ template <ConfigKind Kind> void Handler<Kind>::saveFailed(const QString& error, 
 
 } // namespace detail
 
-SETTINGS_SINGLETON_DECL(ConfigSingleton, ConfigRoot, GlobalConfig)
-SETTINGS_SINGLETON_DECL(TokensSingleton, TokensRoot, TokenConfig)
+SETTINGS_SINGLETON_DECL(ConfigSingleton, caelestia::shell::config::ConfigRoot, GlobalConfig)
+SETTINGS_SINGLETON_DECL(TokensSingleton, caelestia::shell::config::TokensRoot, TokenConfig)
 
-} // namespace caelestia::config
+} // namespace caelestia::shell::config
