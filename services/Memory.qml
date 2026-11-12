@@ -12,6 +12,7 @@ Singleton {
     // ── State ────────────────────────────────────────────────────
     property var cards: []
     property var proposals: []
+    property string proposalStoreError: ""
     readonly property string proposalsPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory_proposals.json"
     property string memoryStoreState: "checking" // checking | healthy | backup_pending | blocked | backup_failed
     property string memoryBackupPath: ""
@@ -222,13 +223,21 @@ Singleton {
             try {
                 const parsed = JSON.parse(text())
                 root.proposals = Array.isArray(parsed) ? parsed : []
-            } catch (e) { root.proposals = [] }
+                root.proposalStoreError = ""
+            } catch (e) {
+                root.proposals = []
+                root.proposalStoreError = qsTr("Memory suggestions could not be read. The file was left untouched.")
+            }
         }
         onLoadFailed: err => {
             if (err === FileViewError.FileNotFound) {
                 root.proposals = []
+                root.proposalStoreError = ""
                 Qt.callLater(() => proposalsStorage.setText("[]"))
-            } else root.proposals = []
+            } else {
+                root.proposals = []
+                root.proposalStoreError = qsTr("Memory suggestions could not be loaded. The file was left untouched.")
+            }
         }
     }
 

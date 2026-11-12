@@ -52,6 +52,7 @@ Singleton {
     property int _requestSerial: 0
     property string requestState: "idle" // idle | waiting | streaming | completed | failed | cancelled
     property var recalledContext: null
+    property bool personalContextEnabled: true
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
 
     // Delegated to Memory.qml singleton
@@ -1411,7 +1412,7 @@ Singleton {
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
         const queryForContext = (action === "ask") ? (customPrompt || sourceText) : sourceText
-        const memContext = Memory.getPromptInjection(queryForContext)
+        const memContext = root.personalContextEnabled ? Memory.getPromptInjection(queryForContext) : ""
         apiProc.command = ["python3", "-u", scriptPath, action, "--stdin-json"]
         root._pendingApiInput = {
             request_id: requestId,
@@ -1420,7 +1421,8 @@ Singleton {
             mode: mode,
             thread: (action === "ask" && mode === "followup") ? (root.thread || []) : [],
             anchor: (action === "ask" && mode === "followup") ? (root.topicAnchor || newAnchor || "") : "",
-            context: memContext || ""
+            context: memContext || "",
+            include_personal_context: root.personalContextEnabled
         }
         apiProc.running = true
     }

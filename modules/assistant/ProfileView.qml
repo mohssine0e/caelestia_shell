@@ -36,6 +36,7 @@ FocusScope {
     property bool showGroqKey: false
 
     property bool savedFeedback: false
+    implicitHeight: profileLayout.implicitHeight
 
     function syncFromService() {
         const p = Assistant.profile || Assistant.defaultProfile || {}
@@ -75,6 +76,7 @@ FocusScope {
     }
 
     ColumnLayout {
+        id: profileLayout
         anchors.fill: parent
         spacing: Tokens.spacing.medium
 
@@ -255,6 +257,8 @@ FocusScope {
             id: flick
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 180
+            implicitHeight: 460
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             contentHeight: root.activeTab === 0 ? engineLayout.implicitHeight + 12 : dossierLayout.implicitHeight + 12
@@ -698,6 +702,23 @@ FocusScope {
                 anchors.top: parent.top
                 anchors.rightMargin: Tokens.padding.small
                 spacing: 14
+
+                StyledRect {
+                    Layout.fillWidth: true
+                    implicitHeight: personalContextNote.implicitHeight + 16
+                    radius: Tokens.rounding.small
+                    color: Colours.palette.m3surfaceContainerHigh
+
+                    StyledText {
+                        id: personalContextNote
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        text: qsTr("Profile details, learner notes, workspace, recalled history, and saved memory are shared with the AI provider when Personal context is on in chat. Turn it off there to send a request without this personal context.")
+                        font: Tokens.font.body.small
+                        color: Colours.palette.m3onSurfaceVariant
+                        wrapMode: Text.Wrap
+                    }
+                }
 
                 // AI Proposed Profile Banner (if present)
                 StyledRect {

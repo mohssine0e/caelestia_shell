@@ -25,6 +25,7 @@ FocusScope {
     property string editingTopic: ""
     property string editingLinesText: ""
     property string expandedCardId: ""
+    implicitHeight: memoryLayout.implicitHeight
 
     readonly property int knowledgeCount: {
         const list = Memory.cards || []
@@ -196,6 +197,7 @@ FocusScope {
     // MAIN LAYOUT
     // ─────────────────────────────────────────────────────────────
     ColumnLayout {
+        id: memoryLayout
         anchors.fill: parent
         spacing: 10
 
@@ -332,6 +334,27 @@ FocusScope {
             }
         }
 
+        Flickable {
+            id: controlsFlick
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(memoryControls.implicitHeight,
+                Math.max(120, Math.floor((root.height - headerContainer.implicitHeight - 180) * 0.55)))
+            Layout.maximumHeight: Math.max(120, Math.floor((root.height - headerContainer.implicitHeight - 180) * 0.55))
+            implicitHeight: memoryControls.implicitHeight
+            contentWidth: width
+            contentHeight: memoryControls.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            StyledScrollBar.vertical: StyledScrollBar {
+                flickable: controlsFlick
+            }
+
+            ColumnLayout {
+                id: memoryControls
+                width: controlsFlick.width
+                spacing: 10
+
         StyledRect {
             visible: Memory.memoryStoreState === "backup_pending"
                 || Memory.memoryStoreState === "blocked"
@@ -370,6 +393,37 @@ FocusScope {
                     implicitHeight: 28
                     horizontalPadding: Tokens.padding.small
                     onClicked: Memory.acceptMemoryRecovery()
+                }
+            }
+        }
+
+        StyledRect {
+            visible: Memory.proposalStoreError.length > 0
+            Layout.fillWidth: true
+            implicitHeight: proposalRecoveryRow.implicitHeight + 16
+            radius: Tokens.rounding.small
+            color: Colours.palette.m3errorContainer
+
+            RowLayout {
+                id: proposalRecoveryRow
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 8
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: qsTr("%1 File: %2").arg(Memory.proposalStoreError).arg(Memory.proposalsPath)
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3onErrorContainer
+                    wrapMode: Text.Wrap
+                }
+
+                IconTextButton {
+                    type: IconTextButton.Tonal
+                    icon: "refresh"
+                    text: qsTr("Retry")
+                    font: Tokens.font.label.small
+                    onClicked: Memory.reload()
                 }
             }
         }
@@ -468,19 +522,6 @@ FocusScope {
                         onClicked: Memory.reviewProposal(root.currentProposal.id, true)
                     }
                 }
-            }
-        }
-
-        // ═════════════════════════════════════════════════════════
-        // VIEW 1: CHALLENGE / GAUNTLET MODE (Extracted to GauntletView)
-        // ═════════════════════════════════════════════════════════
-        GauntletView {
-            id: gauntletView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: root.isInChallengeMode
-            onFinished: {
-                Memory.clearChallenge()
             }
         }
 
@@ -636,6 +677,20 @@ FocusScope {
 
             }
         }
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // VIEW 1: CHALLENGE / GAUNTLET MODE (Extracted to GauntletView)
+        // ═════════════════════════════════════════════════════════
+        GauntletView {
+            id: gauntletView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: 120
+            visible: root.isInChallengeMode
+            onFinished: Memory.clearChallenge()
+        }
 
         // ═════════════════════════════════════════════════════════
         // CARD LIST (Virtualized ListView with Lazy Drawers)
@@ -643,6 +698,8 @@ FocusScope {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 140
+            implicitHeight: 360
             visible: !root.isInChallengeMode
 
             // Empty State (Centered Overlay)

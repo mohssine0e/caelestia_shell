@@ -40,17 +40,15 @@ PROMPTS = {
     ),
     "explain": (
         "You are an expert tutor. Explain the following text simply, clearly, and engagingly in pure English. "
-        "Break down complex ideas into intuitive parts using short bullet points. "
+        "Break down complex ideas into intuitive parts, using bullets or examples when they improve understanding. "
         "Do NOT write Arabic sentences; write in pure English. If an advanced or difficult English word is used, "
         "you may add its concise Arabic translation in parentheses (e.g., 'elucidate (يوضّح)')."
     ),
     "fix": (
         "You are an expert software engineer and debugger. Analyze the following error, stack trace, or buggy snippet. "
-        "Lead immediately with the solution:\n"
-        "1. Direct Fix (minimal, production-ready code or command snippet first)\n"
-        "2. Exact Root Cause (1 crisp sentence)\n"
-        "3. Prevention Invariants (2 bullet points on how to prevent this in the future)\n"
-        "No conversational filler or polite preamble."
+        "Lead with a practical fix when the cause is clear, then explain the cause and how to verify the fix. "
+        "Keep simple corrections short. For multi-cause or systemic problems, give a detailed diagnosis, "
+        "relevant alternatives, and prevention steps. Avoid conversational filler."
     ),
     "tldr": (
         "Summarize the following text concisely in pure English. Provide key takeaways in 2-4 brief bullet points. "
@@ -65,10 +63,18 @@ PROMPTS = {
         "Write all explanations and sentences in pure English. If a hard English word appears, place its Arabic translation in parentheses."
     ),
     "ask": (
-        "You are an expert assistant. Answer the user's question clearly, directly, and concisely in pure English. "
+        "You are an expert assistant. Answer the user's question clearly and directly in pure English. "
         "Write purely in English, placing a concise Arabic gloss in parentheses only for difficult or advanced English terms."
     )
 }
+
+ADAPTIVE_LENGTH_INSTRUCTION = (
+    "Adapt the answer's length to the actual request. For a simple factual or direct question, give the answer "
+    "briefly, usually in one to three sentences. For a multi-part, analytical, instructional, or explicitly detailed "
+    "question, give a thorough answer with clear sections or steps and enough reasoning, examples, or caveats to be "
+    "useful. Follow any requested length or format. If a key ambiguity prevents a useful answer, ask one focused "
+    "clarifying question. Do not pad, repeat the question, or force a fixed template."
+)
 
 def get_provider_ceiling(primary, gemini_key, groq_key):
     prov = (primary or "").strip().lower()
@@ -648,12 +654,14 @@ def main():
         custom_prompt = str(stdin_payload.get("custom_prompt", ""))
         topic_anchor = str(stdin_payload.get("anchor", ""))
         extra_context = str(stdin_payload.get("context", ""))
+        include_personal_context = stdin_payload.get("include_personal_context", True) is not False
         parsed_thread = stdin_payload.get("thread", [])
     else:
         mode = "auto"
         thread_raw = "[]"
         topic_anchor = ""
         extra_context = ""
+        include_personal_context = True
         positional = []
         i = 2
         while i < len(sys.argv):
@@ -738,44 +746,47 @@ def main():
             system_instruction = (
                 f"You are an expert technical reading assistant continuing an active inquiry with the user.\n"
                 f"{anchor_context}"
-                f"Directly and concisely answer the user's follow-up question based on the whole discussion and reference material. "
+                f"Directly answer the user's follow-up question based on the whole discussion and reference material. "
                 f"Synthesize the prior discussion without re-explaining settled definitions unless requested. "
                 f"Focus specifically on the new aspect requested (e.g., concrete examples, edge cases, deeper breakdown)."
             )
             user_payload = custom_prompt if custom_prompt else text_to_process
         elif custom_prompt and text_to_process.strip():
             system_instruction = (
-                "You are an expert reading assistant. Answer the user's question clearly and concisely "
+                "You are an expert reading assistant. Answer the user's question clearly "
                 "using the provided context text as reference when relevant."
             )
             user_payload = f"Context text:\n{text_to_process}\n\nUser Question: {custom_prompt}"
         elif custom_prompt:
             system_instruction = (
-                "You are a helpful, knowledgeable, and concise AI assistant. "
+                "You are a helpful and knowledgeable AI assistant. "
                 "Directly and accurately answer the user's question."
             )
             user_payload = custom_prompt
         elif text_to_process.strip():
             system_instruction = (
-                "You are an expert assistant. Explain or answer regarding the provided text clearly and concisely."
+                "You are an expert assistant. Explain or answer regarding the provided text clearly and directly."
             )
             user_payload = text_to_process
     else:
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
         user_payload = text_to_process
 
+    if action in ("ask", "explain", "fix"):
+        system_instruction = f"{system_instruction}\n\n{ADAPTIVE_LENGTH_INSTRUCTION}"
+
     if action == "ask":
         touch_matching_knowledge_cards(custom_prompt or text_to_process)
 
-    learner_injection = get_learner_profile_injection()
+    learner_injection = get_learner_profile_injection() if include_personal_context else ""
     if learner_injection:
         system_instruction = f"{learner_injection}\n{system_instruction}"
 
-    profile_prefix = get_profile_prompt_prefix()
+    profile_prefix = get_profile_prompt_prefix() if include_personal_context else ""
     if profile_prefix:
         system_instruction = f"{profile_prefix}\n{system_instruction}"
 
-    workspace_context = get_active_workspace_context()
+    workspace_context = get_active_workspace_context() if include_personal_context else ""
     if workspace_context:
         system_instruction = f"{workspace_context}\n{system_instruction}"
 
@@ -789,7 +800,7 @@ def main():
     )
     system_instruction = f"{system_instruction}\n{latex_symbol_rule}"
 
-    recalled_item = find_relevant_history(text_to_process, custom_prompt) if not is_followup else None
+    recalled_item = find_relevant_history(text_to_process, custom_prompt) if include_personal_context and not is_followup else None
     recalled_meta = None
     if recalled_item:
         prior_title = (recalled_item.get("prompt") or recalled_item.get("text") or "")[:80].replace("\n", " ").strip()

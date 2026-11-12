@@ -22,6 +22,7 @@ FocusScope {
     property string searchQuery: ""
     property string editingChatId: ""
     property string editingTitleText: ""
+    implicitHeight: historyLayout.implicitHeight
 
     function formatTime(isoStr) {
         if (!isoStr) return ""
@@ -89,6 +90,7 @@ FocusScope {
     readonly property var displayedChats: (root.filteredChats || []).slice(0, root.visibleLimit)
 
     ColumnLayout {
+        id: historyLayout
         anchors.fill: parent
         spacing: Tokens.spacing.small
 
@@ -173,6 +175,14 @@ FocusScope {
                     onClicked: root.closeRequested()
                 }
             }
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            text: qsTr("Deleting a chat removes its saved conversation only. Assistant history and saved memory are managed separately.")
+            font: Tokens.font.label.small
+            color: Colours.palette.m3outline
+            wrapMode: Text.Wrap
         }
 
         // ── 2. Search & Tag Filter Bar ────────────────────────────────
@@ -341,6 +351,7 @@ FocusScope {
             id: listContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 180
             implicitHeight: 400
 
             // Empty state

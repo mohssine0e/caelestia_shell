@@ -15,6 +15,8 @@ FocusScope {
     id: root
 
     property var windowRef: null
+    property real maximumHudWidth: 1200
+    property real maximumHudHeight: 900
     property string currentView: "assistant"
 
     Connections {
@@ -86,13 +88,36 @@ FocusScope {
 
 
     focus: true
-    width: {
-        if (root.currentView === "memory") return 680
-        if (root.currentView === "profile" || root.currentView === "history") return 680
-        return 640
+    implicitWidth: Math.min(root.currentView === "assistant" ? 640 : 680, root.maximumHudWidth)
+    implicitHeight: Math.min(mainCard.implicitHeight, root.maximumHudHeight)
+    readonly property real assistantChromeHeight: headerContainer.implicitHeight
+        + snippetCard.implicitHeight
+        + actionSwitcher.implicitHeight
+        + footerLayout.implicitHeight
+        + cardLayout.spacing * (inlineErrorPanel.visible ? 5 : 4)
+        + Tokens.padding.medium * 2
+        + 2
+        + (inlineErrorPanel.visible ? inlineErrorPanel.implicitHeight : 0)
+    readonly property real maxResponseViewportHeight: Math.max(0, root.maximumHudHeight - root.assistantChromeHeight)
+    readonly property real minimumResponseViewportHeight: Math.min(140, root.maxResponseViewportHeight)
+    readonly property real preferredResponseViewportHeight: {
+        if (Assistant.isLoading && Assistant.messages.length === 0) return 220
+        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 200
+        if (Assistant.messages.length === 0) return 180
+        if (Assistant.isGenerating) return 160
+        return Math.max(180, chatList.contentHeight + Tokens.padding.medium * 2)
     }
-    implicitWidth: width
-    implicitHeight: mainCard.implicitHeight
+    readonly property real preferredAssistantHeight: Math.min(root.maximumHudHeight,
+        root.assistantChromeHeight + Math.min(root.maxResponseViewportHeight, root.preferredResponseViewportHeight))
+    readonly property real minimumHudHeight: Math.min(root.maximumHudHeight,
+        root.currentView === "assistant"
+            ? root.assistantChromeHeight + root.minimumResponseViewportHeight
+            : Math.max(420, Math.min(460, root.maximumHudHeight)))
+
+    Behavior on implicitHeight {
+        enabled: root.currentView === "assistant"
+        Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
+    }
 
     signal closeRequested()
 
@@ -111,6 +136,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
+        if (Assistant.requestedView.length > 0 && Assistant.requestedView !== root.currentView)
+            root.currentView = Assistant.requestedView
         Assistant.isWindowActive = root.isHudActive
         Qt.callLater(() => root.forceActiveFocus())
     }
@@ -258,14 +285,10 @@ FocusScope {
         border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         implicitHeight: {
-            if (root.currentView === "memory") return 620
-            if (root.currentView === "history" || root.currentView === "profile") return 680
-            return cardLayout.implicitHeight + Tokens.padding.medium * 2
-        }
-
-        Behavior on implicitHeight {
-            enabled: !Assistant.isStreaming
-            Anim { duration: Tokens.anim.durations.expressiveDefaultEffects }
+            if (root.currentView === "memory") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, memoryView.implicitHeight + Tokens.padding.medium * 2))
+            if (root.currentView === "history") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, historyView.implicitHeight + Tokens.padding.medium * 2))
+            if (root.currentView === "profile") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, profileView.implicitHeight + Tokens.padding.medium * 2))
+            return root.preferredAssistantHeight
         }
 
         ColumnLayout {
@@ -717,14 +740,59 @@ FocusScope {
 
             // ── 4. Main Result View / Shimmer Skeleton ────────────────
             StyledRect {
+                id: inlineErrorPanel
+                visible: Assistant.messages.length > 0 && Assistant.errorMessage.length > 0
+                Layout.fillWidth: true
+                implicitHeight: inlineErrorRow.implicitHeight + 12
+                radius: Tokens.rounding.small
+                color: Colours.palette.m3errorContainer
+
+                RowLayout {
+                    id: inlineErrorRow
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 8
+
+                    MaterialIcon {
+                        text: "error_outline"
+                        fontStyle: Tokens.font.icon.small
+                        color: Colours.palette.m3onErrorContainer
+                    }
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: Assistant.errorMessage
+                        font: Tokens.font.body.small
+                        color: Colours.palette.m3onErrorContainer
+                        wrapMode: Text.Wrap
+                    }
+
+                    IconTextButton {
+                        visible: Assistant.hasApiKey && Assistant.errorType !== "auth"
+                        type: IconTextButton.Tonal
+                        icon: "refresh"
+                        text: qsTr("Retry")
+                        font: Tokens.font.label.small
+                        onClicked: Assistant.retryAction()
+                    }
+
+                    IconTextButton {
+                        visible: !Assistant.hasApiKey || Assistant.errorType === "auth"
+                        type: IconTextButton.Tonal
+                        icon: "vpn_key"
+                        text: qsTr("Settings")
+                        font: Tokens.font.label.small
+                        onClicked: root.currentView = "profile"
+                    }
+                }
+            }
+
+            StyledRect {
                 id: resultContainer
                 Layout.fillWidth: true
-                implicitHeight: {
-                    if (Assistant.isLoading && Assistant.messages.length === 0) return 360
-                    if (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey) return 240
-                    if (Assistant.messages.length === 0) return 180
-                    return 460
-                }
+                Layout.fillHeight: true
+                Layout.minimumHeight: root.minimumResponseViewportHeight
+                implicitHeight: Math.min(root.maxResponseViewportHeight, root.preferredResponseViewportHeight)
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLowest
                 border.width: 1
@@ -797,7 +865,7 @@ FocusScope {
                 ColumnLayout {
                     anchors.centerIn: parent
                     width: parent.width - Tokens.padding.medium * 2
-                    visible: !Assistant.isLoading && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)
+                    visible: !Assistant.isLoading && Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)
                     spacing: Tokens.spacing.small
 
                     MaterialIcon {
@@ -1070,7 +1138,7 @@ FocusScope {
                     id: chatStreamContainer
                     anchors.fill: parent
                     anchors.margins: Tokens.padding.small
-                    visible: Assistant.errorMessage.length === 0 && Assistant.hasApiKey && Assistant.messages.length > 0
+                    visible: Assistant.hasApiKey && Assistant.messages.length > 0
 
                     ListView {
                         id: chatList
@@ -1270,7 +1338,7 @@ FocusScope {
                                             cursorVisible: false
                                             textFormat: TextEdit.MarkdownText
                                             wrapMode: TextEdit.Wrap
-                                            font: Tokens.font.body.builders.small.size(11).build()
+                                            font: Tokens.font.body.small
                                             color: Colours.palette.m3onSurface
                                             selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
                                             selectedTextColor: Colours.palette.m3onSurface
@@ -1380,11 +1448,14 @@ FocusScope {
 
             // ── 5. Footer / Custom Question Bar ───────────────────────
             ColumnLayout {
+                id: footerLayout
                 Layout.fillWidth: true
                 spacing: 6
+                implicitHeight: contextChipRow.implicitHeight + questionInputRow.implicitHeight + spacing
 
                 // Context Chip Row (above input row)
                 RowLayout {
+                    id: contextChipRow
                     Layout.fillWidth: true
                     spacing: 4
 
@@ -1498,6 +1569,42 @@ FocusScope {
                         }
                     }
 
+                    StyledRect {
+                        implicitHeight: 22
+                        implicitWidth: personalContextRow.implicitWidth + 14
+                        radius: Tokens.rounding.full
+                        opacity: Assistant.isGenerating ? 0.55 : 1
+                        color: Assistant.personalContextEnabled
+                            ? Colours.palette.m3surfaceContainerHigh
+                            : Qt.alpha(Colours.palette.m3tertiary, 0.18)
+
+                        RowLayout {
+                            id: personalContextRow
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            MaterialIcon {
+                                text: Assistant.personalContextEnabled ? "psychology" : "psychology_alt"
+                                fontStyle: Tokens.font.label.small
+                                color: Assistant.personalContextEnabled ? Colours.palette.m3primary : Colours.palette.m3tertiary
+                            }
+
+                            StyledText {
+                                text: Assistant.personalContextEnabled ? qsTr("Personal on") : qsTr("Personal off")
+                                font: Tokens.font.label.small
+                                color: Assistant.personalContextEnabled ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3tertiary
+                            }
+                        }
+
+                        StateLayer {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            enabled: !Assistant.isGenerating
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Assistant.personalContextEnabled = !Assistant.personalContextEnabled
+                        }
+                    }
+
                     // Token count & turn count metrics badge
                     StyledRect {
                         visible: (Assistant.messages || []).length > 0
@@ -1553,7 +1660,9 @@ FocusScope {
 
                 // Input Row
                 RowLayout {
+                    id: questionInputRow
                     Layout.fillWidth: true
+                    implicitHeight: Math.max(customQuestionInput.implicitHeight, sendQuestionButton.implicitHeight, 40)
                     spacing: Tokens.spacing.small
 
                 StyledTextField {
@@ -1578,6 +1687,7 @@ FocusScope {
                 }
 
                 IconButton {
+                    id: sendQuestionButton
                     type: IconButton.Filled
                     icon: "send"
                     font: Tokens.font.icon.small
