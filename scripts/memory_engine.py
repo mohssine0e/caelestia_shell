@@ -11,6 +11,7 @@ import json
 import ast
 import re
 import time
+import shutil
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -21,8 +22,10 @@ from assistant_common import (
     CODE_TOKEN_PATTERN, WORD_PATTERN, JSON_CLEAN_PATTERN,
     emit, load_config, load_profile, load_learner_profile, save_learner_profile,
     extract_keywords, extract_code_tokens, normalize_concept_key,
-    clean_json_response, parse_json_safely
+    clean_json_response, parse_json_safely, atomic_write_json
 )
+
+PROPOSALS_PATH = os.path.expanduser("~/.config/caelestia/assistant_memory_proposals.json")
 
 DEMOTION_THRESHOLD_SECONDS = 30 * 86400  # 30-day mastery decay
 
@@ -268,6 +271,34 @@ def atomic_save_memory(cards):
                 pass
         raise e
 
+def inspect_memory_file():
+    """Validate the memory store and preserve unreadable contents before any replacement."""
+    if not os.path.exists(MEMORY_PATH):
+        emit({"status": "ok"})
+        return
+    try:
+        with open(MEMORY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list) and all(isinstance(card, dict) for card in data):
+            emit({"status": "ok"})
+            return
+    except Exception:
+        pass
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = f"{MEMORY_PATH}.corrupt.{stamp}"
+    suffix = 1
+    while os.path.exists(backup_path):
+        backup_path = f"{MEMORY_PATH}.corrupt.{stamp}.{suffix}"
+        suffix += 1
+    try:
+        os.makedirs(os.path.dirname(MEMORY_PATH), mode=0o700, exist_ok=True)
+        shutil.copy2(MEMORY_PATH, backup_path)
+        os.chmod(backup_path, 0o600)
+        emit({"status": "corrupt", "backup_path": backup_path})
+    except Exception as e:
+        emit({"status": "backup_failed", "error": str(e)})
+
 # ---------------------------------------------------------
 # AI Calling Helper (Groq / Gemini Hybrid)
 # Fast Groq prioritized to save Gemini quota, with rock-solid fallback
@@ -458,7 +489,9 @@ def get_context(query_text):
 # CLI Command: distill
 # Thread-aware, noise-filtered memory card distillation
 # ---------------------------------------------------------
-DISTILL_PROMPT = """You are a strict knowledge classifier. Analyze the chat history. Determine if the user learned a deep engineering concept, a quick atomic fact, or if they established a new workspace context.
+DISTILL_PROMPT = """You are a strict knowledge classifier. Analyze the chat history and propose durable technical knowledge only.
+
+Do not create cards for personal preferences, response style, identity, or general instructions about how the assistant should behave; those belong in the user's separate Profile settings. For every knowledge/fact card, set scope to 'general' or 'project'. Use 'project' only when the source explicitly concerns a named/path-specific project; include project_path when known. Do not infer a project path. Workspace context proposals are project scoped.
 
 If it is a DEEP CONCEPT, you MUST extract a Mental Model, at least 2 Invariants, a valid Code Snippet, and at least 1 personal trap. Output as type 'knowledge'.
 If it is a QUICK FACT, output only a 1-sentence question and a 1-sentence answer. Output as type 'fact'.
@@ -472,6 +505,7 @@ OUTPUT JSON SCHEMA:
     {
       "id": "card_<domain>_<slug>",
       "type": "knowledge",
+      "scope": "general|project",
       "domain": "code|concurrency|architecture|networking|linux|general",
       "title": "Clear Concept Title (5-7 words max)",
       "mental_model": "Underlying cause-and-effect principle and WHY it works",
@@ -489,6 +523,7 @@ OUTPUT JSON SCHEMA:
     {
       "id": "fact_<domain>_<slug>",
       "type": "fact",
+      "scope": "general|project",
       "domain": "vocab|architecture|linux|general",
       "front": "1-sentence question or prompt?",
       "back": "1-sentence authoritative answer.",
@@ -498,6 +533,7 @@ OUTPUT JSON SCHEMA:
     {
       "id": "ctx_<slug>",
       "type": "context",
+      "scope": "project",
       "project_path": "/path/to/project",
       "git_branch": "main",
       "last_active": "ISO8601"
@@ -507,6 +543,15 @@ OUTPUT JSON SCHEMA:
 """
 
 def distill():
+    try:
+        with open(PROPOSALS_PATH, "r", encoding="utf-8") as f:
+            pending_proposals = json.load(f)
+        if not isinstance(pending_proposals, list): pending_proposals = []
+    except FileNotFoundError:
+        pending_proposals = []
+    except Exception:
+        emit({"success": False, "error": "Proposal queue is unreadable; preserving it and stopping distillation."})
+        return
     if not os.path.exists(HISTORY_PATH):
         emit({"success": True, "new_cards": 0, "updated_cards": 0, "total_cards": 0, "message": "No history file found."})
         return
@@ -525,6 +570,9 @@ def distill():
         for s in card.get("sources", []):
             if s:
                 indexed_sources.add(str(s))
+    for proposal in pending_proposals:
+        if isinstance(proposal, dict):
+            indexed_sources.update(str(s) for s in proposal.get("sources", []) if s)
 
     # Filter unindexed, non-noise entries
     unindexed = []
@@ -594,6 +642,29 @@ def distill():
     except Exception as e:
         emit({"success": False, "error": f"Distillation AI call failed: {e}"})
         return
+
+    # Extraction creates reviewable drafts; only explicit user acceptance writes memory cards.
+    staged = []
+    for nc in new_cards:
+        if not isinstance(nc, dict):
+            continue
+        ctype = nc.get("type", "knowledge")
+        scope = "project" if ctype == "context" else (nc.get("scope") if nc.get("scope") in ("general", "project") else "general")
+        title = nc.get("title") or nc.get("topic") or nc.get("front") or "Workspace Context"
+        sources = list(dict.fromkeys(str(s) for s in nc.get("sources", []) if s))
+        if not sources:
+            # A model response without source attribution is not safe to add to memory.
+            continue
+        staged.append({**nc, "id": nc.get("id") or f"proposal_{int(time.time()*1000)}_{len(staged)}",
+                       "title": title, "type": ctype, "scope": scope, "review_status": "pending",
+                       "sources": sources, "proposed_at": datetime.now(timezone.utc).isoformat()})
+    if staged:
+        existing_ids = {str(p.get("id")) for p in pending_proposals if isinstance(p, dict)}
+        pending_proposals.extend(p for p in staged if str(p["id"]) not in existing_ids)
+        atomic_write_json(PROPOSALS_PATH, pending_proposals)
+    emit({"success": True, "new_cards": len(staged), "updated_cards": 0, "pending_proposals": len(pending_proposals), "total_cards": len(current_memory),
+          "message": "New knowledge is waiting for review." if staged else "No durable knowledge found."})
+    return
 
     now_iso = datetime.now(timezone.utc).isoformat()
     existing_map = {c.get("id"): c for c in current_memory}
@@ -1600,7 +1671,9 @@ def main():
 
     cmd = sys.argv[1].lower()
 
-    if cmd == "distill":
+    if cmd == "inspect_memory":
+        inspect_memory_file()
+    elif cmd == "distill":
         distill()
     elif cmd == "quick_card":
         src = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -1643,4 +1716,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -55,6 +55,8 @@ FocusScope {
         return cnt
     }
 
+    readonly property var pendingProposals: (Memory.proposals || []).filter(p => p && p.review_status !== "dismissed")
+
     Timer {
         id: searchDebounceTimer
         interval: 100
@@ -402,7 +404,7 @@ FocusScope {
                     implicitWidth: 28
                     implicitHeight: 28
                     type: IconButton.Tonal
-                    enabled: !Memory.isDailyGauntletLoading
+                    enabled: Memory.memoryWritesAllowed && !Memory.isDailyGauntletLoading
                     onClicked: {
                         root.resetGauntlet()
                         Memory.startDailyGauntlet()
@@ -437,6 +439,7 @@ FocusScope {
 
                 IconTextButton {
                     visible: !Memory.isDistilling && !root.isInChallengeMode
+                    enabled: Memory.memoryWritesAllowed
                     text: qsTr("Extract Cards")
                     icon: "auto_awesome"
                     type: IconTextButton.Tonal
@@ -460,6 +463,48 @@ FocusScope {
             }
         }
 
+        StyledRect {
+            visible: Memory.memoryStoreState === "backup_pending"
+                || Memory.memoryStoreState === "blocked"
+                || Memory.memoryStoreState === "backup_failed"
+            Layout.fillWidth: true
+            implicitHeight: recoveryNotice.implicitHeight + 16
+            radius: Tokens.rounding.small
+            color: Colours.palette.m3errorContainer
+
+            ColumnLayout {
+                id: recoveryNotice
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 4
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: {
+                        if (Memory.memoryStoreState === "backup_pending")
+                            return qsTr("Memory file is unreadable. Preserving a recovery copy…")
+                        if (Memory.memoryStoreState === "blocked")
+                            return qsTr("Memory file is unreadable. It is backed up at %1. Memory changes are paused until you choose to replace it.").arg(Memory.memoryBackupPath)
+                        return qsTr("Memory file is unreadable and could not be backed up. Saving is disabled. %1").arg(Memory.memoryRecoveryError)
+                    }
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3onErrorContainer
+                    wrapMode: Text.Wrap
+                }
+
+                IconTextButton {
+                    visible: Memory.memoryStoreState === "blocked"
+                    Layout.alignment: Qt.AlignRight
+                    text: qsTr("Replace with empty memory")
+                    icon: "warning"
+                    type: IconTextButton.Tonal
+                    implicitHeight: 28
+                    horizontalPadding: Tokens.padding.small
+                    onClicked: Memory.acceptMemoryRecovery()
+                }
+            }
+        }
+
         // ═════════════════════════════════════════════════════════
         // NOTIFICATIONS
         // ═════════════════════════════════════════════════════════
@@ -475,6 +520,90 @@ FocusScope {
             icon: "merge_type"
             text: Memory.consolidateMessage
             tone: Colours.palette.m3tertiary
+        }
+
+        StyledRect {
+            visible: !root.isInChallengeMode && root.pendingProposals.length > 0
+            Layout.fillWidth: true
+            implicitHeight: proposalColumn.implicitHeight + 16
+            radius: Tokens.rounding.medium
+            color: Colours.palette.m3surfaceContainerLow
+
+            ColumnLayout {
+                id: proposalColumn
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 6
+                RowLayout {
+                    Layout.fillWidth: true
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: qsTr("Review suggestions (%1)").arg(root.pendingProposals.length)
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                    }
+                    StyledText {
+                        text: qsTr("Preferences belong in Profile")
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3onSurfaceVariant
+                    }
+                }
+                Repeater {
+                    model: root.pendingProposals
+                    delegate: StyledRect {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        implicitHeight: proposalRow.implicitHeight + 12
+                        radius: Tokens.rounding.small
+                        color: Colours.palette.m3surfaceContainer
+                        RowLayout {
+                            id: proposalRow
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 8
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: modelData.title || modelData.front || qsTr("Knowledge suggestion")
+                                    font: Tokens.font.label.large
+                                    color: Colours.palette.m3onSurface
+                                    elide: Text.ElideRight
+                                }
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: modelData.scope === "project" ? qsTr("Project knowledge") : qsTr("General knowledge")
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3onSurfaceVariant
+                                }
+                            }
+                            TextButton {
+                                text: qsTr("Change scope")
+                                type: TextButton.Tonal
+                                onClicked: {
+                                    const next = (Memory.proposals || []).slice()
+                                    const i = next.findIndex(p => String(p.id) === String(modelData.id))
+                                    if (i >= 0) {
+                                        next[i].scope = next[i].scope === "project" ? "general" : "project"
+                                        Memory.proposals = next
+                                        Memory.saveProposals()
+                                    }
+                                }
+                            }
+                            TextButton {
+                                text: qsTr("Dismiss")
+                                type: TextButton.Text
+                                onClicked: Memory.reviewProposal(modelData.id, false)
+                            }
+                            TextButton {
+                                text: qsTr("Accept")
+                                type: TextButton.Tonal
+                                onClicked: Memory.reviewProposal(modelData.id, true)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // ═════════════════════════════════════════════════════════

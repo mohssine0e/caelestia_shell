@@ -11,6 +11,12 @@ Singleton {
 
     // ── State ────────────────────────────────────────────────────
     property var cards: []
+    property var proposals: []
+    readonly property string proposalsPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory_proposals.json"
+    property string memoryStoreState: "checking" // checking | healthy | backup_pending | blocked | backup_failed
+    property string memoryBackupPath: ""
+    property string memoryRecoveryError: ""
+    readonly property bool memoryWritesAllowed: memoryStoreState === "healthy"
     readonly property string memoryPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_memory.json"
     readonly property string learnerProfilePath: Quickshell.env("HOME") + "/.config/caelestia/learner_profile.json"
     readonly property string enginePath: Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/memory_engine.py"
@@ -120,16 +126,74 @@ Singleton {
                         c._ts = ts
                     }
                     root.cards = parsed
+                    root.memoryStoreState = "healthy"
+                    root.memoryBackupPath = ""
+                    root.memoryRecoveryError = ""
+                } else {
+                    root.cards = []
+                    root.beginMemoryRecovery()
                 }
             } catch (e) {
                 root.cards = []
+                root.beginMemoryRecovery()
             }
         }
         onLoadFailed: err => {
             if (root._isSaving) return
             root.cards = []
             if (err === FileViewError.FileNotFound) {
+                root.memoryStoreState = "healthy"
                 Qt.callLater(() => memoryStorage.setText("[]"))
+            } else {
+                root.beginMemoryRecovery()
+            }
+        }
+    }
+
+    function beginMemoryRecovery() {
+        if (root.memoryStoreState === "backup_pending" || root.memoryStoreState === "blocked") return
+        root.memoryStoreState = "backup_pending"
+        root.memoryRecoveryError = ""
+        memoryRecoveryProc.command = ["python3", root.enginePath, "inspect_memory"]
+        memoryRecoveryProc.running = true
+    }
+
+    function handleMemoryRecoveryResult(raw) {
+        try {
+            const result = JSON.parse(String(raw || "").trim())
+            if (result.status === "ok") {
+                root.memoryStoreState = "healthy"
+                root.memoryStorage.reload()
+            } else if (result.status === "corrupt" && result.backup_path) {
+                root.memoryBackupPath = result.backup_path
+                root.memoryStoreState = "blocked"
+            } else {
+                root.memoryRecoveryError = result.error || qsTr("Could not preserve the unreadable memory file.")
+                root.memoryStoreState = "backup_failed"
+            }
+        } catch (e) {
+            root.memoryRecoveryError = qsTr("Could not verify or back up the unreadable memory file.")
+            root.memoryStoreState = "backup_failed"
+        }
+    }
+
+    function acceptMemoryRecovery() {
+        if (root.memoryStoreState !== "blocked" || !root.memoryBackupPath) return
+        root.cards = []
+        root.memoryStoreState = "healthy"
+        root.saveNow()
+    }
+
+    Process {
+        id: memoryRecoveryProc
+        stdout: StdioCollector {
+            id: memoryRecoveryOutput
+            onStreamFinished: root.handleMemoryRecoveryResult(memoryRecoveryOutput.text)
+        }
+        onExited: code => {
+            if (code !== 0 && root.memoryStoreState === "backup_pending") {
+                root.memoryRecoveryError = qsTr("The backup helper could not complete.")
+                root.memoryStoreState = "backup_failed"
             }
         }
     }
@@ -150,9 +214,68 @@ Singleton {
         }
     }
 
+    FileView {
+        id: proposalsStorage
+        printErrors: false
+        path: root.proposalsPath
+        onLoaded: {
+            try {
+                const parsed = JSON.parse(text())
+                root.proposals = Array.isArray(parsed) ? parsed : []
+            } catch (e) { root.proposals = [] }
+        }
+        onLoadFailed: err => {
+            if (err === FileViewError.FileNotFound) {
+                root.proposals = []
+                Qt.callLater(() => proposalsStorage.setText("[]"))
+            } else root.proposals = []
+        }
+    }
+
+    function saveProposals() {
+        proposalsStorage.setText(JSON.stringify(root.proposals, null, 2))
+    }
+
+    function reviewProposal(id, accept) {
+        if (!root.memoryWritesAllowed) return
+        const all = (root.proposals || []).slice()
+        const idx = all.findIndex(p => String(p.id) === String(id))
+        if (idx < 0) return
+        const proposal = all[idx]
+        if (accept) {
+            const card = Object.assign({}, proposal)
+            delete card.review_status; delete card.proposed_at
+            card.id = "card_" + Date.now().toString(36)
+            card.status = "learning"
+            card.created = new Date().toISOString(); card.updated = card.created; card._ts = Date.now()
+            card.scope = proposal.scope === "project" ? "project" : "general"
+            if (card.type === "fact") {
+                card.front = card.front || card.title; card.back = card.back || ""
+                card.topic = card.title = card.front; card.lines = [card.back]
+            } else if (card.type === "context") {
+                card.scope = "project"
+                card.domain = "workspace"
+            } else {
+                card.type = "knowledge"
+                card.topic = card.title
+                card.summary = card.mental_model || card.summary || ""
+                card.lines = card.invariants || card.lines || []
+            }
+            root.cards = root.cards.concat([card])
+            root.save()
+            all.splice(idx, 1)
+        } else {
+            // Keep dismissed source IDs so automatic extraction does not ask again.
+            all[idx].review_status = "dismissed"
+        }
+        root.proposals = all
+        root.saveProposals()
+    }
+
     function reload() {
         if (memoryStorage) memoryStorage.reload()
         if (learnerProfileStorage) learnerProfileStorage.reload()
+        if (proposalsStorage) proposalsStorage.reload()
     }
 
     // Debounced disk save (300ms) to eliminate file I/O churn
@@ -167,14 +290,14 @@ Singleton {
     }
 
     function _doSave() {
-        if (!memoryStorage) return
+        if (!memoryStorage || !root.memoryWritesAllowed) return
         root._isSaving = true
         memoryStorage.setText(JSON.stringify(root.cards, null, 2))
         Qt.callLater(() => { root._isSaving = false })
     }
 
     function updateCard(id, updatedLines, updatedTopic) {
-        if (!root.cards) return
+        if (!root.memoryWritesAllowed || !root.cards) return
         const list = root.cards.slice()
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(id)) {
@@ -201,7 +324,7 @@ Singleton {
     }
 
     function deleteCard(id) {
-        if (!root.cards) return
+        if (!root.memoryWritesAllowed || !root.cards) return
         root.cards = root.cards.filter(c => String(c.id) !== String(id))
         root.save()
     }
@@ -216,7 +339,7 @@ Singleton {
     }
 
     function removeTrap(cardId, trapText) {
-        if (!root.cards || !cardId || !trapText) return
+        if (!root.memoryWritesAllowed || !root.cards || !cardId || !trapText) return
         const list = root.cards.slice()
         for (let i = 0; i < list.length; i++) {
             if (String(list[i].id) === String(cardId)) {
@@ -247,9 +370,14 @@ Singleton {
         }
 
         const scored = []
+        const queryLower = query.toLowerCase()
         for (let i = 0; i < root.cards.length; i++) {
             const card = root.cards[i]
-            if (!card) continue
+            if (!card || card.review_status === "pending" || card.type === "context") continue
+            if (card.scope === "project") {
+                const projectLabel = String(card.title || card.topic || card.project_path || "").toLowerCase()
+                if (!projectLabel || !queryLower.includes(projectLabel)) continue
+            }
             const topic = (card.topic || "").toLowerCase()
             const tags = (card.tags || []).join(" ").toLowerCase()
             const summary = (card.summary || "").toLowerCase()
@@ -313,7 +441,7 @@ Singleton {
     property string _quickCardBuffer: ""
 
     function createCardFromAssistant(sourceText, answerText, actionType) {
-        if (!sourceText || !answerText || quickCardProc.running) return
+        if (!root.memoryWritesAllowed || !sourceText || !answerText || quickCardProc.running) return
         root.isCreatingQuickCard = true
         root.quickCardMessage = ""
         root._quickCardBuffer = ""
@@ -363,7 +491,7 @@ Singleton {
     property string enrichError: ""
 
     function enrichCard(cardId) {
-        if (!cardId || enrichProc.running) return
+        if (!root.memoryWritesAllowed || !cardId || enrichProc.running) return
         root.isEnriching = true
         root.enrichingCardId = String(cardId)
         root.enrichError = ""
@@ -404,7 +532,7 @@ Singleton {
     }
 
     function distill() {
-        if (distillProc.running) return
+        if (!root.memoryWritesAllowed || distillProc.running) return
         root.isDistilling = true
         root.distillMessage = "Distilling new cards..."
         root.distillError = ""
@@ -448,7 +576,7 @@ Singleton {
     property string _consolidateBuffer: ""
 
     function consolidate(domain) {
-        if (consolidateProc.running || root.isConsolidating) return
+        if (!root.memoryWritesAllowed || consolidateProc.running || root.isConsolidating) return
         root.isConsolidating = true
         root.consolidateMessage = "Consolidating domain knowledge..."
         root.consolidateError = ""
@@ -535,7 +663,7 @@ Singleton {
     }
 
     function submitAnswer(cardId, answersData) {
-        if (!cardId || !answersData || gradeProc.running) return
+        if (!root.memoryWritesAllowed || !cardId || !answersData || gradeProc.running) return
         root.isGrading = true
         root.gradeError = ""
         root.lastGradeResult = null
@@ -628,5 +756,3 @@ Singleton {
         root.dailyGauntletError = ""
     }
 }
-
-
