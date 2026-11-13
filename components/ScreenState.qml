@@ -14,6 +14,8 @@ PersistentProperties {
     property bool tasks
     property bool timer
     property bool assistant
+    property bool quickNote
+    property string notesMode: "capture"
     property bool project
 
     // Timer mini (pill HUD) state — persisted

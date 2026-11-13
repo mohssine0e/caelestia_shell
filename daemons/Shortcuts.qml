@@ -13,6 +13,24 @@ Scope {
     property bool launcherInterrupted
     readonly property bool hasFullscreen: Hypr.focusedWorkspace?.toplevels.values.some(t => t.lastIpcObject.fullscreen > 1) ?? false
 
+    function toggleNotesWindow(mode: string): void {
+        const st = ShellState.forActive() ?? ShellState.states[0];
+        if (!st) return;
+        if (st.quickNote && st.notesMode === mode) {
+            st.quickNote = false;
+        } else {
+            st.notesMode = mode;
+            st.quickNote = true;
+        }
+    }
+
+    function openNotesWindow(mode: string): void {
+        const st = ShellState.forActive() ?? ShellState.states[0];
+        if (!st) return;
+        st.notesMode = mode;
+        st.quickNote = true;
+    }
+
     // qmllint disable unresolved-type
     CustomShortcut {
         // qmllint enable unresolved-type
@@ -168,6 +186,22 @@ Scope {
         onPressed: Assistant.toggle()
     }
 
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "quickNote"
+        description: "Capture a quick note"
+        onPressed: root.toggleNotesWindow("capture")
+    }
+
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "notesView"
+        description: "Review quick notes"
+        onPressed: root.toggleNotesWindow("review")
+    }
+
     IpcHandler {
         function open(): void {
             WindowFactory.create();
@@ -191,6 +225,14 @@ Scope {
             Assistant.toggle();
         }
 
+        function toggleQuickNote(): void {
+            root.toggleNotesWindow("capture");
+        }
+
+        function toggleNotes(): void {
+            root.toggleNotesWindow("review");
+        }
+
         function startGauntlet(cardId: string): void {
             const st = ShellState.forActive() ?? ShellState.states[0];
             if (st && !st.assistant) st.assistant = true;
@@ -202,6 +244,22 @@ Scope {
         }
 
         target: "assistant"
+    }
+
+    IpcHandler {
+        function toggle(): void {
+            root.toggleNotesWindow("capture");
+        }
+
+        function open(): void {
+            root.openNotesWindow("capture");
+        }
+
+        function review(): void {
+            root.openNotesWindow("review");
+        }
+
+        target: "notes"
     }
 
     IpcHandler {

@@ -72,6 +72,9 @@ if("shell" IN_LIST ENABLE_MODULES)
         install(DIRECTORY ${dir} DESTINATION "${INSTALL_QSCONFDIR}")
     endforeach()
 
+    install(DIRECTORY scripts DESTINATION "${INSTALL_QSCONFDIR}"
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.sh")
+
     install(PROGRAMS assets/wrap_term_launch.sh DESTINATION "${INSTALL_QSCONFDIR}/assets")
 
     file(READ shell.qml SHELL_QML)

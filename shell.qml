@@ -12,6 +12,7 @@ import "modules/areapicker"
 import "modules/lock"
 import "modules/timer"
 import "modules/assistant"
+import "modules/notes"
 import "modules/project"
 import QtQuick
 import Quickshell
@@ -55,6 +56,7 @@ ShellRoot {
     AreaPicker {}
     TimerFloating {}
     AssistantFloating {}
+    QuickNote {}
     ProjectMenu {}
     Lock {
         id: lock
