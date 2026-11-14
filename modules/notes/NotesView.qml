@@ -17,8 +17,6 @@ Item {
     property string selectedId: ""
     property string activeTag: ""
     property bool sourcesOpen: false
-    property string editingSourceId: ""
-    property string editSourceText: ""
     property string recentlyDeletedId: ""
 
     readonly property var allGroups: {
@@ -141,58 +139,74 @@ Item {
         return text
     }
     function buildKnowledge(group): var {
-        const result = { overview: [], commands: [], code: [], configuration: [], errors: [], references: [] }
+        const result = { overview: [], notes: [], commands: [], code: [], configuration: [], errors: [], references: [] }
         if (!group) return result
         const seenText = new Set()
         const seenCommands = new Set()
-        function addText(section, value) {
-            const text = String(value || "").trim()
+        function addText(section, value, note, fieldKey) {
+            const text = String(note.display_edits?.[fieldKey] || value || "").trim()
             const key = text.toLowerCase().replace(/[\x60*_#•-]/g, "").replace(/\s+/g, " ").trim()
             if (!text || seenText.has(section + ":" + key)) return
             seenText.add(section + ":" + key)
-            result[section].push(text.replace(/^\s*[-*•]\s*/, ""))
+            result[section].push({ text: text.replace(/^\s*[-*•]\s*/, ""),
+                noteId: note.id, key: fieldKey, origin: note.origin || "user" })
         }
-        function addCommand(command, explanation) {
-            const clean = String(command || "").trim().replace(/^\$\s*/, "")
+        function addCommand(command, explanation, note, commandKey, explanationKey) {
+            const clean = String(note.display_edits?.[commandKey] || command || "").trim().replace(/^\$\s*/, "")
             if (!clean || seenCommands.has(clean)) return
             seenCommands.add(clean)
             result.commands.push({
                 command: clean,
-                explanation: win.conciseExplanation(explanation)
+                explanation: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
+                commandEntry: { text: clean, noteId: note.id, key: commandKey, origin: note.origin || "user" },
+                explanationEntry: { text: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
+                    noteId: note.id, key: explanationKey, origin: note.origin || "user" }
             })
         }
         for (const note of group.notes || []) {
+            if (note.origin === "ai" && !(note.essentials || []).length) {
+                addText(note.topic_section === "overview" ? "overview" : "notes",
+                    note.raw_content, note, "fallback")
+                continue
+            }
             const essentials = note.essentials || []
             const excerpts = note.exact_excerpts || []
             const type = note.technical_type || "general"
             if (type === "command") {
                 let commandIndex = 0
-                for (const excerpt of excerpts) {
-                    for (const line of String(excerpt.content || "").split("\n").map(value => value.trim()).filter(value => value)) {
-                        const explanation = essentials[Math.min(commandIndex, Math.max(essentials.length - 1, 0))]
+                for (let excerptIndex = 0; excerptIndex < excerpts.length; excerptIndex++) {
+                    const lines = String(excerpts[excerptIndex].content || "").split("\n")
+                    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                        const line = lines[lineIndex].trim()
+                        if (!line) continue
+                        const essentialIndex = Math.min(commandIndex, Math.max(essentials.length - 1, 0))
+                        const explanation = essentials[essentialIndex]
                             || win.displayTitle(note)
-                        addCommand(line, explanation)
+                        addCommand(line, explanation, note,
+                            "command:" + excerptIndex + ":" + lineIndex, "essential:" + essentialIndex)
                         commandIndex += 1
                     }
                 }
                 if (excerpts.length === 0 && !String(note.raw_content || "").includes("\n"))
-                    addCommand(note.raw_content, essentials[0] || win.displayTitle(note))
-                for (let i = commandIndex; i < essentials.length; i++) addText("overview", essentials[i])
+                    addCommand(note.raw_content, essentials[0] || win.displayTitle(note), note, "fallback", "essential:0")
+                for (let i = commandIndex; i < essentials.length; i++) addText("notes", essentials[i], note, "essential:" + i)
             } else if (type === "code") {
-                for (const excerpt of excerpts) result.code.push({
-                    language: excerpt.language || "",
-                    content: excerpt.content || "",
-                    explanation: essentials[0] || win.displayTitle(note)
+                for (let i = 0; i < excerpts.length; i++) result.code.push({
+                    language: excerpts[i].language || "",
+                    content: note.display_edits?.["command:" + i + ":0"] || excerpts[i].content || "",
+                    explanation: essentials[0] || win.displayTitle(note),
+                    noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user"
                 })
                 if (excerpts.length === 0 && note.raw_content)
-                    result.code.push({ language: note.technology || "", content: note.raw_content, explanation: essentials[0] || "" })
+                    result.code.push({ language: note.technology || "", content: note.display_edits?.fallback || note.raw_content,
+                        explanation: essentials[0] || "", noteId: note.id, key: "fallback", origin: note.origin || "user" })
             } else {
-                let section = "overview"
+                let section = note.topic_section === "overview" ? "overview" : "notes"
                 if (type === "configuration") section = "configuration"
                 else if (type === "error_fix") section = "errors"
                 else if (type === "reference" || note.category === "reference") section = "references"
-                for (const item of essentials) addText(section, item)
-                if (essentials.length === 0) addText(section, note.formatted_content || note.raw_content)
+                for (let i = 0; i < essentials.length; i++) addText(section, essentials[i], note, "essential:" + i)
+                if (essentials.length === 0) addText(section, note.formatted_content || note.raw_content, note, "fallback")
             }
         }
         return result
@@ -201,9 +215,10 @@ Item {
         if (!win.selectedGroup) return ""
         const output = ["# " + win.selectedGroup.title]
         function addSection(title, values) {
-            if (values.length) output.push("## " + title + "\n\n" + values.map(value => "- " + value).join("\n"))
+            if (values.length) output.push("## " + title + "\n\n" + values.map(value => "- " + value.text).join("\n"))
         }
         addSection(qsTr("Overview"), win.knowledge.overview)
+        addSection(qsTr("Notes"), win.knowledge.notes)
         if (win.knowledge.commands.length)
             output.push("## " + qsTr("Commands") + "\n\n"
                 + win.knowledge.commands.map(item => "$ " + item.command + "\n" + item.explanation).join("\n\n"))
@@ -257,7 +272,6 @@ Item {
     function closeView(): void {
         if (win.sourcesOpen) {
             win.sourcesOpen = false
-            win.editingSourceId = ""
         } else {
             win.closeRequested()
         }
@@ -301,14 +315,12 @@ Item {
         function onNoteDeleted(noteId): void {
             win.recentlyDeletedId = noteId
             undoTimer.restart()
-            if (win.editingSourceId === noteId) win.editingSourceId = ""
         }
         function onNoteChanged(note): void {
             if (note?.id === win.recentlyDeletedId) {
                 win.recentlyDeletedId = ""
                 undoTimer.stop()
             }
-            if (note?.id === win.editingSourceId) win.editingSourceId = ""
         }
         target: Notes
     }
@@ -341,6 +353,7 @@ Item {
             anchors.centerIn: parent
             spacing: 5
             Item {
+                visible: !!headerAction.actionIcon || headerAction.running
                 width: 16
                 height: 16
                 MaterialIcon {
@@ -375,25 +388,44 @@ Item {
         }
     }
     component SimpleSection: Column {
+        id: section
+
         required property string sectionTitle
+        required property string sectionKey
         required property var entries
+        property bool bulleted: false
+        property bool showWhenEmpty: false
+        property string emptyLabel: ""
+
         width: parent?.width ?? 0
-        visible: entries.length > 0
+        visible: showWhenEmpty || entries.length > 0 || topicOps.pendingFor(sectionKey).length > 0
         spacing: 10
         SectionTitle { text: parent.sectionTitle.toUpperCase() }
+        StyledText {
+            width: parent.width
+            visible: section.showWhenEmpty && section.entries.length === 0
+                && topicOps.pendingFor(section.sectionKey).length === 0
+            text: section.emptyLabel
+            color: Colours.palette.m3onSurfaceVariant
+            font: Tokens.font.body.small
+        }
         Repeater {
             model: parent.entries
-            delegate: StyledText {
-                required property string modelData
+            delegate: InlineEntry {
+                required property var modelData
                 width: parent.width
-                text: modelData
-                textFormat: Text.MarkdownText
-                color: Colours.palette.m3onSurface
-                font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15,
-                    weight: Tokens.font.body.medium.weight })
-                wrapMode: Text.Wrap
-                lineHeight: 1.45
-                lineHeightMode: Text.ProportionalHeight
+                entry: modelData
+                markdown: true
+                bullet: section.bulleted
+            }
+        }
+        Repeater {
+            model: topicOps.pendingFor(parent.sectionKey)
+            delegate: PendingLine {
+                required property var modelData
+                width: parent.width
+                suggestion: modelData
+                controller: topicOps
             }
         }
         Rectangle {
@@ -402,6 +434,11 @@ Item {
             color: Colours.palette.m3outlineVariant
             opacity: 0.55
         }
+    }
+
+    TopicInline {
+        id: topicOps
+        topic: win.selectedGroup?.key?.startsWith("topic:") ? win.selectedGroup.title : ""
     }
 
     Rectangle {
@@ -606,12 +643,26 @@ Item {
                         }
                     }
                     HeaderAction {
-                        actionIcon: "content_copy"
+                        actionIcon: "lightbulb"
+                        label: topicOps.busyAction === "fill-topic" ? qsTr("Filling…") : qsTr("Fill gaps")
+                        running: topicOps.busyAction === "fill-topic"
+                        enabled: !!topicOps.topic && !topicOps.busy && Notes.providerConfigured
+                        onTriggered: topicOps.generate()
+                    }
+                    HeaderAction {
+                        actionIcon: "done_all"
+                        label: qsTr("Accept all (%1)").arg(topicOps.available.length)
+                        visible: topicOps.available.length > 0
+                        enabled: !topicOps.busy
+                        onTriggered: topicOps.acceptAll()
+                    }
+                    HeaderAction {
+                        actionIcon: ""
                         label: qsTr("Copy")
                         enabled: !!win.selectedGroup
                         onTriggered: {
                             Quickshell.clipboardText = win.topicMarkdown()
-                            Toaster.toast(qsTr("Copied"), qsTr("Topic copied as Markdown"), "content_copy")
+                            Toaster.toast(qsTr("Copied"), qsTr("Topic copied as Markdown"), "check")
                         }
                     }
                     HeaderAction {
@@ -628,13 +679,33 @@ Item {
                         onTriggered: win.sourcesOpen = true
                     }
                 }
+                StyledText {
+                    width: parent.width
+                    visible: !!topicOps.errorMessage || !!topicOps.notice
+                    text: topicOps.errorMessage || topicOps.notice
+                    color: topicOps.errorMessage ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
+                    font: Tokens.font.body.small
+                    wrapMode: Text.Wrap
+                }
                 SimpleSection {
                     sectionTitle: qsTr("Overview")
+                    sectionKey: "overview"
                     entries: win.knowledge.overview
+                    bulleted: true
+                    showWhenEmpty: !!win.selectedGroup?.key?.startsWith("topic:")
+                    emptyLabel: qsTr("Fill gaps to suggest an overview.")
+                }
+                SimpleSection {
+                    sectionTitle: qsTr("Notes")
+                    sectionKey: "notes"
+                    entries: win.knowledge.notes
+                    bulleted: true
+                    showWhenEmpty: !!win.selectedGroup?.key?.startsWith("topic:")
+                    emptyLabel: qsTr("No notes saved for this topic.")
                 }
                 Column {
                     width: parent.width
-                    visible: win.knowledge.commands.length > 0
+                    visible: win.knowledge.commands.length > 0 || topicOps.pendingFor("commands").length > 0
                     spacing: 6
                     SectionTitle { text: qsTr("COMMANDS") }
                     Rectangle {
@@ -650,52 +721,20 @@ Item {
                             required property var modelData
                             property bool copied: false
                             width: parent.width
-                            height: Math.max(40, commandExplanation.implicitHeight + 14)
+                            height: Math.max(40, commandEntry.implicitHeight + 12, commandExplanation.implicitHeight + 12)
                             Timer {
                                 interval: 1200
                                 running: commandRow.copied
                                 onTriggered: commandRow.copied = false
                             }
-                            RowLayout {
+                            Item {
                                 anchors.fill: parent
-                                spacing: 12
-                                Flickable {
-                                    Layout.preferredWidth: commandRow.width * 0.42
-                                    Layout.fillHeight: true
-                                    contentWidth: commandTextRow.implicitWidth
-                                    contentHeight: height
-                                    clip: true
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    Row {
-                                        id: commandTextRow
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 7
-                                        StyledText {
-                                            text: "$"
-                                            color: Colours.palette.m3tertiary
-                                            font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14,
-                                                weight: Tokens.font.mono.small.weight })
-                                        }
-                                        StyledText {
-                                            text: commandRow.modelData.command
-                                            color: Colours.palette.m3primary
-                                            font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14,
-                                                weight: Tokens.font.mono.small.weight })
-                                        }
-                                    }
-                                }
-                                StyledText {
-                                    id: commandExplanation
-                                    Layout.fillWidth: true
-                                    text: "•  " + commandRow.modelData.explanation
-                                    color: Colours.palette.m3onSurfaceVariant
-                                    font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 15,
-                                        weight: Tokens.font.body.small.weight })
-                                    wrapMode: Text.Wrap
-                                }
                                 Item {
-                                    Layout.preferredWidth: 28
-                                    Layout.preferredHeight: 28
+                                    id: commandCopy
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 28
+                                    height: 28
                                     opacity: commandCopyMouse.containsMouse || commandRow.copied ? 1 : 0.45
                                     Behavior on opacity { NumberAnimation { duration: 120 } }
                                     MaterialIcon {
@@ -703,7 +742,7 @@ Item {
                                         text: commandRow.copied ? "check" : "content_copy"
                                         color: Colours.palette.m3onSurfaceVariant
                                         fill: 0
-                                        fontStyle: Tokens.font.icon.builders.small.build()
+                                        fontStyle: Tokens.font.icon.size(12).build()
                                     }
                                     MouseArea {
                                         id: commandCopyMouse
@@ -716,6 +755,28 @@ Item {
                                         }
                                     }
                                 }
+                                StyledText {
+                                    id: commandEntry
+                                    anchors.left: commandCopy.right
+                                    anchors.leftMargin: 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: commandRow.width * 0.38
+                                    text: "$ " + commandRow.modelData.command
+                                    color: Colours.palette.m3primary
+                                    font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
+                                    wrapMode: Text.WrapAnywhere
+                                }
+                                StyledText {
+                                    id: commandExplanation
+                                    anchors.left: commandEntry.right
+                                    anchors.leftMargin: 12
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "•  " + commandRow.modelData.explanation
+                                    color: Colours.palette.m3onSurface
+                                    font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
+                                    wrapMode: Text.WrapAnywhere
+                                }
                             }
                             Rectangle {
                                 anchors.left: parent.left
@@ -727,10 +788,19 @@ Item {
                             }
                         }
                     }
+                    Repeater {
+                        model: topicOps.pendingFor("commands")
+                        delegate: PendingLine {
+                            required property var modelData
+                            width: parent.width
+                            suggestion: modelData
+                            controller: topicOps
+                        }
+                    }
                 }
                 Column {
                     width: parent.width
-                    visible: win.knowledge.code.length > 0
+                    visible: win.knowledge.code.length > 0 || topicOps.pendingFor("code").length > 0
                     spacing: 8
                     SectionTitle { text: qsTr("CODE") }
                     Repeater {
@@ -758,21 +828,28 @@ Item {
                                         weight: Tokens.font.body.small.weight })
                                     wrapMode: Text.Wrap
                                 }
-                                StyledText {
+                                InlineEntry {
                                     width: parent.width
-                                    text: codeBlock.modelData.content
-                                    color: Colours.palette.m3onSurface
-                                    font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14,
-                                        weight: Tokens.font.mono.small.weight })
-                                    wrapMode: Text.WrapAnywhere
+                                    entry: ({ text: codeBlock.modelData.content, noteId: codeBlock.modelData.noteId,
+                                        key: codeBlock.modelData.key, origin: codeBlock.modelData.origin })
+                                    mono: true
                                 }
                             }
                         }
                     }
+                    Repeater {
+                        model: topicOps.pendingFor("code")
+                        delegate: PendingLine {
+                            required property var modelData
+                            width: parent.width
+                            suggestion: modelData
+                            controller: topicOps
+                        }
+                    }
                 }
-                SimpleSection { sectionTitle: qsTr("Configuration"); entries: win.knowledge.configuration }
-                SimpleSection { sectionTitle: qsTr("Errors & Fixes"); entries: win.knowledge.errors }
-                SimpleSection { sectionTitle: qsTr("References"); entries: win.knowledge.references }
+                SimpleSection { sectionTitle: qsTr("Configuration"); sectionKey: "configuration"; entries: win.knowledge.configuration }
+                SimpleSection { sectionTitle: qsTr("Errors & Fixes"); sectionKey: "errors"; entries: win.knowledge.errors }
+                SimpleSection { sectionTitle: qsTr("References"); sectionKey: "references"; entries: win.knowledge.references }
                 StyledText {
                     width: parent.width
                     visible: !!win.query && win.visibleGroups.length === 0
@@ -827,7 +904,7 @@ Item {
                     }
                     StyledText {
                         Layout.fillWidth: true
-                        text: qsTr("Original captures remain separate and editable.")
+                        text: qsTr("Original captures remain separate.")
                         color: Colours.palette.m3onSurfaceVariant
                         font: Tokens.font.label.small
                     }
@@ -865,15 +942,6 @@ Item {
                                         elide: Text.ElideRight
                                     }
                                     TextButton {
-                                        text: qsTr("Edit")
-                                        type: TextButton.Text
-                                        font: Tokens.font.label.small
-                                        onClicked: {
-                                            win.editingSourceId = sourceCard.modelData.id
-                                            win.editSourceText = sourceCard.modelData.raw_content || ""
-                                        }
-                                    }
-                                    TextButton {
                                         text: qsTr("Delete")
                                         type: TextButton.Text
                                         font: Tokens.font.label.small
@@ -883,7 +951,6 @@ Item {
                                 }
                                 StyledText {
                                     Layout.fillWidth: true
-                                    visible: win.editingSourceId !== sourceCard.modelData.id
                                     text: sourceCard.modelData.raw_content || ""
                                     color: Colours.palette.m3onSurfaceVariant
                                     font: sourceCard.modelData.technical_type === "command"
@@ -891,47 +958,6 @@ Item {
                                     wrapMode: Text.WrapAnywhere
                                     maximumLineCount: 8
                                     elide: Text.ElideRight
-                                }
-                                TextArea {
-                                    id: sourceEditor
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 110
-                                    visible: win.editingSourceId === sourceCard.modelData.id
-                                    text: visible ? win.editSourceText : ""
-                                    color: Colours.palette.m3onSurface
-                                    font: Tokens.font.body.small
-                                    wrapMode: TextEdit.Wrap
-                                    selectByMouse: true
-                                    background: Rectangle {
-                                        radius: 7
-                                        color: Colours.palette.m3surfaceContainerLow
-                                        border.width: 1
-                                        border.color: sourceEditor.activeFocus
-                                            ? Colours.palette.m3primary : Colours.palette.m3outlineVariant
-                                    }
-                                    onTextChanged: {
-                                        if (visible && activeFocus) win.editSourceText = text
-                                    }
-                                    onVisibleChanged: if (visible) Qt.callLater(() => forceActiveFocus())
-                                }
-                                RowLayout {
-                                    Layout.alignment: Qt.AlignRight
-                                    visible: win.editingSourceId === sourceCard.modelData.id
-                                    TextButton {
-                                        text: qsTr("Cancel")
-                                        type: TextButton.Text
-                                        onClicked: win.editingSourceId = ""
-                                    }
-                                    TextButton {
-                                        text: qsTr("Save")
-                                        type: TextButton.Tonal
-                                        enabled: win.editSourceText.trim().length > 0 && !Notes.mutating
-                                        onClicked: Notes.update(
-                                            sourceCard.modelData.id,
-                                            win.editSourceText,
-                                            sourceCard.modelData.tags || []
-                                        )
-                                    }
                                 }
                             }
                         }

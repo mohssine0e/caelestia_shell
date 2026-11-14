@@ -28,10 +28,10 @@ Scope {
                 readonly property string mode: win.st?.notesMode || "capture"
                 readonly property bool reviewMode: mode === "review"
                 readonly property int preferredWidth: reviewMode
-                    ? Math.min(920, Math.round(loader.modelData.width * 0.94))
+                    ? Math.min(900, Math.round(loader.modelData.width * 0.94))
                     : Math.min(600, Math.round(loader.modelData.width * 0.92))
                 readonly property int preferredHeight: reviewMode
-                    ? Math.min(640, Math.round(loader.modelData.height * 0.88))
+                    ? Math.min(620, Math.round(loader.modelData.height * 0.88))
                     : Math.min(150, Math.round(loader.modelData.height * 0.4))
                 property string saveError: ""
                 property bool modeTransitioning: false

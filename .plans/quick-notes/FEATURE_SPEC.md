@@ -7,7 +7,7 @@
 
 ## 1. Product decisions
 
-- Use one Quick Notes window with two modes: a `600 × 150` compact capture and a `920 × 640` review mode.
+- Use one Quick Notes window with two modes: a `600 × 150` compact capture and a `900 × 620` review mode.
 - `Super+/` opens capture. `Super+Shift+/` opens review.
 - Compact mode contains only the editor and the user's text. It has no title, placeholder, buttons, status text, spinner, or keyboard hints.
 - Focus enters the editor automatically. Enter inserts a normal newline.
@@ -27,10 +27,10 @@
 - [x] **Step 5 — Review UI:** search, category filters, raw/formatted display, editing, copying, retrying analysis, soft deletion, undo, and narrow/wide layouts.
 - [x] **Step 6 — Single-window behavior:** capture and review resize the same Hyprland client instead of opening multiple windows.
 - [x] **Step 7 — Shell integration:** screen state, Caelestia global shortcuts, IPC methods, shell loading, Hyprland bindings, and script packaging.
-- [x] **Step 8 — Verification:** eight backend tests, QML convention checks, diff validation, live shell reload, focus/save/restart checks, real provider triage, and `600×150 ↔ 920×640` live resize.
+- [x] **Step 8 — Verification:** eight backend tests, QML convention checks, diff validation, live shell reload, focus/save/restart checks, real provider triage, and live capture/review resizing.
 - [x] **Step 8.1 — Developer knowledge model:** technical subtypes, generated titles, tool/language metadata, suggested tags, exact source excerpts, duplicate suggestions, local secret detection, Inbox bulk analysis, and a content-first review layout.
-- [x] **Step 8.2 — Topic knowledge view:** canonical topics, local topic hints for legacy notes, grouped captures, ordered overview/command/code/configuration/error/reference sections, semantic duplicate reduction, and per-capture editing inside a topic.
-- [x] **Step 8.3 — Focused review redesign:** single-pane reader, compact search and topic/tag strip, quiet topic actions, structured command table with copy feedback, raw-source drawer with inline editing, and keyboard navigation.
+- [x] **Step 8.2 — Topic knowledge view:** canonical topics, local topic hints for legacy notes, grouped captures, ordered overview/command/code/configuration/error/reference sections, and semantic duplicate reduction.
+- [x] **Step 8.3 — Focused review redesign:** single-pane reader, compact search and topic/tag strip, quiet topic actions, structured command table with copy feedback, raw-source drawer, and keyboard navigation.
 - [ ] **Step 9 — Optional learning bridge:** reviewable fact extraction and explicit export to Gauntlet/Knowledge Nodes.
 
 ## 3. User experience
@@ -72,7 +72,7 @@ The AI must not invent credentials, paths, project details, personal preferences
 - Search raw text, formatted text, and literal hashtags.
 - Show formatted bullets for technical/reference notes and exact raw text for personal/idea notes.
 - Keep skipped notes visible through the Skipped filter so an incorrect AI decision is recoverable.
-- Allow editing raw text, copying, analyzing again, deleting with undo, and restoring notes.
+- Allow copying, analyzing again, deleting with undo, and restoring notes.
 - Disclose the configured primary and fallback providers in review mode without exposing credentials.
 
 ## 4. Architecture
@@ -238,3 +238,89 @@ Add the learning bridge only after the notes workflow has been used long enough 
 4. Add Knowledge Node promotion as a separate explicit action.
 
 No automatic promotion should occur, and personal/idea notes should be excluded by default.
+
+## 12. Topic learning gaps (2026-11-14)
+
+Historical implementation record. Replaced by the inline topic workflow in
+Section 13 below; the answer-checking panel and its actions were removed.
+
+Checkpoint before this phase: `73972cf6` — grouped topic review, typography,
+search/Escape handling, draggable header, and separate topic/tag banner.
+
+- [x] Add **What am I missing?** and **Add note** actions for named topics.
+- [x] Keep the learning panel inside the existing review window.
+- [x] Request up to five concise gaps using only eligible notes from the selected
+  topic; exclude private/local-only, personal, idea, skipped, and detected-secret
+  captures. Bound the request context to 24,000 characters.
+- [x] Reuse the configured assistant provider and fallback through the existing
+  notes provider adapter, without assistant conversation or memory context.
+- [x] Persist suggestions and dismissals in a separate SQLite table. Exclude
+  previous suggestions from later requests; provide **Restore dismissed**.
+- [x] Offer **Explain**, **Write my own**, and **Dismiss** for each suggestion.
+- [x] Check a **Write my own** answer with AI before saving it. Correct answers
+  save automatically; incomplete or incorrect answers show brief feedback and
+  a corrected version for retry. Edited answers require a new check. Sensitive
+  text is rejected locally before any provider call.
+- [x] Show the AI explanation as a preview; require **Save to topic** to create
+  a note. Label AI-origin notes in the topic content and source drawer.
+- [x] Keep manually added notes linked to their chosen topic through edits and
+  later analysis. Writing an answer to a gap marks that gap as saved.
+- [x] Make saving a suggestion idempotent and keep provider failures from changing
+  saved notes. Prevent late results from appearing under another topic.
+- [x] Protect unsaved editor text when closing the learning panel.
+- [x] Add schema version 6 with additive migrations and backend regression tests.
+
+Usage: open a named topic, choose **What am I missing?**, then **Suggest gaps**.
+Choose **Explain** to preview a concise explanation before saving, **Write my
+own** to record your understanding, or **Dismiss** to hide that suggestion.
+**Add note** directly saves your own topic-linked capture without an AI call.
+
+Validation: 22 backend tests use temporary databases and mocked provider output.
+The new QML panel passes the repository convention checker; the live shell loads
+it without Notes errors and the empty learning panel has been visually checked.
+Live provider output quality has not been evaluated in this phase. Context is
+bounded, so suggestions can miss coverage in older or very long notes; semantic
+deduplication depends partly on the model. Existing NotesView formatting warnings
+predate this phase; no broad reformat was performed.
+
+## 13. Inline topic completion (2026-11-14)
+
+- [x] **Fill gaps** makes one provider request for concise, section-specific
+  candidate lines using only eligible notes from the selected topic.
+- [x] Pending candidates appear within Overview, Commands, Code,
+  Configuration, Errors & Fixes, or References. Each has Accept and Delete.
+- [x] **Accept all** saves the remaining pending lines in one transaction.
+  Accepted commands retain their exact command and a short explanation.
+- [x] Delete dismisses only the candidate; it does not delete a saved note.
+- [x] Pending candidates have only Accept and Delete actions. Saved knowledge
+  lines are read-only; Overview uses bullets. Only command rows have copy icons.
+- [x] Remove visible AI provenance labels and edit controls from the topic view
+  and Sources drawer. Keep original captures and any previously saved display
+  edits in storage.
+- [x] Remove the learning drawer, user-answer grading flow, and unused backend
+  endpoints. Keep existing saved notes and dismissed candidates in the database.
+- [x] Run 20 backend tests against temporary databases and mocked provider
+  output. Check the new QML components and load the live shell.
+
+Usage: choose a topic and click **Fill gaps**. Accept useful lines individually,
+delete unwanted candidates, or choose **Accept all**. Copy a command with its
+left-side icon, or copy the whole topic with the text action in the header.
+Sources shows the original captures.
+
+Limit: provider quality still needs real-use review. Sources retains the raw
+text for provenance.
+
+## 14. Topic overview and notes sections (2026-11-14)
+
+- [x] Make the command copy glyph slightly smaller while keeping its 28px hit area,
+  and reduce the review window from 920×640 to 900×620.
+- [x] Add **Notes** between Overview and Commands for captured concept facts and
+  accepted AI notes. Keep Overview for short topic-level bullets.
+- [x] Ask Fill gaps to prioritize an overview bullet and useful notes, with a
+  focused second request only when the first reply omits an unsaved overview.
+- [x] Persist the accepted line's section so overview and notes stay separate
+  after refresh; migrate existing databases without discarding saved notes.
+- [x] Back up the live notes database and soft-delete three clearly identified
+  Docker test captures: `what is docker`, `docke is mn3rf`, and
+  `test adding a note`. Other captures remain unchanged.
+- [x] Run backend tests and reload the shell.
