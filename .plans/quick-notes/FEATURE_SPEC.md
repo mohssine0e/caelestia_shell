@@ -28,6 +28,9 @@
 - [x] **Step 6 — Single-window behavior:** capture and review resize the same Hyprland client instead of opening multiple windows.
 - [x] **Step 7 — Shell integration:** screen state, Caelestia global shortcuts, IPC methods, shell loading, Hyprland bindings, and script packaging.
 - [x] **Step 8 — Verification:** eight backend tests, QML convention checks, diff validation, live shell reload, focus/save/restart checks, real provider triage, and `600×150 ↔ 920×640` live resize.
+- [x] **Step 8.1 — Developer knowledge model:** technical subtypes, generated titles, tool/language metadata, suggested tags, exact source excerpts, duplicate suggestions, local secret detection, Inbox bulk analysis, and a content-first review layout.
+- [x] **Step 8.2 — Topic knowledge view:** canonical topics, local topic hints for legacy notes, grouped captures, ordered overview/command/code/configuration/error/reference sections, semantic duplicate reduction, and per-capture editing inside a topic.
+- [x] **Step 8.3 — Focused review redesign:** single-pane reader, compact search and topic/tag strip, quiet topic actions, structured command table with copy feedback, raw-source drawer with inline editing, and keyboard navigation.
 - [ ] **Step 9 — Optional learning bridge:** reviewable fact extraction and explicit export to Gauntlet/Knowledge Nodes.
 
 ## 3. User experience
@@ -128,9 +131,17 @@ The notes directory uses mode `0700`; the database uses `0600`.
 | `keep_decision` | `pending`, `keep`, or recoverable `skip` |
 | `triage_error`, `triage_attempts` | Retry and diagnostic state |
 | `triage_token` | Rejects stale provider output |
+| `title` | Short AI-generated title for retrieval |
+| `technical_type` | Command, code, concept, error/fix, configuration, tool, reference, or general |
+| `technology` | Detected language, CLI, framework, or tool |
+| `ai_tags` | Searchable suggested tags stored separately from user tags |
+| `local_only`, `sensitive_reason` | Blocks detected credentials and secrets from provider requests |
+| `duplicate_of` | Links a likely duplicate without merging or deleting either note |
+| `topic` | Stable knowledge topic used to group atomic captures |
+| `essentials`, `completions`, `exact_excerpts` | Structured facts and verbatim technical material used by the topic view |
 | `deleted_at` | Supports soft deletion and undo |
 
-Schema version 2 migrates existing databases in place and preserves all note IDs and content.
+Schema version 4 migrates existing databases in place and preserves all note IDs and content.
 
 ## 6. Backend interface
 
@@ -159,7 +170,8 @@ Private note text travels through stdin JSON, never command-line arguments. The 
 - Store a short local error and allow retry from review mode.
 - Ignore provider output if the note changed after the request began.
 - Never automatically delete content based on an AI classification.
-- Existing notes from before schema version 2 remain `unclassified` until manually analyzed; migration does not silently upload them.
+- Detect common credentials and private keys locally before any provider call. Mark them Local only.
+- Existing notes from older schemas remain `unclassified` until the user chooses Analyze Inbox; migration does not silently upload them.
 
 ## 8. Files
 
@@ -206,13 +218,13 @@ Private note text travels through stdin JSON, never command-line arguments. The 
 
 ## 10. Verification record
 
-- Eight backend tests pass, including migration-safe storage behavior, private permissions, personal-note preservation, technical bullet output, recoverable noise classification, provider failure preservation, and stale-response rejection.
+- Ten backend tests pass, including migration-safe storage behavior, private permissions, personal-note preservation, technical metadata and exact excerpts, local secret blocking, duplicate suggestions, recoverable noise classification, provider failure preservation, and stale-response rejection.
 - Repository QML convention checks pass for `services/Notes.qml`, `modules/notes/QuickNote.qml`, and `modules/notes/NotesView.qml`.
 - `git diff --check` passes.
 - The live shell reloads and registers the notes/assistant IPC targets and both shortcuts.
 - Live capture autosaved continued typing into one database row.
 - Synthetic technical and personal notes completed through the configured provider with their raw content preserved; the disposable test notes were soft-deleted afterward.
-- The existing notes database migrated to schema version 2 without losing existing rows.
+- The existing notes database migrated to schema version 4 without losing existing rows.
 
 The system `qmllint` does not understand the repository's existing `pragma ComponentBehavior: Bound` syntax. The repository convention checker and the live Quickshell parser are therefore the applicable QML validation gates.
 

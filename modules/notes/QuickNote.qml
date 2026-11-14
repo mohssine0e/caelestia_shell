@@ -100,7 +100,6 @@ Scope {
                     if (visible) {
                         win.saveError = ""
                         Qt.callLater(() => {
-                            win.requestActivate()
                             if (win.reviewMode) reviewView.forceActiveFocus()
                             else win.beginCapture()
                         })
@@ -114,7 +113,6 @@ Scope {
                     resizeTimer.restart()
                     if (visible) {
                         Qt.callLater(() => {
-                            win.requestActivate()
                             if (win.reviewMode) reviewView.forceActiveFocus()
                             else win.beginCapture()
                         })
@@ -127,8 +125,6 @@ Scope {
                     interval: 80
                     onTriggered: {
                         win.resizeAttempts += 1
-                        win.width = win.preferredWidth
-                        win.height = win.preferredHeight
                         if (win.resizeAttempts < 3) {
                             resizeTimer.restart()
                         } else {
@@ -219,6 +215,7 @@ Scope {
                     visible: win.reviewMode
                     anchors.fill: parent
                     onCloseRequested: win.closeWindow()
+                    onMoveRequested: win.startSystemMove()
                 }
             }
         }

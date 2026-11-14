@@ -33,6 +33,7 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(result["note"]["raw_content"], "docker ps  #Docker #linux #docker")
         self.assertEqual(result["note"]["tags"], ["#docker", "#linux"])
         self.assertEqual(result["note"]["status"], "inbox")
+        self.assertEqual(result["note"]["topic"], "Docker")
         self.assertEqual(stat.S_IMODE(self.db_path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.db_path.parent.stat().st_mode), 0o700)
 
@@ -72,7 +73,7 @@ class NotesBackendTest(unittest.TestCase):
     def test_triage_keeps_personal_thought_verbatim(self):
         original = "I focus better when I start with one small task."
         note = notes.create_note({"raw_content": original})["note"]
-        response = '{"keep":true,"category":"personal","essential_bullets":["changed"],"completion_bullets":["invented"]}'
+        response = '{"keep":true,"category":"personal","title":"AI rewrite","essential_bullets":["changed"],"completion_bullets":["invented"]}'
         with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
             result = notes.triage_note({"id": note["id"]})
         self.assertTrue(result["success"])
@@ -81,21 +82,65 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(stored["formatted_content"], "")
         self.assertEqual(stored["category"], "personal")
         self.assertEqual(stored["keep_decision"], "keep")
+        self.assertEqual(stored["title"], "")
 
     def test_triage_builds_essential_bullets_and_labels_ai_additions(self):
         note = notes.create_note({"raw_content": "docker ps shows running containers"})["note"]
         response = json.dumps({
             "keep": True,
             "category": "technical",
+            "technical_type": "command",
+            "canonical_topic": "Docker",
+            "title": "List running Docker containers",
+            "technology": "Docker",
+            "suggested_tags": ["#docker", "#containers"],
             "essential_bullets": ["`docker ps` lists running containers."],
             "completion_bullets": ["Use `docker ps -a` to include stopped containers."],
+            "exact_excerpts": [{"language": "bash", "content": "docker ps"}],
         })
         with mock.patch.object(notes, "_run_provider", return_value=(response, "groq")):
             stored = notes.triage_note({"id": note["id"]})["note"]
         self.assertEqual(stored["category"], "technical")
         self.assertIn("- `docker ps` lists running containers.", stored["formatted_content"])
         self.assertIn("**AI-added context**", stored["formatted_content"])
+        self.assertIn("```bash\ndocker ps\n```", stored["formatted_content"])
+        self.assertEqual(stored["title"], "List running Docker containers")
+        self.assertEqual(stored["technical_type"], "command")
+        self.assertEqual(stored["technology"], "Docker")
+        self.assertEqual(stored["topic"], "Docker")
+        self.assertEqual(stored["ai_tags"], ["#docker", "#containers"])
+        self.assertEqual(stored["essentials"], ["`docker ps` lists running containers."])
+        self.assertEqual(stored["exact_excerpts"], [{"language": "bash", "content": "docker ps"}])
         self.assertEqual(stored["raw_content"], "docker ps shows running containers")
+
+    def test_sensitive_note_stays_local_without_calling_provider(self):
+        note = notes.create_note({"raw_content": "api_key = sk_test_12345678901234567890"})["note"]
+        with mock.patch.object(notes, "_run_provider") as provider:
+            stored = notes.triage_note({"id": note["id"]})["note"]
+        provider.assert_not_called()
+        self.assertTrue(stored["local_only"])
+        self.assertEqual(stored["raw_content"], "api_key = sk_test_12345678901234567890")
+        self.assertEqual(stored["provider"], "")
+        self.assertIn("secret", stored["sensitive_reason"])
+
+    def test_similar_notes_are_linked_without_automatic_merge(self):
+        original = notes.create_note({"raw_content": "docker ps"})["note"]
+        duplicate = notes.create_note({"raw_content": "docker ps"})["note"]
+        response = json.dumps({
+            "keep": True,
+            "category": "technical",
+            "technical_type": "command",
+            "title": "List Docker containers",
+            "technology": "Docker",
+            "suggested_tags": ["#docker"],
+            "essential_bullets": ["Lists running containers."],
+            "completion_bullets": [],
+            "exact_excerpts": [{"language": "bash", "content": "docker ps"}],
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
+            stored = notes.triage_note({"id": duplicate["id"]})["note"]
+        self.assertEqual(stored["duplicate_of"], original["id"])
+        self.assertEqual(len(notes.list_notes({})["notes"]), 2)
 
     def test_noise_is_recoverable_instead_of_deleted(self):
         note = notes.create_note({"raw_content": "asdf qwer"})["note"]

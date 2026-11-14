@@ -25,6 +25,9 @@ Singleton {
         const fallback = root.fallbackProvider.charAt(0).toUpperCase() + root.fallbackProvider.slice(1)
         return qsTr("%1 first, %2 fallback").arg(primary).arg(fallback)
     }
+    readonly property int pendingAnalysisCount: root.notes.filter(note =>
+        note.category === "unclassified" && note.keep_decision !== "skip" && !note.local_only
+    ).length
 
     property var _createInput: ({})
     property var _mutationInput: ({})
@@ -124,6 +127,15 @@ Singleton {
         queue.push(id)
         root._organizeQueue = queue
         root._startNextOrganization()
+    }
+
+    function analyzeInbox(): void {
+        const source = root.notes || []
+        for (let i = 0; i < source.length; i++) {
+            const note = source[i]
+            if (note.category === "unclassified" && note.keep_decision !== "skip" && !note.local_only)
+                root.queueOrganization(note.id)
+        }
     }
 
     function _startNextOrganization(): void {

@@ -11,11 +11,12 @@ import sys
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 TAG_PATTERN = re.compile(r"(?<![\w#])#([\w-]+)", re.UNICODE)
 ORGANIZER_PROMPT = (
     "You are a technical note formatter. Format the supplied raw developer note as "
@@ -25,20 +26,40 @@ ORGANIZER_PROMPT = (
     "formatted Markdown."
 )
 TRIAGE_PROMPT = """
-You organize a private quick-note inbox. Return one strict JSON object and no
-other text:
+You organize a private developer knowledge inbox. Most notes concern code,
+commands, software tools, errors, configuration, or engineering concepts.
+Return one strict JSON object and no other text:
 {
   "keep": true,
   "category": "technical|reference|personal|idea|noise",
+  "technical_type": "command|code|concept|error_fix|configuration|tool|reference|general",
+  "canonical_topic": "Docker",
+  "title": "short searchable title",
+  "technology": "language, CLI, framework, or tool; empty when unknown",
+  "suggested_tags": ["#docker"],
   "essential_bullets": ["..."],
-  "completion_bullets": ["..."]
+  "completion_bullets": ["..."],
+  "exact_excerpts": [{"language": "bash", "content": "docker ps"}]
 }
 
 Rules:
+- Identify the technical type precisely. Use reference for documentation links,
+  citations, and material primarily saved for later lookup.
+- Choose one stable canonical topic such as Docker, Git, Python, QML, Linux,
+  Kubernetes, or OCI Networking. Use the technology or concept, not the note title.
+- Create a concrete title under 70 characters. Do not title a note "Note",
+  "Technical note", or another generic phrase.
+- Preserve every command, code snippet, error message, configuration key, path,
+  flag, and identifier exactly. Put exact source excerpts in exact_excerpts;
+  never correct or rewrite them there. Use an empty list when none exist.
+- Suggest at most five specific lowercase tags. Never include private values.
 - Personal observations, feelings, preferences, plans, and ideas belong in
-  personal or idea. Preserve them verbatim: return empty bullet arrays.
+  personal or idea. Preserve them verbatim: return empty bullet and excerpt
+  arrays. A software product idea may be an idea rather than a technical fact.
 - Technical or reference notes may become at most six short, factual essential
-  bullets. Preserve commands exactly and use Markdown backticks where useful.
+  bullets. Explain what the saved material does without repeating it.
+- For commands and code, make each essential bullet a direct description of at
+  most 12 words so it fits beside the exact command in a compact table.
 - If a technical note is incomplete, add at most three completion bullets only
   when the missing fact is well established and directly implied. Never invent
   project-specific details, personal facts, credentials, paths, or intent.
@@ -46,6 +67,39 @@ Rules:
   Short but meaningful thoughts must be kept.
 - Do not add introductions, headings, filler, advice, or repeated information.
 """.strip()
+
+SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
+    ("GitHub token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,})\b")),
+    ("AWS access key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
+    ("JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
+    ("assigned secret", re.compile(
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd)\b"
+        r"\s*(?:=|:)\s*['\"]?(?!<|\$\{|\$[A-Za-z_]|your[-_ ]|example|changeme|redacted|xxx)"
+        r"[A-Za-z0-9_./+=:@-]{12,}"
+    )),
+)
+
+TECHNICAL_TYPES = {
+    "command", "code", "concept", "error_fix", "configuration", "tool", "reference", "general"
+}
+
+TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("Docker", re.compile(r"(?i)\b(?:docker|dockerfile|compose)\b")),
+    ("Kubernetes", re.compile(r"(?i)\b(?:kubernetes|kubectl|k8s|helm)\b")),
+    ("Git", re.compile(r"(?i)\b(?:git|github|gitlab)\b")),
+    ("Python", re.compile(r"(?i)\b(?:python|pip|pytest|django|flask|fastapi)\b")),
+    ("JavaScript", re.compile(r"(?i)\b(?:javascript|node(?:\.js)?|npm|pnpm|yarn|react|vue)\b")),
+    ("TypeScript", re.compile(r"(?i)\b(?:typescript|tsx|tsc)\b")),
+    ("QML", re.compile(r"(?i)\b(?:qml|qtquick|quickshell|caelestia)\b")),
+    ("Linux", re.compile(r"(?i)\b(?:linux|systemd|journalctl|pacman|archlinux)\b")),
+    ("Shell", re.compile(r"(?i)\b(?:bash|zsh|shell script)\b")),
+    ("Hyprland", re.compile(r"(?i)\bhyprland\b")),
+    ("SQL", re.compile(r"(?i)\b(?:sql|sqlite|postgres(?:ql)?|mysql)\b")),
+    ("OCI Networking", re.compile(r"(?i)\b(?:oci networking|vcn|subnet|route table)\b")),
+)
 
 
 def utc_now() -> str:
@@ -106,6 +160,17 @@ def connect() -> sqlite3.Connection:
         "triage_error": "ALTER TABLE notes ADD COLUMN triage_error TEXT",
         "triage_attempts": "ALTER TABLE notes ADD COLUMN triage_attempts INTEGER NOT NULL DEFAULT 0",
         "triage_token": "ALTER TABLE notes ADD COLUMN triage_token TEXT",
+        "title": "ALTER TABLE notes ADD COLUMN title TEXT NOT NULL DEFAULT ''",
+        "technical_type": "ALTER TABLE notes ADD COLUMN technical_type TEXT NOT NULL DEFAULT ''",
+        "technology": "ALTER TABLE notes ADD COLUMN technology TEXT NOT NULL DEFAULT ''",
+        "ai_tags_json": "ALTER TABLE notes ADD COLUMN ai_tags_json TEXT NOT NULL DEFAULT '[]'",
+        "local_only": "ALTER TABLE notes ADD COLUMN local_only INTEGER NOT NULL DEFAULT 0",
+        "sensitive_reason": "ALTER TABLE notes ADD COLUMN sensitive_reason TEXT",
+        "duplicate_of": "ALTER TABLE notes ADD COLUMN duplicate_of TEXT",
+        "topic": "ALTER TABLE notes ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
+        "essentials_json": "ALTER TABLE notes ADD COLUMN essentials_json TEXT NOT NULL DEFAULT '[]'",
+        "completions_json": "ALTER TABLE notes ADD COLUMN completions_json TEXT NOT NULL DEFAULT '[]'",
+        "excerpts_json": "ALTER TABLE notes ADD COLUMN excerpts_json TEXT NOT NULL DEFAULT '[]'",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -160,6 +225,14 @@ def _normalise_tags(value: Any, raw_content: str = "") -> list[str]:
     return tags[:24]
 
 
+def _infer_local_topic(raw: str, tags: list[str] | None = None) -> str:
+    source = f"{raw}\n{' '.join(tags or [])}"
+    for topic, pattern in TOPIC_PATTERNS:
+        if pattern.search(source):
+            return topic
+    return ""
+
+
 def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     note = dict(row)
     try:
@@ -167,12 +240,34 @@ def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     except (TypeError, ValueError):
         note["tags"] = []
         note.pop("tags_json", None)
+    try:
+        note["ai_tags"] = json.loads(note.pop("ai_tags_json"))
+    except (TypeError, ValueError):
+        note["ai_tags"] = []
+        note.pop("ai_tags_json", None)
+    for column, target in (("essentials_json", "essentials"),
+                           ("completions_json", "completions"),
+                           ("excerpts_json", "exact_excerpts")):
+        try:
+            note[target] = json.loads(note.pop(column))
+        except (TypeError, ValueError):
+            note[target] = []
+            note.pop(column, None)
     note["formatted_content"] = note.get("formatted_content") or ""
     note["format_error"] = note.get("format_error") or ""
     note["triage_error"] = note.get("triage_error") or ""
     note["category"] = note.get("category") or "unclassified"
     note["keep_decision"] = note.get("keep_decision") or "pending"
     note["provider"] = note.get("provider") or ""
+    note["title"] = note.get("title") or ""
+    note["technical_type"] = note.get("technical_type") or ""
+    note["technology"] = note.get("technology") or ""
+    note["sensitive_reason"] = note.get("sensitive_reason") or ""
+    note["duplicate_of"] = note.get("duplicate_of") or ""
+    note["topic"] = note.get("topic") or _infer_local_topic(
+        note.get("raw_content", ""), note.get("tags", [])
+    )
+    note["local_only"] = bool(note.get("local_only"))
     note["deleted"] = bool(note.get("deleted_at"))
     note.pop("format_token", None)
     note.pop("triage_token", None)
@@ -215,10 +310,12 @@ def list_notes(payload: dict[str, Any]) -> dict[str, Any]:
     if query:
         clauses.append(
             "(lower(raw_content) LIKE ? OR lower(COALESCE(formatted_content, '')) LIKE ? "
-            "OR lower(tags_json) LIKE ?)"
+            "OR lower(COALESCE(title, '')) LIKE ? OR lower(COALESCE(technology, '')) LIKE ? "
+            "OR lower(COALESCE(topic, '')) LIKE ? OR lower(tags_json) LIKE ? "
+            "OR lower(COALESCE(ai_tags_json, '[]')) LIKE ?)"
         )
         needle = f"%{query}%"
-        params.extend((needle, needle, needle))
+        params.extend((needle, needle, needle, needle, needle, needle, needle))
     limit = max(1, min(int(payload.get("limit", 500)), 1000))
     sql = f"SELECT * FROM notes WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT ?"
     params.append(limit)
@@ -259,12 +356,21 @@ def update_note(payload: dict[str, Any]) -> dict[str, Any]:
                triage_error = CASE WHEN ? THEN NULL ELSE triage_error END,
                category = CASE WHEN ? THEN 'unclassified' ELSE category END,
                keep_decision = CASE WHEN ? THEN 'pending' ELSE keep_decision END,
+               title = CASE WHEN ? THEN '' ELSE title END,
+               technical_type = CASE WHEN ? THEN '' ELSE technical_type END,
+               technology = CASE WHEN ? THEN '' ELSE technology END,
+               ai_tags_json = CASE WHEN ? THEN '[]' ELSE ai_tags_json END,
+               local_only = CASE WHEN ? THEN 0 ELSE local_only END,
+               sensitive_reason = CASE WHEN ? THEN NULL ELSE sensitive_reason END,
+               duplicate_of = CASE WHEN ? THEN NULL ELSE duplicate_of END,
+               topic = CASE WHEN ? THEN '' ELSE topic END,
+               essentials_json = CASE WHEN ? THEN '[]' ELSE essentials_json END,
+               completions_json = CASE WHEN ? THEN '[]' ELSE completions_json END,
+               excerpts_json = CASE WHEN ? THEN '[]' ELSE excerpts_json END,
                provider = CASE WHEN ? THEN NULL ELSE provider END,
                schema_version = ?
                WHERE id = ?""",
-            (raw, json.dumps(tags, ensure_ascii=False), now,
-             raw_changed, raw_changed, raw_changed, raw_changed,
-             raw_changed, raw_changed, raw_changed, raw_changed, raw_changed,
+            (raw, json.dumps(tags, ensure_ascii=False), now, *([raw_changed] * 20),
              SCHEMA_VERSION, note_id),
         )
         updated = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
@@ -382,7 +488,69 @@ def _clean_bullets(value: Any, limit: int) -> list[str]:
     return bullets
 
 
-def _parse_triage_response(text: str) -> dict[str, Any]:
+def _clean_text(value: Any, limit: int) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def _detect_sensitive_content(raw: str) -> str:
+    for label, pattern in SECRET_PATTERNS:
+        if pattern.search(raw):
+            return label
+    return ""
+
+
+def _normalise_similarity_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9+#./_-]+", " ", text.lower()).strip()
+
+
+def _find_duplicate(db: sqlite3.Connection, note_id: str, raw: str) -> str:
+    current = _normalise_similarity_text(raw)
+    if len(current) < 4:
+        return ""
+    rows = db.execute(
+        "SELECT id, raw_content FROM notes WHERE id != ? AND deleted_at IS NULL",
+        (note_id,),
+    ).fetchall()
+    current_tokens = set(current.split())
+    best_id = ""
+    best_score = 0.0
+    for row in rows:
+        candidate = _normalise_similarity_text(row["raw_content"])
+        if len(candidate) < 4:
+            continue
+        candidate_tokens = set(candidate.split())
+        union = current_tokens | candidate_tokens
+        jaccard = len(current_tokens & candidate_tokens) / len(union) if union else 0.0
+        score = max(SequenceMatcher(None, current, candidate).ratio(), jaccard)
+        if current == candidate:
+            score = 1.0
+        elif min(len(current), len(candidate)) >= 8 and (current in candidate or candidate in current):
+            score = max(score, 0.9)
+        if score >= 0.86 and score > best_score:
+            best_id = row["id"]
+            best_score = score
+    return best_id
+
+
+def _clean_exact_excerpts(value: Any, raw: str) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    excerpts: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content or content not in raw:
+            continue
+        language = re.sub(r"[^A-Za-z0-9_+.-]", "", str(item.get("language", "")))[:24]
+        if not any(existing["content"] == content for existing in excerpts):
+            excerpts.append({"language": language, "content": content[:10_000]})
+        if len(excerpts) >= 6:
+            break
+    return excerpts
+
+
+def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
     cleaned = text.strip()
     fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
     if fence:
@@ -398,16 +566,36 @@ def _parse_triage_response(text: str) -> dict[str, Any]:
     if category not in allowed:
         raise RuntimeError("The AI returned an unknown note category.")
     keep = result.get("keep") is not False and category != "noise"
+    technical_type = str(result.get("technical_type", "general")).strip().lower()
+    if technical_type not in TECHNICAL_TYPES:
+        technical_type = "general"
+    title = _clean_text(result.get("title"), 70)
+    technology = _clean_text(result.get("technology"), 40)
+    topic = _clean_text(result.get("canonical_topic"), 50) or technology or _infer_local_topic(raw)
+    suggested_tags = _normalise_tags(result.get("suggested_tags", []))[:5]
     essentials = _clean_bullets(result.get("essential_bullets"), 6)
     completions = _clean_bullets(result.get("completion_bullets"), 3)
+    exact_excerpts = _clean_exact_excerpts(result.get("exact_excerpts"), raw)
     if category in {"personal", "idea", "noise"}:
         essentials = []
         completions = []
+        exact_excerpts = []
+        title = ""
+        technical_type = ""
+        technology = ""
+        topic = ""
+        suggested_tags = []
     return {
         "keep": keep,
         "category": category,
+        "technical_type": technical_type,
+        "title": title,
+        "technology": technology,
+        "topic": topic,
+        "suggested_tags": suggested_tags,
         "essential_bullets": essentials,
         "completion_bullets": completions,
+        "exact_excerpts": exact_excerpts,
     }
 
 
@@ -418,17 +606,33 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
         row = db.execute("SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL", (note_id,)).fetchone()
         if row is None:
             raise ValueError("Note not found.")
+        raw = row["raw_content"]
+        sensitive_reason = _detect_sensitive_content(raw)
+        if sensitive_reason:
+            duplicate_of = _find_duplicate(db, note_id, raw)
+            db.execute(
+                """UPDATE notes SET status = 'formatted', category = 'reference',
+                   keep_decision = 'keep', title = 'Private local note',
+                   technical_type = 'reference', technology = '', ai_tags_json = '[]',
+                   topic = ?, essentials_json = '[]', completions_json = '[]', excerpts_json = '[]',
+                   local_only = 1, sensitive_reason = ?, duplicate_of = ?,
+                   formatted_content = NULL, triage_error = NULL, triage_token = NULL,
+                   provider = NULL, updated_at = ?, schema_version = ? WHERE id = ?""",
+                (_infer_local_topic(raw), sensitive_reason, duplicate_of or None,
+                 utc_now(), SCHEMA_VERSION, note_id),
+            )
+            stored = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+            return {"success": True, "note": _row_to_note(stored), "local_only": True}
         db.execute(
             """UPDATE notes SET status = 'formatting', triage_error = NULL,
                triage_attempts = triage_attempts + 1, triage_token = ?, updated_at = ?
                WHERE id = ?""",
             (token, utc_now(), note_id),
         )
-        raw = row["raw_content"]
 
     try:
         response, provider = _run_provider(TRIAGE_PROMPT, raw)
-        triage = _parse_triage_response(response)
+        triage = _parse_triage_response(response, raw)
     except Exception as exc:
         message = str(exc).strip() or "Note analysis failed."
         with database() as db:
@@ -444,18 +648,29 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
     essentials = triage["essential_bullets"]
     completions = triage["completion_bullets"]
     markdown_parts = ["\n".join(f"- {item}" for item in essentials)] if essentials else []
+    for excerpt in triage["exact_excerpts"]:
+        markdown_parts.append(f"```{excerpt['language']}\n{excerpt['content']}\n```")
     if completions:
         markdown_parts.append("**AI-added context**\n" + "\n".join(f"- {item}" for item in completions))
     formatted = "\n\n".join(markdown_parts)
     decision = "keep" if triage["keep"] else "skip"
     with database() as db:
+        duplicate_of = _find_duplicate(db, note_id, raw)
         cursor = db.execute(
             """UPDATE notes SET formatted_content = ?, status = 'formatted',
                category = ?, keep_decision = ?, triage_error = NULL,
-               triage_token = NULL, provider = ?, updated_at = ?, schema_version = ?
+               triage_token = NULL, provider = ?, title = ?, technical_type = ?,
+               technology = ?, topic = ?, ai_tags_json = ?, essentials_json = ?,
+               completions_json = ?, excerpts_json = ?, local_only = 0,
+               sensitive_reason = NULL, duplicate_of = ?, updated_at = ?, schema_version = ?
                WHERE id = ? AND triage_token = ? AND deleted_at IS NULL""",
-            (formatted or None, triage["category"], decision, provider, utc_now(),
-             SCHEMA_VERSION, note_id, token),
+            (formatted or None, triage["category"], decision, provider,
+             triage["title"], triage["technical_type"], triage["technology"], triage["topic"],
+             json.dumps(triage["suggested_tags"], ensure_ascii=False),
+             json.dumps(essentials, ensure_ascii=False),
+             json.dumps(completions, ensure_ascii=False),
+             json.dumps(triage["exact_excerpts"], ensure_ascii=False), duplicate_of or None,
+             utc_now(), SCHEMA_VERSION, note_id, token),
         )
     if cursor.rowcount != 1:
         return {"success": False, "stale": True, "id": note_id}
