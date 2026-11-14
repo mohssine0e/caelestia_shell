@@ -123,6 +123,32 @@ Item {
         return items
     }
     readonly property var knowledge: win.buildKnowledge(win.selectedGroup)
+    readonly property var activeDynamicSections: {
+        const map = new Map()
+        for (const sec of (win.knowledge?.dynamicSections || [])) {
+            map.set(sec.key, {
+                title: sec.title,
+                key: sec.key,
+                bullets: sec.bullets || [],
+                commands: sec.commands || [],
+                code: sec.code || []
+            })
+        }
+        const standardKeys = new Set(["overview", "notes", "commands", "code", "configuration", "errors", "references"])
+        for (const pendingSec of (topicOps.pendingSections || [])) {
+            const key = String(pendingSec).toLowerCase().trim()
+            if (!standardKeys.has(key) && !map.has(key)) {
+                map.set(key, {
+                    title: pendingSec,
+                    key: key,
+                    bullets: [],
+                    commands: [],
+                    code: []
+                })
+            }
+        }
+        return Array.from(map.values())
+    }
 
     signal closeRequested()
     signal moveRequested()
@@ -139,40 +165,80 @@ Item {
         return text
     }
     function buildKnowledge(group): var {
-        const result = { overview: [], notes: [], commands: [], code: [], configuration: [], errors: [], references: [] }
+        const result = {
+            overview: [], notes: [], commands: [], code: [],
+            configuration: [], errors: [], references: [],
+            dynamicSections: []
+        }
         if (!group) return result
         const seenText = new Set()
         const seenCommands = new Set()
+        const customMap = new Map()
+
+        function getOrCreateCustomSection(title) {
+            const trimmed = String(title || "").trim()
+            const key = trimmed.toLowerCase()
+            if (!customMap.has(key)) {
+                customMap.set(key, { title: trimmed, key: key, bullets: [], commands: [], code: [] })
+            }
+            return customMap.get(key)
+        }
+
         function addText(section, value, note, fieldKey) {
             const text = String(note.display_edits?.[fieldKey] || value || "").trim()
             const key = text.toLowerCase().replace(/[\x60*_#•-]/g, "").replace(/\s+/g, " ").trim()
             if (!text || seenText.has(section + ":" + key)) return
             seenText.add(section + ":" + key)
-            result[section].push({ text: text.replace(/^\s*[-*•]\s*/, ""),
-                noteId: note.id, key: fieldKey, origin: note.origin || "user" })
+            const entry = { text: text.replace(/^\s*[-*•]\s*/, ""),
+                noteId: note.id, key: fieldKey, origin: note.origin || "user" }
+            const secKey = String(section || "").toLowerCase().trim()
+            if (result[secKey]) {
+                result[secKey].push(entry)
+            } else {
+                getOrCreateCustomSection(section).bullets.push(entry)
+            }
         }
-        function addCommand(command, explanation, note, commandKey, explanationKey) {
+        function addCommand(section, command, explanation, note, commandKey, explanationKey) {
             const clean = String(note.display_edits?.[commandKey] || command || "").trim().replace(/^\$\s*/, "")
             if (!clean || seenCommands.has(clean)) return
             seenCommands.add(clean)
-            result.commands.push({
+            const cmdObj = {
                 command: clean,
                 explanation: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
                 commandEntry: { text: clean, noteId: note.id, key: commandKey, origin: note.origin || "user" },
                 explanationEntry: { text: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
                     noteId: note.id, key: explanationKey, origin: note.origin || "user" }
-            })
-        }
-        for (const note of group.notes || []) {
-            if (note.origin === "ai" && !(note.essentials || []).length) {
-                addText(note.topic_section === "overview" ? "overview" : "notes",
-                    note.raw_content, note, "fallback")
-                continue
             }
+            const secKey = String(section || "").toLowerCase().trim()
+            if (secKey === "commands") {
+                result.commands.push(cmdObj)
+            } else {
+                getOrCreateCustomSection(section).commands.push(cmdObj)
+            }
+        }
+        function addCode(section, codeItem) {
+            const secKey = String(section || "").toLowerCase().trim()
+            if (secKey === "code") {
+                result.code.push(codeItem)
+            } else {
+                getOrCreateCustomSection(section).code.push(codeItem)
+            }
+        }
+
+        for (const note of group.notes || []) {
+            const targetSection = String(note.topic_section || "").trim()
             const essentials = note.essentials || []
             const excerpts = note.exact_excerpts || []
             const type = note.technical_type || "general"
+
+            if (note.origin === "ai" && !(note.essentials || []).length) {
+                const sec = targetSection ? targetSection : "notes"
+                addText(sec, note.raw_content, note, "fallback")
+                continue
+            }
+
             if (type === "command") {
+                const sec = targetSection ? targetSection : "commands"
                 let commandIndex = 0
                 for (let excerptIndex = 0; excerptIndex < excerpts.length; excerptIndex++) {
                     const lines = String(excerpts[excerptIndex].content || "").split("\n")
@@ -182,33 +248,44 @@ Item {
                         const essentialIndex = Math.min(commandIndex, Math.max(essentials.length - 1, 0))
                         const explanation = essentials[essentialIndex]
                             || win.displayTitle(note)
-                        addCommand(line, explanation, note,
+                        addCommand(sec, line, explanation, note,
                             "command:" + excerptIndex + ":" + lineIndex, "essential:" + essentialIndex)
                         commandIndex += 1
                     }
                 }
                 if (excerpts.length === 0 && !String(note.raw_content || "").includes("\n"))
-                    addCommand(note.raw_content, essentials[0] || win.displayTitle(note), note, "fallback", "essential:0")
-                for (let i = commandIndex; i < essentials.length; i++) addText("notes", essentials[i], note, "essential:" + i)
+                    addCommand(sec, note.raw_content, essentials[0] || win.displayTitle(note), note, "fallback", "essential:0")
+                for (let i = commandIndex; i < essentials.length; i++) addText(sec === "commands" ? "notes" : sec, essentials[i], note, "essential:" + i)
             } else if (type === "code") {
-                for (let i = 0; i < excerpts.length; i++) result.code.push({
-                    language: excerpts[i].language || "",
-                    content: note.display_edits?.["command:" + i + ":0"] || excerpts[i].content || "",
-                    explanation: essentials[0] || win.displayTitle(note),
-                    noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user"
-                })
-                if (excerpts.length === 0 && note.raw_content)
-                    result.code.push({ language: note.technology || "", content: note.display_edits?.fallback || note.raw_content,
-                        explanation: essentials[0] || "", noteId: note.id, key: "fallback", origin: note.origin || "user" })
+                const sec = targetSection ? targetSection : "code"
+                for (let i = 0; i < excerpts.length; i++) {
+                    addCode(sec, {
+                        language: excerpts[i].language || "",
+                        content: note.display_edits?.["command:" + i + ":0"] || excerpts[i].content || "",
+                        explanation: essentials[0] || win.displayTitle(note),
+                        noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user"
+                    })
+                }
+                if (excerpts.length === 0 && note.raw_content) {
+                    addCode(sec, {
+                        language: note.technology || "",
+                        content: note.display_edits?.fallback || note.raw_content,
+                        explanation: essentials[0] || "", noteId: note.id, key: "fallback", origin: note.origin || "user"
+                    })
+                }
             } else {
-                let section = note.topic_section === "overview" ? "overview" : "notes"
-                if (type === "configuration") section = "configuration"
-                else if (type === "error_fix") section = "errors"
-                else if (type === "reference" || note.category === "reference") section = "references"
-                for (let i = 0; i < essentials.length; i++) addText(section, essentials[i], note, "essential:" + i)
-                if (essentials.length === 0) addText(section, note.formatted_content || note.raw_content, note, "fallback")
+                let sec = targetSection
+                if (!sec) {
+                    if (type === "configuration") sec = "configuration"
+                    else if (type === "error_fix") sec = "errors"
+                    else if (type === "reference" || note.category === "reference") sec = "references"
+                    else sec = "notes"
+                }
+                for (let i = 0; i < essentials.length; i++) addText(sec, essentials[i], note, "essential:" + i)
+                if (essentials.length === 0) addText(sec, note.formatted_content || note.raw_content, note, "fallback")
             }
         }
+        result.dynamicSections = Array.from(customMap.values())
         return result
     }
     function topicMarkdown(): string {
@@ -227,6 +304,17 @@ Item {
         addSection(qsTr("Configuration"), win.knowledge.configuration)
         addSection(qsTr("Errors & Fixes"), win.knowledge.errors)
         addSection(qsTr("References"), win.knowledge.references)
+        for (const sec of win.activeDynamicSections) {
+            if (sec.bullets.length || sec.commands.length || sec.code.length) {
+                output.push("## " + sec.title)
+                if (sec.bullets.length)
+                    output.push(sec.bullets.map(value => "- " + value.text).join("\n"))
+                if (sec.commands.length)
+                    output.push(sec.commands.map(item => "$ " + item.command + "\n" + item.explanation).join("\n\n"))
+                if (sec.code.length)
+                    output.push(sec.code.map(item => item.content).join("\n\n"))
+            }
+        }
         return output.join("\n\n")
     }
     function analyzeSelectedGroup(): void {
@@ -850,6 +938,163 @@ Item {
                 SimpleSection { sectionTitle: qsTr("Configuration"); sectionKey: "configuration"; entries: win.knowledge.configuration }
                 SimpleSection { sectionTitle: qsTr("Errors & Fixes"); sectionKey: "errors"; entries: win.knowledge.errors }
                 SimpleSection { sectionTitle: qsTr("References"); sectionKey: "references"; entries: win.knowledge.references }
+                Repeater {
+                    model: win.activeDynamicSections
+                    delegate: Column {
+                        id: dynamicSectionCol
+                        required property var modelData
+                        width: parent.width
+                        spacing: 8
+                        visible: modelData.bullets.length > 0 || modelData.commands.length > 0
+                            || modelData.code.length > 0 || topicOps.pendingFor(modelData.title).length > 0
+
+                        SectionTitle { text: dynamicSectionCol.modelData.title.toUpperCase() }
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Colours.palette.m3outlineVariant
+                            opacity: 0.55
+                        }
+
+                        Repeater {
+                            model: dynamicSectionCol.modelData.bullets
+                            delegate: Item {
+                                id: dynBulletRow
+                                required property var modelData
+                                width: parent.width
+                                implicitHeight: dynBulletEntry.implicitHeight + 6
+                                InlineEntry {
+                                    id: dynBulletEntry
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    entry: dynBulletRow.modelData
+                                    bullet: true
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: dynamicSectionCol.modelData.commands
+                            delegate: Item {
+                                id: dynCmdRow
+                                required property var modelData
+                                property bool copied: false
+                                width: parent.width
+                                height: Math.max(40, dynCmdEntry.implicitHeight + 12, dynCmdExplanation.implicitHeight + 12)
+                                Timer {
+                                    interval: 1200
+                                    running: dynCmdRow.copied
+                                    onTriggered: dynCmdRow.copied = false
+                                }
+                                Item {
+                                    anchors.fill: parent
+                                    Item {
+                                        id: dynCmdCopy
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 28
+                                        height: 28
+                                        opacity: dynCmdCopyMouse.containsMouse || dynCmdRow.copied ? 1 : 0.45
+                                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                                        MaterialIcon {
+                                            anchors.centerIn: parent
+                                            text: dynCmdRow.copied ? "check" : "content_copy"
+                                            color: Colours.palette.m3onSurfaceVariant
+                                            fill: 0
+                                            fontStyle: Tokens.font.icon.size(12).build()
+                                        }
+                                        MouseArea {
+                                            id: dynCmdCopyMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                Quickshell.clipboardText = dynCmdRow.modelData.command
+                                                dynCmdRow.copied = true
+                                            }
+                                        }
+                                    }
+                                    StyledText {
+                                        id: dynCmdEntry
+                                        anchors.left: dynCmdCopy.right
+                                        anchors.leftMargin: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: dynCmdRow.width * 0.38
+                                        text: "$ " + dynCmdRow.modelData.command
+                                        color: Colours.palette.m3primary
+                                        font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                    StyledText {
+                                        id: dynCmdExplanation
+                                        anchors.left: dynCmdEntry.right
+                                        anchors.leftMargin: 12
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "•  " + dynCmdRow.modelData.explanation
+                                        color: Colours.palette.m3onSurface
+                                        font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 1
+                                    color: Colours.palette.m3outlineVariant
+                                    opacity: 0.2
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: dynamicSectionCol.modelData.code
+                            delegate: Rectangle {
+                                id: dynCodeBlock
+                                required property var modelData
+                                width: parent.width
+                                implicitHeight: dynCodeCol.implicitHeight + 20
+                                radius: 8
+                                color: Colours.palette.m3surfaceContainerLow
+                                Column {
+                                    id: dynCodeCol
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 10
+                                    spacing: 8
+                                    StyledText {
+                                        width: parent.width
+                                        visible: !!dynCodeBlock.modelData.explanation
+                                        text: dynCodeBlock.modelData.explanation
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 14,
+                                            weight: Tokens.font.body.small.weight })
+                                        wrapMode: Text.Wrap
+                                    }
+                                    InlineEntry {
+                                        width: parent.width
+                                        entry: ({ text: dynCodeBlock.modelData.content, noteId: dynCodeBlock.modelData.noteId,
+                                            key: dynCodeBlock.modelData.key, origin: dynCodeBlock.modelData.origin })
+                                        mono: true
+                                    }
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: topicOps.pendingFor(dynamicSectionCol.modelData.title)
+                            delegate: PendingLine {
+                                required property var modelData
+                                width: parent.width
+                                suggestion: modelData
+                                controller: topicOps
+                            }
+                        }
+                    }
+                }
                 StyledText {
                     width: parent.width
                     visible: !!win.query && win.visibleGroups.length === 0

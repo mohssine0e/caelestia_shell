@@ -324,3 +324,12 @@ text for provenance.
   Docker test captures: `what is docker`, `docke is mn3rf`, and
   `test adding a note`. Other captures remain unchanged.
 - [x] Run backend tests and reload the shell.
+
+## 15. Dynamic domain sections (2026-11-14)
+
+- [x] Lift the rigid 7-section restriction (`TOPIC_SECTIONS`) so the AI organizer can generate domain-tailored section headings (e.g., *Stream API*, *JVM Options* for Java; *Process Control*, *Networking* for Linux).
+- [x] Add item `kind` (`bullet`, `command`, `code`) and optional `code`/`language` columns to `topic_suggestions` table in Schema v9.
+- [x] Extend `TOPIC_PATTERNS` to recognize common programming languages (Java, Rust, Go) for local topic inference.
+- [x] Update `NotesView.qml` `buildKnowledge()` to collect and expose dynamic sections, rendering custom headers with format-aware delegates (bullets, copyable command table, or code blocks).
+- [x] Keep Overview pinned first while rendering custom dynamic sections seamlessly alongside existing legacy notes.
+- [x] Add automated unit tests covering dynamic section suggestions and multi-kind candidate acceptance.

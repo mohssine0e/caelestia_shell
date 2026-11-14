@@ -29,8 +29,11 @@ Rectangle {
 
         StyledText {
             Layout.fillWidth: true
-            text: (root.suggestion.section === "commands" ? "$ " + root.suggestion.command + "  •  " : "")
-                + (["overview", "notes"].includes(root.suggestion.section) ? "•  " : "")
+            text: (root.suggestion.kind === "command" || root.suggestion.command
+                    ? "$ " + root.suggestion.command + "  •  "
+                    : (root.suggestion.kind === "code" || root.suggestion.code
+                        ? (root.suggestion.language ? "[" + root.suggestion.language + "] " : "") + (root.suggestion.code || "") + "  •  "
+                        : "•  "))
                 + root.suggestion.content
             font: Tokens.font.body.small
             color: Colours.palette.m3onSurface

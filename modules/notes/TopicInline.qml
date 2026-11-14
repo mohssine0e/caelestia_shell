@@ -28,7 +28,20 @@ Item {
         return true
     }
     function pendingFor(section): var {
-        return available.filter(item => item.section === section)
+        const target = String(section || "").toLowerCase().trim()
+        return available.filter(item => String(item.section || "").toLowerCase().trim() === target)
+    }
+    readonly property var pendingSections: {
+        const list = []
+        const seen = new Set()
+        for (const item of available) {
+            const sec = String(item.section || "").trim()
+            if (sec && !seen.has(sec.toLowerCase())) {
+                seen.add(sec.toLowerCase())
+                list.push(sec)
+            }
+        }
+        return list
     }
     function generate(): void { request("fill-topic") }
     function accept(id): void { request("accept-topic-line", { id: id }) }

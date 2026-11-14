@@ -309,6 +309,31 @@ class NotesBackendTest(unittest.TestCase):
             result = notes.fill_topic({"topic": "Docker"})
         self.assertEqual([item["command"] for item in result["suggestions"]], ["docker ps -a"])
 
+    def test_fill_topic_supports_dynamic_domain_sections(self):
+        notes.create_note({"raw_content": "Java public static void main"})
+        response = json.dumps([
+            {"section": "Overview", "kind": "bullet", "content": "Java is an object-oriented language running on the JVM."},
+            {"section": "Stream API", "kind": "code", "content": "Filters list", "code": "list.stream().filter(x -> x > 0)", "language": "java"},
+            {"section": "JVM Options", "kind": "command", "content": "Sets max heap to 2GB", "command": "-Xmx2g"},
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
+            suggestions = notes.fill_topic({"topic": "Java"})["suggestions"]
+        self.assertEqual([item["section"] for item in suggestions], ["Overview", "Stream API", "JVM Options"])
+        self.assertEqual(suggestions[1]["kind"], "code")
+        self.assertEqual(suggestions[1]["code"], "list.stream().filter(x -> x > 0)")
+        self.assertEqual(suggestions[2]["kind"], "command")
+        self.assertEqual(suggestions[2]["command"], "-Xmx2g")
+
+        notes.accept_all_topic_lines({"topic": "Java"})
+        saved = [item for item in notes.list_notes({})["notes"] if item["origin"] == "ai"]
+        saved_by_section = {item["topic_section"]: item for item in saved}
+        self.assertIn("Stream API", saved_by_section)
+        self.assertEqual(saved_by_section["Stream API"]["technical_type"], "code")
+        self.assertEqual(saved_by_section["Stream API"]["exact_excerpts"][0]["content"], "list.stream().filter(x -> x > 0)")
+        self.assertIn("JVM Options", saved_by_section)
+        self.assertEqual(saved_by_section["JVM Options"]["technical_type"], "command")
+        self.assertEqual(saved_by_section["JVM Options"]["exact_excerpts"][0]["content"], "-Xmx2g")
+
 
 if __name__ == "__main__":
     unittest.main()
