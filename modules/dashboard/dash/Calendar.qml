@@ -77,7 +77,7 @@ CustomMouseArea {
             const evs = root.gcalEvents[root.selectedDateKey] || [];
             const isToday = root.selectedDateKey === root.todayKey;
             const dateStr = root.formatDateStr(root.selectedDateKey);
-            const headerTitle = isToday ? ("Today • " + dateStr) : dateStr;
+            const headerTitle = isToday ? ("TODAY • " + dateStr) : dateStr.toUpperCase();
 
             const items = [{
                 isHeader: true,
@@ -142,7 +142,7 @@ CustomMouseArea {
             isHeader: true,
             isEmptyNotice: false,
             id: "hdr_today",
-            title: "Today • " + todayDateStr,
+            title: "TODAY • " + todayDateStr.toUpperCase(),
             dateKey: todayStr,
             time: "",
             all_day: false,
@@ -156,7 +156,7 @@ CustomMouseArea {
                 isHeader: false,
                 isEmptyNotice: true,
                 id: "empty_today",
-                title: "Nothing scheduled today",
+                title: "No events scheduled for today",
                 dateKey: todayStr,
                 time: "",
                 all_day: false,
@@ -195,9 +195,9 @@ CustomMouseArea {
 
             let headerTitle = "";
             if (k === tomorrowKey) {
-                headerTitle = "Tomorrow • " + d.toLocaleDateString(Qt.locale(), "ddd, MMM d");
+                headerTitle = "TOMORROW • " + d.toLocaleDateString(Qt.locale(), "ddd, MMM d").toUpperCase();
             } else {
-                headerTitle = d.toLocaleDateString(Qt.locale(), "dddd • MMM d");
+                headerTitle = d.toLocaleDateString(Qt.locale(), "dddd • MMM d").toUpperCase();
             }
 
             result.push({
@@ -352,7 +352,7 @@ CustomMouseArea {
 
     anchors.left: parent.left
     anchors.right: parent.right
-    implicitHeight: 390
+    implicitHeight: 440
 
     acceptedButtons: Qt.MiddleButton
     onClicked: {
@@ -409,8 +409,8 @@ CustomMouseArea {
     ColumnLayout {
         id: inner
         anchors.fill: parent
-        anchors.margins: Tokens.padding.medium
-        spacing: Tokens.spacing.small
+        anchors.margins: Tokens.padding.large
+        spacing: Tokens.spacing.medium
 
         // Top Header Bar
         RowLayout {
@@ -418,20 +418,35 @@ CustomMouseArea {
             spacing: Tokens.spacing.small
 
             RowLayout {
-                spacing: Tokens.spacing.extraSmall
+                spacing: Tokens.spacing.small
                 Layout.alignment: Qt.AlignVCenter
 
-                StyledText {
-                    text: "Calendar"
-                    font: Tokens.font.title.small
+                MaterialIcon {
+                    text: "calendar_month"
                     color: Colours.palette.m3primary
+                    fontStyle: Tokens.font.icon.medium
                 }
 
                 StyledText {
-                    text: !root.gcalConfigured ? "• Local Only" : ""
-                    font: Tokens.font.label.small
-                    color: Colours.palette.m3outline
-                    visible: text !== ""
+                    text: "Calendar"
+                    font: Tokens.font.title.medium
+                    color: Colours.palette.m3onSurface
+                }
+
+                Rectangle {
+                    visible: !root.gcalConfigured
+                    radius: Tokens.rounding.extraSmall
+                    color: Colours.palette.m3surfaceContainerHighest
+                    implicitHeight: 22
+                    implicitWidth: localBadgeText.implicitWidth + 12
+
+                    StyledText {
+                        id: localBadgeText
+                        anchors.centerIn: parent
+                        text: "Local Mode"
+                        font: Tokens.font.label.small
+                        color: Colours.palette.m3outline
+                    }
                 }
             }
 
@@ -439,7 +454,7 @@ CustomMouseArea {
 
             // Filter status / Reset button
             IconButton {
-                icon: "event_upcoming"
+                icon: "view_agenda"
                 isRound: true
                 type: IconButton.Tonal
                 font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
@@ -497,8 +512,8 @@ CustomMouseArea {
             id: quickAddBox
             Layout.fillWidth: true
             visible: root.isAddingEvent
-            radius: Tokens.rounding.small
-            color: Colours.palette.m3surfaceContainer
+            radius: Tokens.rounding.medium
+            color: Colours.palette.m3surfaceContainerHigh
             border.width: 1
             border.color: Colours.palette.m3outlineVariant
             implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
@@ -530,7 +545,7 @@ CustomMouseArea {
 
                 StyledTextField {
                     id: eventTimeInput
-                    Layout.preferredWidth: 80
+                    Layout.preferredWidth: 90
                     placeholderText: "14:00"
                     placeholderFloats: false
                     verticalPadding: Tokens.padding.extraSmall
@@ -563,18 +578,18 @@ CustomMouseArea {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Tokens.spacing.medium
+            spacing: Tokens.spacing.large
 
-            // LEFT PANE: Mini Month Navigator
+            // LEFT PANE: Spacious Month Navigator
             ColumnLayout {
-                Layout.preferredWidth: 235
+                Layout.preferredWidth: 330
                 Layout.fillHeight: true
-                spacing: 2
+                spacing: Tokens.spacing.small
 
-                // Month Switcher
+                // Month Switcher Header
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 2
+                    spacing: 4
 
                     IconButton {
                         isRound: true
@@ -587,7 +602,7 @@ CustomMouseArea {
 
                     Item {
                         Layout.fillWidth: true
-                        implicitHeight: monthYearDisplay.implicitHeight + Tokens.padding.extraSmall
+                        implicitHeight: monthYearDisplay.implicitHeight + Tokens.padding.small
 
                         StateLayer {
                             color: Colours.palette.m3primary
@@ -602,8 +617,8 @@ CustomMouseArea {
                             id: monthYearDisplay
                             anchors.centerIn: parent
                             text: grid.title
-                            color: Colours.palette.m3onSurface
-                            font: Tokens.font.title.builders.small.capitalisation(Font.Capitalize).build()
+                            color: Colours.palette.m3primary
+                            font: Tokens.font.title.medium
                         }
                     }
 
@@ -617,7 +632,7 @@ CustomMouseArea {
                     }
                 }
 
-                // Days of week header
+                // Days of week header row
                 DayOfWeekRow {
                     id: daysRow
                     Layout.fillWidth: true
@@ -629,10 +644,11 @@ CustomMouseArea {
                         text: model.shortName
                         font: Tokens.font.label.small
                         color: (model.day === 0 || model.day === 6) ? Colours.palette.m3tertiary : Colours.palette.m3onSurfaceVariant
+                        opacity: 0.85
                     }
                 }
 
-                // Month Grid
+                // Month Grid with generous cell dimensions
                 MonthGrid {
                     id: grid
                     Layout.fillWidth: true
@@ -640,7 +656,7 @@ CustomMouseArea {
 
                     month: root.currMonth
                     year: root.currYear
-                    spacing: 1
+                    spacing: 3
                     locale: Tr.locale
 
                     delegate: Item {
@@ -648,7 +664,7 @@ CustomMouseArea {
                         required property var model
 
                         implicitWidth: implicitHeight
-                        implicitHeight: text.implicitHeight + 14
+                        implicitHeight: 38
 
                         readonly property string dayKey: root.dateToKey(dayItem.model.date)
                         readonly property var events: root.gcalEvents[dayKey] || []
@@ -659,13 +675,30 @@ CustomMouseArea {
                         // Selection / Today Background Pill
                         Rectangle {
                             anchors.centerIn: parent
-                            width: Math.min(parent.width, parent.height) - 2
-                            height: width
-                            radius: width / 2
+                            width: 32
+                            height: 32
+                            radius: 16
                             color: dayItem.isToday ? Colours.palette.m3primary : Colours.palette.m3primaryContainer
                             visible: dayItem.isToday || dayItem.isSelected
-                            opacity: dayItem.isSelected && !dayItem.isToday ? 0.75 : 1
+                            opacity: dayItem.isSelected && !dayItem.isToday ? 0.8 : 1
                             Behavior on opacity { Anim { type: Anim.FastEffects } }
+                        }
+
+                        StateLayer {
+                            anchors.centerIn: parent
+                            width: 34
+                            height: 34
+                            radius: 17
+                            color: Colours.palette.m3primary
+                            visible: !dayItem.isToday && !dayItem.isSelected
+                            onClicked: {
+                                root.isAddingEvent = false;
+                                if (root.selectedDateKey === dayItem.dayKey) {
+                                    root.selectedDateKey = "";
+                                } else {
+                                    root.selectedDateKey = dayItem.dayKey;
+                                }
+                            }
                         }
 
                         MouseArea {
@@ -684,7 +717,7 @@ CustomMouseArea {
                         StyledText {
                             id: text
                             anchors.centerIn: parent
-                            anchors.verticalCenterOffset: -3
+                            anchors.verticalCenterOffset: dayItem.eventsCount > 0 ? -3 : 0
                             horizontalAlignment: Text.AlignHCenter
                             text: grid.locale.toString(dayItem.model.day)
                             color: {
@@ -694,24 +727,24 @@ CustomMouseArea {
                                 if (dow === 0 || dow === 6) return Colours.palette.m3tertiary;
                                 return Colours.palette.m3onSurface;
                             }
-                            opacity: dayItem.isToday || dayItem.model.month === grid.month ? 1 : 0.35
-                            font: Tokens.font.body.small
+                            opacity: dayItem.isToday || dayItem.model.month === grid.month ? 1 : 0.3
+                            font: dayItem.isToday || dayItem.isSelected ? Tokens.font.body.builders.medium.weight(Font.Bold).build() : Tokens.font.body.medium
                         }
 
-                        // Event Density Indicator Dots (1, 2, or 3 dots)
+                        // Event Density Dots
                         Row {
                             anchors.top: text.bottom
-                            anchors.topMargin: 1
+                            anchors.topMargin: 2
                             anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: 2
+                            spacing: 3
                             visible: dayItem.eventsCount > 0
 
                             Repeater {
                                 model: Math.min(dayItem.eventsCount, 3)
                                 Rectangle {
-                                    width: 3
-                                    height: 3
-                                    radius: 1.5
+                                    width: 4
+                                    height: 4
+                                    radius: 2
                                     color: dayItem.isToday ? Colours.palette.m3onPrimary : Colours.palette.m3tertiary
                                 }
                             }
@@ -720,19 +753,19 @@ CustomMouseArea {
                 }
             }
 
-            // VERTICAL DIVIDER
+            // VERTICAL SEPARATOR
             Rectangle {
                 width: 1
                 Layout.fillHeight: true
                 color: Colours.palette.m3outlineVariant
-                opacity: 0.35
+                opacity: 0.3
             }
 
-            // RIGHT PANE: Multi-Day Scrollable Agenda
+            // RIGHT PANE: Spacious Multi-Day Event Cards
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: Tokens.spacing.extraSmall
+                spacing: Tokens.spacing.small
 
                 // Agenda Section Header
                 RowLayout {
@@ -740,26 +773,35 @@ CustomMouseArea {
                     spacing: Tokens.spacing.small
 
                     StyledText {
-                        text: root.selectedDateKey !== "" ? ("Day • " + root.formatDateStr(root.selectedDateKey)) : "Upcoming Agenda"
+                        text: root.selectedDateKey !== "" ? ("Schedule for " + root.formatDateStr(root.selectedDateKey)) : "Upcoming Agenda"
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
                         Layout.fillWidth: true
                     }
 
-                    StyledText {
-                        text: `${root.totalVisibleEventsCount} event${root.totalVisibleEventsCount === 1 ? "" : "s"}`
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3onSurfaceVariant
+                    Rectangle {
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+                        implicitHeight: 24
+                        implicitWidth: countText.implicitWidth + 16
+
+                        StyledText {
+                            id: countText
+                            anchors.centerIn: parent
+                            text: `${root.totalVisibleEventsCount} event${root.totalVisibleEventsCount === 1 ? "" : "s"}`
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
                     }
                 }
 
-                // Scrollable Agenda List
+                // Scrollable Agenda Cards
                 ListView {
                     id: agendaView
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    spacing: Tokens.spacing.extraSmall
+                    spacing: Tokens.spacing.small
                     boundsBehavior: Flickable.StopAtBounds
 
                     model: root.flatAgendaItems
@@ -773,25 +815,27 @@ CustomMouseArea {
                         required property var modelData
 
                         width: agendaView.width - Tokens.padding.small
-                        implicitHeight: modelData.isHeader ? headerCol.implicitHeight : (modelData.isEmptyNotice ? emptyText.implicitHeight + 8 : eventBox.implicitHeight)
+                        implicitHeight: modelData.isHeader ? headerCol.implicitHeight + 4 : (modelData.isEmptyNotice ? emptyCard.implicitHeight : eventCard.implicitHeight)
 
                         // 1. SECTION HEADER DELEGATE
-                        ColumnLayout {
+                        RowLayout {
                             id: headerCol
                             width: parent.width
                             visible: delegateRoot.modelData.isHeader
-                            spacing: 4
+                            spacing: Tokens.spacing.small
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Tokens.spacing.small
+                            Rectangle {
+                                radius: 6
+                                color: Colours.palette.m3primaryContainer
+                                implicitHeight: 24
+                                implicitWidth: headerText.implicitWidth + 14
 
                                 StyledText {
+                                    id: headerText
+                                    anchors.centerIn: parent
                                     text: delegateRoot.modelData.title || ""
-                                    font: Tokens.font.label.small
-                                    color: Colours.palette.m3primary
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
+                                    font: Tokens.font.label.builders.small.weight(Font.Bold).build()
+                                    color: Colours.palette.m3onPrimaryContainer
                                 }
                             }
 
@@ -799,108 +843,161 @@ CustomMouseArea {
                                 Layout.fillWidth: true
                                 height: 1
                                 color: Colours.palette.m3outlineVariant
-                                opacity: 0.25
+                                opacity: 0.3
                             }
                         }
 
-                        // 2. EMPTY NOTICE DELEGATE
-                        StyledText {
-                            id: emptyText
+                        // 2. EMPTY NOTICE CARD
+                        Rectangle {
+                            id: emptyCard
                             width: parent.width
                             visible: delegateRoot.modelData.isEmptyNotice
-                            text: delegateRoot.modelData.title || "Nothing scheduled"
-                            font: Tokens.font.body.builders.small.italic(true).build()
-                            color: Colours.palette.m3outline
-                        }
-
-                        // 3. EVENT ROW DELEGATE
-                        CustomMouseArea {
-                            id: eventBox
-                            width: parent.width
-                            visible: !delegateRoot.modelData.isHeader && !delegateRoot.modelData.isEmptyNotice
-                            implicitHeight: rowContent.implicitHeight + 6
+                            radius: Tokens.rounding.medium
+                            color: Colours.palette.m3surfaceContainerLow
+                            border.width: 1
+                            border.color: Colours.palette.m3outlineVariant
+                            implicitHeight: 46
 
                             RowLayout {
-                                id: rowContent
                                 anchors.fill: parent
+                                anchors.margins: Tokens.padding.small
                                 spacing: Tokens.spacing.small
 
-                                // Accent color strip
-                                Rectangle {
-                                    width: 3
-                                    Layout.preferredHeight: textColumn.implicitHeight
-                                    radius: 1.5
-                                    color: delegateRoot.modelData.is_local ? Colours.palette.m3secondary : Colours.palette.m3tertiary
+                                MaterialIcon {
+                                    text: "event_available"
+                                    color: Colours.palette.m3outline
+                                    fontStyle: Tokens.font.icon.small
                                 }
 
-                                ColumnLayout {
-                                    id: textColumn
+                                StyledText {
+                                    text: delegateRoot.modelData.title || "Nothing scheduled"
+                                    font: Tokens.font.body.builders.small.italic(true).build()
+                                    color: Colours.palette.m3outline
                                     Layout.fillWidth: true
-                                    spacing: 1
+                                }
+                            }
+                        }
+
+                        // 3. MODERN MATERIAL 3 EVENT CARD
+                        Rectangle {
+                            id: eventCard
+                            width: parent.width
+                            visible: !delegateRoot.modelData.isHeader && !delegateRoot.modelData.isEmptyNotice
+                            radius: Tokens.rounding.medium
+                            color: cardMouse.containsMouse ? Colours.palette.m3surfaceContainerHighest : Colours.palette.m3surfaceContainerHigh
+                            border.width: 1
+                            border.color: cardMouse.containsMouse ? Colours.palette.m3outline : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                            implicitHeight: cardRow.implicitHeight + Tokens.padding.small * 2
+
+                            Behavior on color { Anim { type: Anim.FastEffects } }
+                            Behavior on border.color { Anim { type: Anim.FastEffects } }
+
+                            MouseArea {
+                                id: cardMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                            }
+
+                            RowLayout {
+                                id: cardRow
+                                anchors.fill: parent
+                                anchors.margins: Tokens.padding.small
+                                spacing: Tokens.spacing.medium
+
+                                // Left accent strip
+                                Rectangle {
+                                    width: 4
+                                    Layout.fillHeight: true
+                                    radius: 2
+                                    color: delegateRoot.modelData.is_local ? Colours.palette.m3secondary : Colours.palette.m3primary
+                                }
+
+                                // Event content column
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
 
                                     StyledText {
                                         text: delegateRoot.modelData.title || "Untitled"
-                                        font: Tokens.font.body.small
+                                        font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
                                         color: Colours.palette.m3onSurface
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
 
-                                    RowLayout {
+                                    StyledText {
+                                        text: delegateRoot.modelData.location || ""
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        elide: Text.ElideRight
+                                        visible: text !== ""
                                         Layout.fillWidth: true
-                                        spacing: Tokens.spacing.extraSmall
-
-                                        StyledText {
-                                            text: {
-                                                let t = delegateRoot.modelData.time || "";
-                                                if (delegateRoot.modelData.location) {
-                                                    t = t ? (t + " • " + delegateRoot.modelData.location) : delegateRoot.modelData.location;
-                                                }
-                                                return t;
-                                            }
-                                            font: Tokens.font.label.small
-                                            color: Colours.palette.m3onSurfaceVariant
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-
-                                        // Meeting Link Chip [Join]
-                                        Rectangle {
-                                            visible: delegateRoot.modelData.meetUrl !== ""
-                                            radius: Tokens.rounding.extraSmall
-                                            color: Colours.palette.m3primaryContainer
-                                            implicitWidth: meetChipText.implicitWidth + 12
-                                            implicitHeight: meetChipText.implicitHeight + 4
-
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: Qt.openUrlExternally(delegateRoot.modelData.meetUrl)
-                                            }
-
-                                            RowLayout {
-                                                anchors.centerIn: parent
-                                                spacing: 2
-                                                StyledText {
-                                                    text: "Join"
-                                                    font: Tokens.font.label.small
-                                                    color: Colours.palette.m3onPrimaryContainer
-                                                    id: meetChipText
-                                                }
-                                            }
-                                        }
                                     }
                                 }
 
-                                // Delete Button for Local Events
-                                IconButton {
-                                    icon: "delete"
-                                    isRound: true
-                                    type: IconButton.Text
-                                    font: Tokens.font.icon.builders.small.weight(Font.Normal).build()
-                                    padding: Tokens.padding.extraSmall / 2
-                                    visible: delegateRoot.modelData.is_local
-                                    onClicked: root.deleteLocalEvent(delegateRoot.modelData.dateKey, delegateRoot.modelData.id, delegateRoot.modelData.title)
+                                // Right Controls Row
+                                RowLayout {
+                                    spacing: Tokens.spacing.small
+                                    Layout.alignment: Qt.AlignVCenter
+
+                                    // Time Badge
+                                    Rectangle {
+                                        radius: 6
+                                        color: delegateRoot.modelData.all_day ? Colours.palette.m3surfaceContainerHighest : Colours.palette.m3secondaryContainer
+                                        implicitHeight: 24
+                                        implicitWidth: timeBadgeText.implicitWidth + 14
+
+                                        StyledText {
+                                            id: timeBadgeText
+                                            anchors.centerIn: parent
+                                            text: delegateRoot.modelData.time || "All day"
+                                            font: Tokens.font.label.small
+                                            color: delegateRoot.modelData.all_day ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3onSecondaryContainer
+                                        }
+                                    }
+
+                                    // Join Meeting Button Chip
+                                    Rectangle {
+                                        visible: delegateRoot.modelData.meetUrl !== ""
+                                        radius: 6
+                                        color: Colours.palette.m3primary
+                                        implicitHeight: 24
+                                        implicitWidth: joinChipText.implicitWidth + 16
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: Qt.openUrlExternally(delegateRoot.modelData.meetUrl)
+                                        }
+
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 3
+                                            MaterialIcon {
+                                                text: "videocam"
+                                                color: Colours.palette.m3onPrimary
+                                                fontStyle: Tokens.font.icon.small
+                                            }
+                                            StyledText {
+                                                id: joinChipText
+                                                text: "Join"
+                                                font: Tokens.font.label.builders.small.weight(Font.Bold).build()
+                                                color: Colours.palette.m3onPrimary
+                                            }
+                                        }
+                                    }
+
+                                    // Delete Button (Local Events Only)
+                                    IconButton {
+                                        icon: "delete"
+                                        isRound: true
+                                        type: IconButton.Text
+                                        font: Tokens.font.icon.builders.small.weight(Font.Normal).build()
+                                        padding: 2
+                                        visible: delegateRoot.modelData.is_local
+                                        opacity: cardMouse.containsMouse ? 1 : 0.4
+                                        onClicked: root.deleteLocalEvent(delegateRoot.modelData.dateKey, delegateRoot.modelData.id, delegateRoot.modelData.title)
+                                    }
                                 }
                             }
                         }

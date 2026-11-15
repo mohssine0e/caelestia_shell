@@ -17,7 +17,7 @@ GridLayout {
     Rect {
         Layout.row: 0
         Layout.column: 0
-        Layout.preferredWidth: Tokens.sizes.dashboard.weatherWidth
+        Layout.preferredWidth: 380
         Layout.preferredHeight: weather.implicitHeight
 
         radius: Tokens.rounding.extraLarge * 1.5
@@ -30,7 +30,7 @@ GridLayout {
     Rect {
         Layout.row: 0
         Layout.column: 1
-        Layout.preferredWidth: Tokens.sizes.dashboard.userWidth
+        Layout.preferredWidth: 480
         Layout.fillHeight: true
 
         radius: Tokens.rounding.extraLarge
