@@ -6,14 +6,15 @@ import Quickshell.Io
 import Caelestia
 import Caelestia.I18n
 import qs.services
+import qs.utils
 
 Singleton {
     id: root
 
     // ── Timer State ──────────────────────────────────────────────
     property bool isRunning: false
-    property int remainingSeconds: 25 * 60
-    property int totalDurationSeconds: 25 * 60
+    property int remainingSeconds: 35 * 60
+    property int totalDurationSeconds: 35 * 60
     property string mode: "work" // "work" | "break" | "stopwatch" | "custom"
 
     // ── Stopwatch elapsed counter ────────────────────────────────
@@ -27,7 +28,7 @@ Singleton {
     property string linkedTaskTitle: ""
     property int taskTotalMinutes: 0
     property int taskRemainingSeconds: 0
-    property int phaseMinutes: 25
+    property int phaseMinutes: 35
 
     function formatDuration(totalMins: int): string {
         if (totalMins <= 0) return "0m";
@@ -148,7 +149,10 @@ Singleton {
         }
     }
 
-    Component.onCompleted: checkDayRollover()
+    Component.onCompleted: {
+        checkDayRollover();
+        root._loadObjectives();
+    }
 
     function onTimerFinished(): void {
         checkDayRollover();
@@ -163,7 +167,7 @@ Singleton {
             if (root.linkedTaskId.length > 0 && root.taskRemainingSeconds > 0) {
                 const remMins = Math.ceil(root.taskRemainingSeconds / 60);
                 const title = Tr.tr("Phase Complete!");
-                const msg = Tr.tr("25m phase done for %1 (%2 left). Take a 5m break!").arg(root.linkedTaskTitle).arg(root.formatDuration(remMins));
+                const msg = Tr.tr("%1m phase done for %2 (%3 left). Take a 5m break!").arg(root.phaseMinutes).arg(root.linkedTaskTitle).arg(root.formatDuration(remMins));
                 Toaster.toast(title, msg, "check_circle");
                 Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
                 setPreset("break", 5);
@@ -173,7 +177,7 @@ Singleton {
                 Toaster.toast(title, msg, "check_circle");
                 Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
                 root.clearLinkedTask();
-                setPreset("work", 25);
+                setPreset("work", 35);
             } else {
                 const title = Tr.tr("Focus Session Complete!");
                 const msg = Tr.tr("Great job! Take a 5m break.");
@@ -199,7 +203,7 @@ Singleton {
                 const msg = Tr.tr("Ready to start your next focus session?");
                 Toaster.toast(title, msg, "coffee");
                 Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Focus Timer", "-i", "alarm", title, msg]);
-                setPreset("work", 25);
+                setPreset("work", 35);
             }
         }
     }
@@ -241,7 +245,7 @@ Singleton {
                 totalDurationSeconds = phaseMins * 60;
                 remainingSeconds = totalDurationSeconds;
             } else {
-                setPreset("work", 25);
+                setPreset("work", 35);
             }
         } else if (mode === "break" || mode === "shortBreak" || mode === "longBreak") {
             setPreset("break", 5);
@@ -286,11 +290,11 @@ Singleton {
     function startForTask(taskId: string, title: string, minutes: int): void {
         linkedTaskId = taskId ?? "";
         linkedTaskTitle = title ?? "";
-        const dur = (minutes && minutes > 0) ? minutes : 25;
+        const dur = (minutes && minutes > 0) ? minutes : 35;
         taskTotalMinutes = dur;
         taskRemainingSeconds = dur * 60;
 
-        // Split into 25m work phases
+        // Split into 35m work phases
         const phaseMins = Math.min(phaseMinutes, dur);
         mode = "work";
         totalDurationSeconds = phaseMins * 60;
@@ -303,5 +307,66 @@ Singleton {
         linkedTaskTitle = "";
         taskTotalMinutes = 0;
         taskRemainingSeconds = 0;
+    }
+
+    // ── Minimal Timer Objectives ─────────────────────────────────
+    property var objectives: []
+
+    function addObjective(text: string): void {
+        const trimmed = (text || "").trim();
+        if (!trimmed) return;
+        const list = (objectives || []).slice();
+        list.push({
+            id: Date.now().toString() + "_" + Math.floor(Math.random() * 1000),
+            text: trimmed
+        });
+        objectives = list;
+        _saveObjectives();
+    }
+
+    function removeObjective(idOrIndex: var): void {
+        const list = (objectives || []).slice();
+        let idx = -1;
+        if (typeof idOrIndex === "number") {
+            idx = idOrIndex;
+        } else {
+            idx = list.findIndex(item => item && item.id === idOrIndex);
+        }
+        if (idx >= 0 && idx < list.length) {
+            list.splice(idx, 1);
+            objectives = list;
+            _saveObjectives();
+        }
+    }
+
+    function _loadObjectives(): void {
+        if (!objectivesFile) return;
+        try {
+            const raw = objectivesFile.text();
+            if (raw && raw.trim().length > 0) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    objectives = parsed;
+                }
+            }
+        } catch (e) {
+            // fallback gracefully
+        }
+    }
+
+    function _saveObjectives(): void {
+        if (!objectivesFile) return;
+        try {
+            objectivesFile.setText(JSON.stringify(objectives, null, 2));
+        } catch (e) {
+            // fallback gracefully
+        }
+    }
+
+    FileView {
+        id: objectivesFile
+        path: `${Paths.state}/timer_objectives.json`
+        printErrors: false
+        onLoaded: root._loadObjectives()
     }
 }

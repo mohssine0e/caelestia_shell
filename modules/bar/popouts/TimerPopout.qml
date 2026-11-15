@@ -78,23 +78,6 @@ Item {
                             color: Colours.palette.m3primary
                         }
                     }
-
-                    // Daily completed pomodoros chip
-                    StyledRect {
-                        visible: FocusTimer.sessionsToday > 0
-                        radius: Tokens.rounding.full
-                        color: Colours.palette.m3primaryContainer
-                        implicitHeight: 18
-                        implicitWidth: sessText.implicitWidth + 10
-
-                        StyledText {
-                            id: sessText
-                            anchors.centerIn: parent
-                            text: qsTr("%1 done").arg(FocusTimer.sessionsToday)
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onPrimaryContainer
-                        }
-                    }
                 }
             }
 
@@ -120,7 +103,7 @@ Item {
             givenHeight: 36
 
             model: [
-                { icon: "work",      text: qsTr("Work"),      value: "work",      minutes: 25 },
+                { icon: "work",      text: qsTr("Work"),      value: "work",      minutes: 35 },
                 { icon: "coffee",    text: qsTr("Break"),     value: "break",     minutes: 5  },
                 { icon: "timer",     text: qsTr("Stopwatch"), value: "stopwatch", minutes: 0  }
             ]
