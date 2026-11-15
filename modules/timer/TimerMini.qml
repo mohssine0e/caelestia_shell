@@ -212,7 +212,7 @@ FocusScope {
                             text: (FocusTimer.mode === "break" || FocusTimer.mode === "shortBreak")
                                 ? "coffee"
                                 : (FocusTimer.mode === "stopwatch" ? "timer" : "work")
-                            fontStyle: Tokens.font.icon.small
+                            fontStyle: Tokens.font.icon.builders.small.scale(0.65).build()
                             color: Colours.palette.m3onSurfaceVariant
                         }
                     }
