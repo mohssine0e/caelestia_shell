@@ -752,6 +752,15 @@ FocusScope {
         }
 
 
+        // Space activates the same selected task/subtask as Enter. Text
+        // editors retain their normal space input; holding it toggles once.
+        if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier) {
+            if (!event.isAutoRepeat)
+                navController.handleKey(Qt.Key_Return, Qt.NoModifier)
+            event.accepted = true
+            return
+        }
+
         if (navController.handleKey(event.key, event.modifiers))
             event.accepted = true
     }
