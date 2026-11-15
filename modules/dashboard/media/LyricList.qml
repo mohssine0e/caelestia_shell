@@ -18,14 +18,17 @@ Item {
     // Funny binding hack to make lyrics update
     readonly property var _: {
         const p = Players.active;
-        if (p)
+        if (p) {
             Lyrics.setTrack(p.trackArtist, p.trackTitle, p.trackAlbum, p.length);
-        else
+            BetterLyrics.setTrack(p.trackArtist, p.trackTitle, p.trackAlbum, p.length);
+        } else {
             Lyrics.clearTrack();
+            BetterLyrics.clearTrack();
+        }
     }
 
     readonly property real fadeAmount: 0.1
-    property list<string> lyricList: Lyrics.lyrics
+    property var lyricList: BetterLyrics.hasLyrics ? BetterLyrics.texts : Lyrics.lyrics
 
     layer.enabled: true
     layer.effect: Mask {
@@ -232,7 +235,8 @@ Item {
         Component.onCompleted: {
             currentIndex = Qt.binding(() => {
                 model; // Force update when lyrics change
-                return Lyrics.indexForTime(Players.active?.position ?? 0);
+                const pos = Players.active ? Players.active.position : 0;
+                return BetterLyrics.hasLyrics ? BetterLyrics.indexForTime(pos) : Lyrics.indexForTime(pos);
             });
             positionViewAtIndex(currentIndex, ListView.Center);
         }
@@ -258,7 +262,12 @@ Item {
             anchors.left: lyrics.contentItem.left
             anchors.right: lyrics.contentItem.right
 
-            text: modelData || ". . ."
+            text: {
+                const s = (lyric.modelData || "").trim().toLowerCase();
+                if (s === "♪" || s === "♪ ♪" || s.includes("instrumental") || s.includes("intro") || s.includes("solo") || s.includes("interlude"))
+                    return "♪  ♫  ♩  ♬  ♪";
+                return lyric.modelData || ". . .";
+            }
             color: ListView.isCurrentItem ? Colours.palette.m3primary : mouse.containsMouse ? Colours.palette.m3onSurface : Colours.palette.m3outline
             font: Tokens.font.body.medium
             wrapMode: Text.WrapAtWordBoundaryOrAnywhere

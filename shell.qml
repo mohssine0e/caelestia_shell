@@ -35,6 +35,7 @@ ShellRoot {
         Players;
         Brightness;
         Weather.reload();
+        BetterLyrics;
 
         if (GlobalConfig.utilities.vpn.enabled)
             VPN;

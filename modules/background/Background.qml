@@ -112,6 +112,11 @@ Variants {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
+
+                    PropertyChanges {
+                        target: clockLoader
+                        anchors.verticalCenterOffset: -200
+                    }
                 },
                 State {
                     name: "middle-right"
@@ -160,6 +165,13 @@ Variants {
                 absX: clockLoader.x
                 absY: clockLoader.y
             }
+        }
+
+        DesktopLyrics {
+            screen: win.modelData
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Tokens.padding.large * 2
         }
     }
 }
