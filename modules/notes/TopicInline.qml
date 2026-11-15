@@ -55,6 +55,13 @@ Item {
         if (topic && !busy) request("learning-list")
     }
 
+    Timer {
+        id: noticeTimer
+        interval: 3500
+        running: false
+        onTriggered: root.notice = ""
+    }
+
     Process {
         id: worker
 
@@ -77,8 +84,10 @@ Item {
             if (request.action === "accept-topic-line" || request.action === "accept-all-topic-lines") {
                 Notes.refresh()
                 root.notice = qsTr("Added to topic.")
+                noticeTimer.restart()
             } else if (request.action === "fill-topic" && root.available.length === 0) {
                 root.notice = qsTr("No new gaps found.")
+                noticeTimer.restart()
             }
         }
     }

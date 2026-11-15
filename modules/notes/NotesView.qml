@@ -18,6 +18,66 @@ Item {
     property string activeTag: ""
     property bool sourcesOpen: false
     property string recentlyDeletedId: ""
+    property string generationFeedback: ""
+    property string generationAction: ""
+    property string generationTopic: ""
+    property string activeSubconcept: "All"
+    property string recentlyDeletedTopic: ""
+    property bool confirmDeleteActive: false
+    property string activeFlagText: ""
+    property string activeFlagExplanation: ""
+    property real flagTooltipX: 0
+    property real flagTooltipY: 0
+
+    function showFlagTooltip(flag, exp, gx, gy): void {
+        win.activeFlagText = flag
+        win.activeFlagExplanation = exp
+        const localPt = win.mapFromGlobal(gx, gy)
+        win.flagTooltipX = localPt.x
+        win.flagTooltipY = localPt.y
+    }
+
+    function hideFlagTooltip(): void {
+        win.activeFlagText = ""
+        win.activeFlagExplanation = ""
+    }
+
+    Timer {
+        id: confirmDeleteTimer
+        interval: 4000
+        running: false
+        onTriggered: win.confirmDeleteActive = false
+    }
+
+    onSelectedGroupKeyChanged: {
+        win.activeSubconcept = "All"
+        win.confirmDeleteActive = false
+    }
+
+    readonly property var activeSubconcepts: {
+        const list = ["All"]
+        const seen = new Set()
+        for (const note of win.selectedGroup?.notes || []) {
+            const sc = String(note.subconcept || "").trim()
+            if (sc && !seen.has(sc.toLowerCase())) {
+                seen.add(sc.toLowerCase())
+                list.push(sc)
+            }
+        }
+        return list
+    }
+
+    readonly property var filteredNotes: {
+        const notes = win.selectedGroup?.notes || []
+        if (!win.activeSubconcept || win.activeSubconcept === "All")
+            return notes
+        return notes.filter(n => String(n.subconcept || "").trim().toLowerCase() === win.activeSubconcept.toLowerCase())
+    }
+
+    readonly property var filteredGroup: {
+        if (!win.selectedGroup) return null
+        return Object.assign({}, win.selectedGroup, { notes: win.filteredNotes })
+    }
 
     readonly property var allGroups: {
         const groups = []
@@ -28,9 +88,7 @@ Item {
             let category = note.category || "unclassified"
             const topic = String(note.topic || "").trim()
             if (note.keep_decision === "skip" || category === "noise") {
-                key = "special:skipped"
-                title = qsTr("Skipped")
-                category = "noise"
+                continue
             } else if (category === "personal") {
                 key = "special:personal"
                 title = qsTr("Personal")
@@ -92,37 +150,21 @@ Item {
     }
     readonly property var pillItems: {
         const items = []
-        const seen = new Set()
-        // Keep the current topic at the leading edge, followed by the remaining
-        // topics. Tags form a separate, quieter group after all topic pills.
+        function groupHasRecent(g) {
+            return (g?.notes || []).some(n => win.isRecent(n.created_at))
+        }
         if (win.selectedGroup)
             items.push({ key: "group:" + win.selectedGroup.key, label: win.selectedGroup.title,
-                kind: "group", value: win.selectedGroup.key })
+                kind: "group", value: win.selectedGroup.key, hasRecent: groupHasRecent(win.selectedGroup) })
         for (const group of win.allGroups) {
             if (group.key === win.selectedGroupKey) continue
-            items.push({ key: "group:" + group.key, label: group.title, kind: "group", value: group.key })
-        }
-        for (const note of win.selectedGroup?.notes || []) {
-            for (const tag of (note.tags || []).concat(note.ai_tags || [])) {
-                const key = "tag:" + tag
-                if (seen.has(key)) continue
-                seen.add(key)
-                items.push({ key: key, label: tag, kind: "tag", value: tag })
-            }
-        }
-        for (const group of win.allGroups) {
-            for (const note of group.notes) {
-                for (const tag of (note.tags || []).concat(note.ai_tags || [])) {
-                    const key = "tag:" + tag
-                    if (seen.has(key)) continue
-                    seen.add(key)
-                    items.push({ key: key, label: tag, kind: "tag", value: tag })
-                }
-            }
+            items.push({ key: "group:" + group.key, label: group.title, kind: "group", value: group.key,
+                hasRecent: groupHasRecent(group) })
         }
         return items
     }
-    readonly property var knowledge: win.buildKnowledge(win.selectedGroup)
+    readonly property var subconceptBlocks: win.buildSubconceptBlocks(win.selectedGroup)
+    readonly property var knowledge: win.buildKnowledge(win.filteredGroup)
     readonly property var activeDynamicSections: {
         const map = new Map()
         for (const sec of (win.knowledge?.dynamicSections || [])) {
@@ -153,6 +195,13 @@ Item {
     signal closeRequested()
     signal moveRequested()
 
+    function isRecent(timestamp): bool {
+        if (!timestamp) return false
+        const time = new Date(timestamp).getTime()
+        if (isNaN(time)) return false
+        const diff = Date.now() - time
+        return diff >= 0 && diff < 24 * 3600 * 1000
+    }
     function displayTitle(note): string {
         if (!note) return ""
         return note.title || String(note.raw_content || "").replace(/\s+/g, " ").trim() || qsTr("Untitled note")
@@ -161,9 +210,148 @@ Item {
         let text = String(value || "").replace(/^\s*[-*•]\s*/, "").trim()
         text = text.replace(/\s+along with\b.*$/i, "")
         text = text.replace(/\ball currently\b/i, "currently")
-        if (text.length > 110) text = text.slice(0, 107).trimEnd() + "…"
+        if (text.length > 110) text = text.slice(0, 107).replace(/\s+$/, "") + "…"
         return text
     }
+    function buildSubconceptBlocks(group): var {
+        if (!group || !group.notes || group.notes.length === 0) return []
+        const blocks = []
+        const isAll = !win.activeSubconcept || win.activeSubconcept === "All"
+
+        let targetSubconcepts = []
+        if (isAll) {
+            const seen = new Set()
+            for (const note of group.notes) {
+                let sc = String(note.subconcept || "").trim()
+                if (!sc) sc = "Core " + (group.title || "Topic")
+                const lower = sc.toLowerCase()
+                if (!seen.has(lower)) {
+                    seen.add(lower)
+                    targetSubconcepts.push(sc)
+                }
+            }
+        } else {
+            targetSubconcepts = [win.activeSubconcept]
+        }
+
+        for (const scName of targetSubconcepts) {
+            const blockNotes = group.notes.filter(n => {
+                let sc = String(n.subconcept || "").trim()
+                if (!sc) sc = "Core " + (group.title || "Topic")
+                return sc.toLowerCase() === scName.toLowerCase()
+            })
+            if (blockNotes.length === 0) continue
+
+            const block = {
+                title: scName,
+                bullets: [],
+                commands: [],
+                code: [],
+                configuration: [],
+                errors: [],
+                references: []
+            }
+
+            const seenText = new Set()
+            const seenCmd = new Set()
+
+            function addText(listName, val, note, fieldKey) {
+                const text = String(note.display_edits?.[fieldKey] || val || "").trim()
+                const cleanKey = text.toLowerCase().replace(/[`*_#•-]/g, "").replace(/\s+/g, " ").trim()
+                if (!text || seenText.has(listName + ":" + cleanKey)) return
+                seenText.add(listName + ":" + cleanKey)
+                block[listName].push({
+                    text: text.replace(/^\s*[-*•]\s*/, ""),
+                    noteId: note.id,
+                    key: fieldKey,
+                    origin: note.origin || "user",
+                    isRecent: win.isRecent(note.created_at)
+                })
+            }
+
+            function addCommand(cmd, exp, note, cmdKey, expKey) {
+                const clean = String(note.display_edits?.[cmdKey] || cmd || "").trim().replace(/^\$\s*/, "")
+                if (!clean || seenCmd.has(clean)) return
+                seenCmd.add(clean)
+                const isRecent = win.isRecent(note.created_at)
+                block.commands.push({
+                    command: clean,
+                    explanation: win.conciseExplanation(note.display_edits?.[expKey] || exp),
+                    commandEntry: { text: clean, noteId: note.id, key: cmdKey, origin: note.origin || "user", isRecent: isRecent },
+                    explanationEntry: { text: win.conciseExplanation(note.display_edits?.[expKey] || exp),
+                        noteId: note.id, key: expKey, origin: note.origin || "user", isRecent: isRecent },
+                    isRecent: isRecent
+                })
+            }
+
+            for (const note of blockNotes) {
+                const targetSec = String(note.topic_section || "").trim().toLowerCase()
+                const essentials = note.essentials || []
+                const excerpts = note.exact_excerpts || []
+                const type = String(note.technical_type || "general").toLowerCase()
+                const isRecent = win.isRecent(note.created_at)
+
+                if (type === "command" || targetSec === "commands") {
+                    let cmdIdx = 0
+                    for (let eIdx = 0; eIdx < excerpts.length; eIdx++) {
+                        const lines = String(excerpts[eIdx].content || "").split("\n")
+                        for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+                            const line = lines[lIdx].trim()
+                            if (!line) continue
+                            const essIdx = Math.min(cmdIdx, Math.max(essentials.length - 1, 0))
+                            const exp = essentials[essIdx] || win.displayTitle(note)
+                            addCommand(line, exp, note, "command:" + eIdx + ":" + lIdx, "essential:" + essIdx)
+                            cmdIdx++
+                        }
+                    }
+                    if (excerpts.length === 0 && !String(note.raw_content || "").includes("\n")) {
+                        addCommand(note.raw_content, essentials[0] || win.displayTitle(note), note, "fallback", "essential:0")
+                    }
+                    for (let i = cmdIdx; i < essentials.length; i++) {
+                        addText("bullets", essentials[i], note, "essential:" + i)
+                    }
+                } else if (type === "code" || targetSec === "code") {
+                    for (let i = 0; i < excerpts.length; i++) {
+                        block.code.push({
+                            language: excerpts[i].language || "",
+                            content: note.display_edits?.["command:" + i + ":0"] || excerpts[i].content || "",
+                            explanation: essentials[0] || win.displayTitle(note),
+                            noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user",
+                            isRecent: isRecent
+                        })
+                    }
+                    if (excerpts.length === 0 && note.raw_content) {
+                        block.code.push({
+                            language: note.technology || "",
+                            content: note.display_edits?.fallback || note.raw_content,
+                            explanation: essentials[0] || "",
+                            noteId: note.id, key: "fallback", origin: note.origin || "user",
+                            isRecent: isRecent
+                        })
+                    }
+                } else if (type === "configuration" || targetSec === "configuration") {
+                    for (let i = 0; i < essentials.length; i++) addText("configuration", essentials[i], note, "essential:" + i)
+                    if (essentials.length === 0) addText("configuration", note.formatted_content || note.raw_content, note, "fallback")
+                } else if (type === "error_fix" || targetSec === "errors" || targetSec === "gotchas") {
+                    for (let i = 0; i < essentials.length; i++) addText("errors", essentials[i], note, "essential:" + i)
+                    if (essentials.length === 0) addText("errors", note.formatted_content || note.raw_content, note, "fallback")
+                } else if (type === "reference" || targetSec === "references" || note.category === "reference") {
+                    for (let i = 0; i < essentials.length; i++) addText("references", essentials[i], note, "essential:" + i)
+                    if (essentials.length === 0) addText("references", note.formatted_content || note.raw_content, note, "fallback")
+                } else {
+                    for (let i = 0; i < essentials.length; i++) addText("bullets", essentials[i], note, "essential:" + i)
+                    if (essentials.length === 0) addText("bullets", note.formatted_content || note.raw_content, note, "fallback")
+                }
+            }
+
+            if (block.bullets.length > 0 || block.commands.length > 0 || block.code.length > 0
+                || block.configuration.length > 0 || block.errors.length > 0 || block.references.length > 0) {
+                blocks.push(block)
+            }
+        }
+        return blocks
+    }
+
     function buildKnowledge(group): var {
         const result = {
             overview: [], notes: [], commands: [], code: [],
@@ -190,7 +378,8 @@ Item {
             if (!text || seenText.has(section + ":" + key)) return
             seenText.add(section + ":" + key)
             const entry = { text: text.replace(/^\s*[-*•]\s*/, ""),
-                noteId: note.id, key: fieldKey, origin: note.origin || "user" }
+                noteId: note.id, key: fieldKey, origin: note.origin || "user",
+                isRecent: win.isRecent(note.created_at) }
             const secKey = String(section || "").toLowerCase().trim()
             if (result[secKey]) {
                 result[secKey].push(entry)
@@ -202,12 +391,14 @@ Item {
             const clean = String(note.display_edits?.[commandKey] || command || "").trim().replace(/^\$\s*/, "")
             if (!clean || seenCommands.has(clean)) return
             seenCommands.add(clean)
+            const isRecent = win.isRecent(note.created_at)
             const cmdObj = {
                 command: clean,
                 explanation: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
-                commandEntry: { text: clean, noteId: note.id, key: commandKey, origin: note.origin || "user" },
+                commandEntry: { text: clean, noteId: note.id, key: commandKey, origin: note.origin || "user", isRecent: isRecent },
                 explanationEntry: { text: win.conciseExplanation(note.display_edits?.[explanationKey] || explanation),
-                    noteId: note.id, key: explanationKey, origin: note.origin || "user" }
+                    noteId: note.id, key: explanationKey, origin: note.origin || "user", isRecent: isRecent },
+                isRecent: isRecent
             }
             const secKey = String(section || "").toLowerCase().trim()
             if (secKey === "commands") {
@@ -230,6 +421,7 @@ Item {
             const essentials = note.essentials || []
             const excerpts = note.exact_excerpts || []
             const type = note.technical_type || "general"
+            const isRecent = win.isRecent(note.created_at)
 
             if (note.origin === "ai" && !(note.essentials || []).length) {
                 const sec = targetSection ? targetSection : "notes"
@@ -263,14 +455,16 @@ Item {
                         language: excerpts[i].language || "",
                         content: note.display_edits?.["command:" + i + ":0"] || excerpts[i].content || "",
                         explanation: essentials[0] || win.displayTitle(note),
-                        noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user"
+                        noteId: note.id, key: "command:" + i + ":0", origin: note.origin || "user",
+                        isRecent: isRecent
                     })
                 }
                 if (excerpts.length === 0 && note.raw_content) {
                     addCode(sec, {
                         language: note.technology || "",
                         content: note.display_edits?.fallback || note.raw_content,
-                        explanation: essentials[0] || "", noteId: note.id, key: "fallback", origin: note.origin || "user"
+                        explanation: essentials[0] || "", noteId: note.id, key: "fallback", origin: note.origin || "user",
+                        isRecent: isRecent
                     })
                 }
             } else {
@@ -291,28 +485,26 @@ Item {
     function topicMarkdown(): string {
         if (!win.selectedGroup) return ""
         const output = ["# " + win.selectedGroup.title]
-        function addSection(title, values) {
-            if (values.length) output.push("## " + title + "\n\n" + values.map(value => "- " + value.text).join("\n"))
-        }
-        addSection(qsTr("Overview"), win.knowledge.overview)
-        addSection(qsTr("Notes"), win.knowledge.notes)
-        if (win.knowledge.commands.length)
-            output.push("## " + qsTr("Commands") + "\n\n"
-                + win.knowledge.commands.map(item => "$ " + item.command + "\n" + item.explanation).join("\n\n"))
-        if (win.knowledge.code.length)
-            output.push("## " + qsTr("Code") + "\n\n" + win.knowledge.code.map(item => item.content).join("\n\n"))
-        addSection(qsTr("Configuration"), win.knowledge.configuration)
-        addSection(qsTr("Errors & Fixes"), win.knowledge.errors)
-        addSection(qsTr("References"), win.knowledge.references)
-        for (const sec of win.activeDynamicSections) {
-            if (sec.bullets.length || sec.commands.length || sec.code.length) {
-                output.push("## " + sec.title)
-                if (sec.bullets.length)
-                    output.push(sec.bullets.map(value => "- " + value.text).join("\n"))
-                if (sec.commands.length)
-                    output.push(sec.commands.map(item => "$ " + item.command + "\n" + item.explanation).join("\n\n"))
-                if (sec.code.length)
-                    output.push(sec.code.map(item => item.content).join("\n\n"))
+        for (const block of win.subconceptBlocks) {
+            output.push("## " + block.title)
+            if (block.bullets.length) {
+                output.push(block.bullets.map(b => "- " + b.text).join("\n"))
+            }
+            if (block.commands.length) {
+                output.push("### " + qsTr("Commands") + "\n\n"
+                    + block.commands.map(item => "$ " + item.command + "\n" + item.explanation).join("\n\n"))
+            }
+            if (block.code.length) {
+                output.push("### " + qsTr("Code") + "\n\n" + block.code.map(item => item.content).join("\n\n"))
+            }
+            if (block.configuration.length) {
+                output.push("### " + qsTr("Configuration") + "\n\n" + block.configuration.map(b => "- " + b.text).join("\n"))
+            }
+            if (block.errors.length) {
+                output.push("### " + qsTr("Errors & Fixes") + "\n\n" + block.errors.map(b => "- " + b.text).join("\n"))
+            }
+            if (block.references.length) {
+                output.push("### " + qsTr("References") + "\n\n" + block.references.map(b => "- " + b.text).join("\n"))
             }
         }
         return output.join("\n\n")
@@ -331,6 +523,30 @@ Item {
         win.selectedGroupKey = key
         win.selectedId = win.selectedGroup?.notes?.[0]?.id || ""
         contentScroll.contentY = 0
+    }
+    function deleteCurrentTopic(): void {
+        const topicName = win.selectedGroup?.title || ""
+        if (!topicName) return
+
+        if (!win.confirmDeleteActive) {
+            win.confirmDeleteActive = true
+            confirmDeleteTimer.restart()
+            return
+        }
+
+        win.confirmDeleteActive = false
+        confirmDeleteTimer.stop()
+        win.recentlyDeletedTopic = topicName
+        Notes.removeTopic(topicName)
+        Toaster.toast(qsTr("Concept deleted"), qsTr("Deleted '%1'").arg(topicName), "delete")
+        if (win.allGroups.length > 0) {
+            const nextGroup = win.allGroups.find(g => g.title !== topicName)
+            if (nextGroup) {
+                win.selectGroup(nextGroup.key)
+            } else {
+                win.selectedGroupKey = ""
+            }
+        }
     }
     function activatePill(index): void {
         if (index < 0 || index >= win.pillItems.length) return
@@ -386,15 +602,22 @@ Item {
     }
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) {
-            if (!win.releaseSearchFocus()) win.closeView()
-            event.accepted = true
-        } else if (!searchInput.activeFocus && event.key === Qt.Key_Slash) {
+            if (topicInput.activeFocus) {
+                topicInput.text = ""
+                topicInput.focus = false
+                win.forceActiveFocus()
+                event.accepted = true
+            } else if (!win.releaseSearchFocus()) {
+                win.closeView()
+                event.accepted = true
+            }
+        } else if (!searchInput.activeFocus && !topicInput.activeFocus && event.key === Qt.Key_Slash) {
             searchInput.forceActiveFocus()
             event.accepted = true
-        } else if (!searchInput.activeFocus && event.key === Qt.Key_Left) {
+        } else if (!searchInput.activeFocus && !topicInput.activeFocus && event.key === Qt.Key_Left) {
             win.cyclePill(-1)
             event.accepted = true
-        } else if (!searchInput.activeFocus && event.key === Qt.Key_Right) {
+        } else if (!searchInput.activeFocus && !topicInput.activeFocus && event.key === Qt.Key_Right) {
             win.cyclePill(1)
             event.accepted = true
         }
@@ -410,12 +633,27 @@ Item {
                 undoTimer.stop()
             }
         }
+        function onTopicGenerated(topic, count, action, message): void {
+            win.generationTopic = String(topic || "")
+            win.generationAction = String(action || "created")
+            win.generationFeedback = String(message || "")
+            feedbackTimer.restart()
+            win.selectGroup("topic:" + String(topic || "").toLowerCase())
+        }
         target: Notes
     }
     Timer {
         id: undoTimer
         interval: 8000
         onTriggered: win.recentlyDeletedId = ""
+    }
+    Timer {
+        id: feedbackTimer
+        interval: 8000
+        onTriggered: {
+            win.generationFeedback = ""
+            win.generationAction = ""
+        }
     }
 
     component SectionTitle: StyledText {
@@ -551,7 +789,7 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 32
                 anchors.rightMargin: 32
-                spacing: 18
+                spacing: 12
                 StyledText {
                     Layout.fillWidth: true
                     text: qsTr("Quick Notes")
@@ -561,7 +799,119 @@ Item {
                     elide: Text.ElideRight
                 }
                 Rectangle {
-                    Layout.preferredWidth: 210
+                    visible: win.generationFeedback.length > 0
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: feedbackRow.implicitWidth + 20
+                    implicitHeight: 28
+                    radius: 14
+                    color: win.generationAction === "already_covered"
+                        ? Qt.alpha(Colours.palette.m3primary, 0.16)
+                        : (win.generationAction === "merged"
+                            ? Qt.alpha(Colours.palette.m3tertiary || Colours.palette.m3secondary, 0.18)
+                            : Qt.alpha(Colours.palette.m3primary, 0.22))
+                    border.width: 1
+                    border.color: win.generationAction === "already_covered"
+                        ? Colours.palette.m3primary
+                        : (win.generationAction === "merged"
+                            ? (Colours.palette.m3tertiary || Colours.palette.m3secondary)
+                            : Colours.palette.m3primary)
+
+                    RowLayout {
+                        id: feedbackRow
+                        anchors.centerIn: parent
+                        spacing: 6
+                        MaterialIcon {
+                            text: win.generationAction === "already_covered"
+                                ? "check_circle"
+                                : (win.generationAction === "merged" ? "call_merge" : "auto_awesome")
+                            color: win.generationAction === "already_covered"
+                                ? Colours.palette.m3primary
+                                : (win.generationAction === "merged"
+                                    ? (Colours.palette.m3tertiary || Colours.palette.m3secondary)
+                                    : Colours.palette.m3primary)
+                            fill: 1
+                            fontStyle: Tokens.font.icon.size(14).build()
+                        }
+                        StyledText {
+                            text: win.generationFeedback
+                            color: Colours.palette.m3onSurface
+                            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
+                                weight: Font.Medium })
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (win.generationTopic)
+                                win.selectGroup("topic:" + win.generationTopic.toLowerCase())
+                        }
+                    }
+                }
+                Rectangle {
+                    Layout.preferredWidth: 200
+                    Layout.preferredHeight: 32
+                    radius: 8
+                    color: Colours.palette.m3surfaceContainerLow
+                    border.width: topicInput.activeFocus ? 1 : 0
+                    border.color: Colours.palette.m3primary
+                    opacity: Notes.generatingTopic ? 0.6 : 1.0
+
+                    MaterialIcon {
+                        id: sparkIcon
+                        anchors.left: parent.left
+                        anchors.leftMargin: 9
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Notes.generatingTopic ? "hourglass_top" : "auto_awesome"
+                        color: Colours.palette.m3primary
+                        fontStyle: Tokens.font.icon.small
+                    }
+                    TextInput {
+                        id: topicInput
+                        anchors.left: sparkIcon.right
+                        anchors.leftMargin: 7
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.topMargin: 4
+                        anchors.bottomMargin: 4
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: Colours.palette.m3onSurface
+                        font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 13,
+                            weight: Tokens.font.body.small.weight })
+                        selectByMouse: true
+                        clip: true
+                        enabled: !Notes.generatingTopic
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                const val = topicInput.text.trim()
+                                if (val) {
+                                    Notes.generateTopic(val)
+                                    topicInput.text = ""
+                                }
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Escape) {
+                                topicInput.text = ""
+                                topicInput.focus = false
+                                win.forceActiveFocus()
+                                event.accepted = true
+                            }
+                        }
+                    }
+                    StyledText {
+                        anchors.left: topicInput.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: !topicInput.text
+                        text: Notes.generatingTopic ? qsTr("Generating…") : qsTr("AI generate topic…")
+                        color: Colours.palette.m3onSurfaceVariant
+                        font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 13,
+                            weight: Tokens.font.body.small.weight })
+                    }
+                }
+                Rectangle {
+                    Layout.preferredWidth: 180
                     Layout.preferredHeight: 32
                     radius: 8
                     color: Colours.palette.m3surfaceContainerLow
@@ -676,6 +1026,17 @@ Item {
                                 font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
                                     weight: Tokens.font.label.small.weight })
                             }
+                            Rectangle {
+                                id: pillDot
+                                visible: !!pill.modelData.hasRecent
+                                width: 5
+                                height: 5
+                                radius: 2.5
+                                color: Colours.palette.m3primary
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 3
+                            }
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
@@ -694,11 +1055,90 @@ Item {
             }
         }
 
+        Item {
+            id: subconceptBanner
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: topicBanner.bottom
+            height: visible ? 40 : 0
+            visible: !!win.selectedGroup
+            clip: true
+
+            Flickable {
+                id: subconceptScroll
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 32
+                anchors.rightMargin: 32
+                height: 28
+                contentWidth: subconceptRow.implicitWidth
+                contentHeight: height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Row {
+                    id: subconceptRow
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 6
+
+                    Repeater {
+                        model: win.activeSubconcepts
+                        delegate: Rectangle {
+                            id: scPill
+                            required property var modelData
+                            required property int index
+
+                            readonly property bool active: win.activeSubconcept.toLowerCase() === String(modelData).toLowerCase()
+                            implicitWidth: scLabel.implicitWidth + 18
+                            implicitHeight: 24
+                            radius: 6
+                            color: active
+                                ? Colours.palette.m3primary
+                                : Colours.palette.m3surfaceContainerHigh
+                            border.width: 1
+                            border.color: active
+                                ? Colours.palette.m3primary
+                                : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+                            StyledText {
+                                id: scLabel
+                                anchors.centerIn: parent
+                                text: scPill.modelData
+                                color: scPill.active
+                                    ? Colours.palette.m3onPrimary
+                                    : Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({
+                                    family: Tokens.font.label.small.family,
+                                    pixelSize: 11,
+                                    weight: scPill.active ? Font.DemiBold : Tokens.font.label.small.weight
+                                })
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.activeSubconcept = scPill.modelData
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+            }
+        }
+
         Flickable {
             id: contentScroll
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: topicBanner.bottom
+            anchors.top: subconceptBanner.bottom
             anchors.bottom: parent.bottom
             anchors.leftMargin: 32
             anchors.rightMargin: 32
@@ -738,6 +1178,12 @@ Item {
                         onTriggered: topicOps.generate()
                     }
                     HeaderAction {
+                        actionIcon: win.confirmDeleteActive ? "warning" : "delete"
+                        label: win.confirmDeleteActive ? qsTr("Confirm delete?") : qsTr("Delete")
+                        enabled: !!win.selectedGroup && !Notes.mutating
+                        onTriggered: win.deleteCurrentTopic()
+                    }
+                    HeaderAction {
                         actionIcon: "done_all"
                         label: qsTr("Accept all (%1)").arg(topicOps.available.length)
                         visible: topicOps.available.length > 0
@@ -762,7 +1208,7 @@ Item {
                     }
                     HeaderAction {
                         actionIcon: "source"
-                        label: qsTr("Sources (%1)").arg(win.selectedGroup?.notes?.length || 0)
+                        label: qsTr("Sources (%1)").arg(win.filteredNotes.length)
                         enabled: !!win.selectedGroup
                         onTriggered: win.sourcesOpen = true
                     }
@@ -775,180 +1221,17 @@ Item {
                     font: Tokens.font.body.small
                     wrapMode: Text.Wrap
                 }
-                SimpleSection {
-                    sectionTitle: qsTr("Overview")
-                    sectionKey: "overview"
-                    entries: win.knowledge.overview
-                    bulleted: true
-                    showWhenEmpty: !!win.selectedGroup?.key?.startsWith("topic:")
-                    emptyLabel: qsTr("Fill gaps to suggest an overview.")
-                }
-                SimpleSection {
-                    sectionTitle: qsTr("Notes")
-                    sectionKey: "notes"
-                    entries: win.knowledge.notes
-                    bulleted: true
-                    showWhenEmpty: !!win.selectedGroup?.key?.startsWith("topic:")
-                    emptyLabel: qsTr("No notes saved for this topic.")
-                }
-                Column {
-                    width: parent.width
-                    visible: win.knowledge.commands.length > 0 || topicOps.pendingFor("commands").length > 0
-                    spacing: 6
-                    SectionTitle { text: qsTr("COMMANDS") }
-                    Rectangle {
-                        width: parent.width
-                        height: 1
-                        color: Colours.palette.m3outlineVariant
-                        opacity: 0.55
-                    }
-                    Repeater {
-                        model: win.knowledge.commands
-                        delegate: Item {
-                            id: commandRow
-                            required property var modelData
-                            property bool copied: false
-                            width: parent.width
-                            height: Math.max(40, commandEntry.implicitHeight + 12, commandExplanation.implicitHeight + 12)
-                            Timer {
-                                interval: 1200
-                                running: commandRow.copied
-                                onTriggered: commandRow.copied = false
-                            }
-                            Item {
-                                anchors.fill: parent
-                                Item {
-                                    id: commandCopy
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 28
-                                    height: 28
-                                    opacity: commandCopyMouse.containsMouse || commandRow.copied ? 1 : 0.45
-                                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                                    MaterialIcon {
-                                        anchors.centerIn: parent
-                                        text: commandRow.copied ? "check" : "content_copy"
-                                        color: Colours.palette.m3onSurfaceVariant
-                                        fill: 0
-                                        fontStyle: Tokens.font.icon.size(12).build()
-                                    }
-                                    MouseArea {
-                                        id: commandCopyMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            Quickshell.clipboardText = commandRow.modelData.command
-                                            commandRow.copied = true
-                                        }
-                                    }
-                                }
-                                StyledText {
-                                    id: commandEntry
-                                    anchors.left: commandCopy.right
-                                    anchors.leftMargin: 12
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: commandRow.width * 0.38
-                                    text: "$ " + commandRow.modelData.command
-                                    color: Colours.palette.m3primary
-                                    font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
-                                    wrapMode: Text.WrapAnywhere
-                                }
-                                StyledText {
-                                    id: commandExplanation
-                                    anchors.left: commandEntry.right
-                                    anchors.leftMargin: 12
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "•  " + commandRow.modelData.explanation
-                                    color: Colours.palette.m3onSurface
-                                    font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
-                                    wrapMode: Text.WrapAnywhere
-                                }
-                            }
-                            Rectangle {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: 1
-                                color: Colours.palette.m3outlineVariant
-                                opacity: 0.2
-                            }
-                        }
-                    }
-                    Repeater {
-                        model: topicOps.pendingFor("commands")
-                        delegate: PendingLine {
-                            required property var modelData
-                            width: parent.width
-                            suggestion: modelData
-                            controller: topicOps
-                        }
-                    }
-                }
-                Column {
-                    width: parent.width
-                    visible: win.knowledge.code.length > 0 || topicOps.pendingFor("code").length > 0
-                    spacing: 8
-                    SectionTitle { text: qsTr("CODE") }
-                    Repeater {
-                        model: win.knowledge.code
-                        delegate: Rectangle {
-                            id: codeBlock
-                            required property var modelData
-                            width: parent.width
-                            implicitHeight: codeColumn.implicitHeight + 20
-                            radius: 8
-                            color: Colours.palette.m3surfaceContainerLow
-                            Column {
-                                id: codeColumn
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 10
-                                spacing: 8
-                                StyledText {
-                                    width: parent.width
-                                    visible: !!codeBlock.modelData.explanation
-                                    text: codeBlock.modelData.explanation
-                                    color: Colours.palette.m3onSurfaceVariant
-                                    font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 14,
-                                        weight: Tokens.font.body.small.weight })
-                                    wrapMode: Text.Wrap
-                                }
-                                InlineEntry {
-                                    width: parent.width
-                                    entry: ({ text: codeBlock.modelData.content, noteId: codeBlock.modelData.noteId,
-                                        key: codeBlock.modelData.key, origin: codeBlock.modelData.origin })
-                                    mono: true
-                                }
-                            }
-                        }
-                    }
-                    Repeater {
-                        model: topicOps.pendingFor("code")
-                        delegate: PendingLine {
-                            required property var modelData
-                            width: parent.width
-                            suggestion: modelData
-                            controller: topicOps
-                        }
-                    }
-                }
-                SimpleSection { sectionTitle: qsTr("Configuration"); sectionKey: "configuration"; entries: win.knowledge.configuration }
-                SimpleSection { sectionTitle: qsTr("Errors & Fixes"); sectionKey: "errors"; entries: win.knowledge.errors }
-                SimpleSection { sectionTitle: qsTr("References"); sectionKey: "references"; entries: win.knowledge.references }
                 Repeater {
-                    model: win.activeDynamicSections
+                    model: win.subconceptBlocks
                     delegate: Column {
-                        id: dynamicSectionCol
+                        id: scBlockCol
                         required property var modelData
                         width: parent.width
-                        spacing: 8
-                        visible: modelData.bullets.length > 0 || modelData.commands.length > 0
-                            || modelData.code.length > 0 || topicOps.pendingFor(modelData.title).length > 0
+                        spacing: 12
 
-                        SectionTitle { text: dynamicSectionCol.modelData.title.toUpperCase() }
+                        SectionTitle {
+                            text: scBlockCol.modelData.title.toUpperCase()
+                        }
                         Rectangle {
                             width: parent.width
                             height: 1
@@ -957,141 +1240,261 @@ Item {
                         }
 
                         Repeater {
-                            model: dynamicSectionCol.modelData.bullets
+                            model: scBlockCol.modelData.bullets
                             delegate: Item {
-                                id: dynBulletRow
+                                id: scBulletItem
                                 required property var modelData
                                 width: parent.width
-                                implicitHeight: dynBulletEntry.implicitHeight + 6
+                                implicitHeight: scBulletEntry.implicitHeight + 6
                                 InlineEntry {
-                                    id: dynBulletEntry
+                                    id: scBulletEntry
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
-                                    entry: dynBulletRow.modelData
+                                    entry: scBulletItem.modelData
                                     bullet: true
                                 }
                             }
                         }
 
-                        Repeater {
-                            model: dynamicSectionCol.modelData.commands
-                            delegate: Item {
-                                id: dynCmdRow
-                                required property var modelData
-                                property bool copied: false
-                                width: parent.width
-                                height: Math.max(40, dynCmdEntry.implicitHeight + 12, dynCmdExplanation.implicitHeight + 12)
-                                Timer {
-                                    interval: 1200
-                                    running: dynCmdRow.copied
-                                    onTriggered: dynCmdRow.copied = false
-                                }
-                                Item {
-                                    anchors.fill: parent
+                        Column {
+                            width: parent.width
+                            visible: scBlockCol.modelData.commands.length > 0
+                            spacing: 6
+                            StyledText {
+                                text: qsTr("COMMANDS")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11, weight: Font.Bold })
+                            }
+                            Repeater {
+                                model: scBlockCol.modelData.commands
+                                delegate: Item {
+                                    id: scCmdRow
+                                    required property var modelData
+                                    property bool copied: false
+                                    width: parent.width
+                                    height: Math.max(40, scCmdEntry.implicitHeight + 12, scCmdExp.implicitHeight + 12)
+                                    Timer {
+                                        interval: 1200
+                                        running: scCmdRow.copied
+                                        onTriggered: scCmdRow.copied = false
+                                    }
                                     Item {
-                                        id: dynCmdCopy
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 28
-                                        height: 28
-                                        opacity: dynCmdCopyMouse.containsMouse || dynCmdRow.copied ? 1 : 0.45
-                                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                                        MaterialIcon {
-                                            anchors.centerIn: parent
-                                            text: dynCmdRow.copied ? "check" : "content_copy"
-                                            color: Colours.palette.m3onSurfaceVariant
-                                            fill: 0
-                                            fontStyle: Tokens.font.icon.size(12).build()
-                                        }
-                                        MouseArea {
-                                            id: dynCmdCopyMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                Quickshell.clipboardText = dynCmdRow.modelData.command
-                                                dynCmdRow.copied = true
+                                        anchors.fill: parent
+                                        Item {
+                                            id: scCmdCopy
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 28
+                                            height: 28
+                                            opacity: scCmdCopyMouse.containsMouse || scCmdRow.copied ? 1 : 0.45
+                                            Behavior on opacity { NumberAnimation { duration: 120 } }
+                                            MaterialIcon {
+                                                anchors.centerIn: parent
+                                                text: scCmdRow.copied ? "check" : "content_copy"
+                                                color: Colours.palette.m3onSurfaceVariant
+                                                fill: 0
+                                                fontStyle: Tokens.font.icon.size(12).build()
+                                            }
+                                            MouseArea {
+                                                id: scCmdCopyMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    Quickshell.clipboardText = scCmdRow.modelData.command
+                                                    scCmdRow.copied = true
+                                                }
                                             }
                                         }
+                                        CommandWithFlags {
+                                            id: scCmdEntry
+                                            anchors.left: scCmdCopy.right
+                                            anchors.leftMargin: 12
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: scCmdRow.width * 0.38
+                                            command: scCmdRow.modelData.command
+                                            isRecent: scCmdRow.modelData.isRecent
+                                            onFlagHovered: (flag, exp, gx, gy) => {
+                                                win.showFlagTooltip(flag, exp, gx, gy)
+                                            }
+                                            onFlagUnhovered: {
+                                                win.hideFlagTooltip()
+                                            }
+                                        }
+                                        SelectableText {
+                                            id: scCmdExp
+                                            anchors.left: scCmdEntry.right
+                                            anchors.leftMargin: 12
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "•  " + scCmdRow.modelData.explanation
+                                            color: Colours.palette.m3onSurface
+                                            font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
+                                        }
                                     }
-                                    StyledText {
-                                        id: dynCmdEntry
-                                        anchors.left: dynCmdCopy.right
-                                        anchors.leftMargin: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: dynCmdRow.width * 0.38
-                                        text: "$ " + dynCmdRow.modelData.command
-                                        color: Colours.palette.m3primary
-                                        font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
-                                        wrapMode: Text.WrapAnywhere
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        height: 1
+                                        color: Colours.palette.m3outlineVariant
+                                        opacity: 0.2
                                     }
-                                    StyledText {
-                                        id: dynCmdExplanation
-                                        anchors.left: dynCmdEntry.right
-                                        anchors.leftMargin: 12
+                                }
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            visible: scBlockCol.modelData.code.length > 0
+                            spacing: 8
+                            StyledText {
+                                text: qsTr("CODE")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11, weight: Font.Bold })
+                            }
+                            Repeater {
+                                model: scBlockCol.modelData.code
+                                delegate: Rectangle {
+                                    id: scCodeBlock
+                                    required property var modelData
+                                    width: parent.width
+                                    implicitHeight: scCodeCol.implicitHeight + 20
+                                    radius: 8
+                                    color: Colours.palette.m3surfaceContainerLow
+                                    border.width: scCodeBlock.modelData.isRecent ? 1 : 0
+                                    border.color: scCodeBlock.modelData.isRecent ? Qt.alpha(Colours.palette.m3primary, 0.45) : "transparent"
+                                    Column {
+                                        id: scCodeCol
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: 10
+                                        spacing: 8
+                                        SelectableText {
+                                            width: parent.width
+                                            visible: !!scCodeBlock.modelData.explanation
+                                            text: scCodeBlock.modelData.explanation
+                                            color: Colours.palette.m3onSurfaceVariant
+                                            font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 14, weight: Tokens.font.body.small.weight })
+                                        }
+                                        InlineEntry {
+                                            width: parent.width
+                                            entry: ({ text: scCodeBlock.modelData.content, noteId: scCodeBlock.modelData.noteId,
+                                                key: scCodeBlock.modelData.key, origin: scCodeBlock.modelData.origin,
+                                                isRecent: scCodeBlock.modelData.isRecent })
+                                            mono: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            visible: scBlockCol.modelData.configuration.length > 0
+                            spacing: 6
+                            StyledText {
+                                text: qsTr("CONFIGURATION")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11, weight: Font.Bold })
+                            }
+                            Repeater {
+                                model: scBlockCol.modelData.configuration
+                                delegate: Item {
+                                    id: scCfgItem
+                                    required property var modelData
+                                    width: parent.width
+                                    implicitHeight: scCfgEntry.implicitHeight + 6
+                                    InlineEntry {
+                                        id: scCfgEntry
+                                        anchors.left: parent.left
                                         anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: "•  " + dynCmdRow.modelData.explanation
-                                        color: Colours.palette.m3onSurface
-                                        font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
-                                        wrapMode: Text.WrapAnywhere
+                                        entry: scCfgItem.modelData
+                                        bullet: true
                                     }
-                                }
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    height: 1
-                                    color: Colours.palette.m3outlineVariant
-                                    opacity: 0.2
                                 }
                             }
                         }
 
-                        Repeater {
-                            model: dynamicSectionCol.modelData.code
-                            delegate: Rectangle {
-                                id: dynCodeBlock
-                                required property var modelData
-                                width: parent.width
-                                implicitHeight: dynCodeCol.implicitHeight + 20
-                                radius: 8
-                                color: Colours.palette.m3surfaceContainerLow
-                                Column {
-                                    id: dynCodeCol
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 10
-                                    spacing: 8
-                                    StyledText {
-                                        width: parent.width
-                                        visible: !!dynCodeBlock.modelData.explanation
-                                        text: dynCodeBlock.modelData.explanation
-                                        color: Colours.palette.m3onSurfaceVariant
-                                        font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 14,
-                                            weight: Tokens.font.body.small.weight })
-                                        wrapMode: Text.Wrap
-                                    }
+                        Column {
+                            width: parent.width
+                            visible: scBlockCol.modelData.errors.length > 0
+                            spacing: 6
+                            StyledText {
+                                text: qsTr("GOTCHAS & FIXES")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11, weight: Font.Bold })
+                            }
+                            Repeater {
+                                model: scBlockCol.modelData.errors
+                                delegate: Item {
+                                    id: scErrItem
+                                    required property var modelData
+                                    width: parent.width
+                                    implicitHeight: scErrEntry.implicitHeight + 6
                                     InlineEntry {
-                                        width: parent.width
-                                        entry: ({ text: dynCodeBlock.modelData.content, noteId: dynCodeBlock.modelData.noteId,
-                                            key: dynCodeBlock.modelData.key, origin: dynCodeBlock.modelData.origin })
-                                        mono: true
+                                        id: scErrEntry
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        entry: scErrItem.modelData
+                                        bullet: true
                                     }
                                 }
                             }
                         }
 
-                        Repeater {
-                            model: topicOps.pendingFor(dynamicSectionCol.modelData.title)
-                            delegate: PendingLine {
-                                required property var modelData
-                                width: parent.width
-                                suggestion: modelData
-                                controller: topicOps
+                        Column {
+                            width: parent.width
+                            visible: scBlockCol.modelData.references.length > 0
+                            spacing: 6
+                            StyledText {
+                                text: qsTr("REFERENCES")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11, weight: Font.Bold })
                             }
+                            Repeater {
+                                model: scBlockCol.modelData.references
+                                delegate: Item {
+                                    id: scRefItem
+                                    required property var modelData
+                                    width: parent.width
+                                    implicitHeight: scRefEntry.implicitHeight + 6
+                                    InlineEntry {
+                                        id: scRefEntry
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        entry: scRefItem.modelData
+                                        bullet: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    visible: topicOps.available.length > 0
+                    spacing: 8
+                    SectionTitle { text: qsTr("SUGGESTED ADDITIONS") }
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Colours.palette.m3outlineVariant
+                        opacity: 0.55
+                    }
+                    Repeater {
+                        model: topicOps.available
+                        delegate: PendingLine {
+                            required property var modelData
+                            width: parent.width
+                            suggestion: modelData
+                            controller: topicOps
                         }
                     }
                 }
@@ -1099,6 +1502,14 @@ Item {
                     width: parent.width
                     visible: !!win.query && win.visibleGroups.length === 0
                     text: qsTr("No topics match this search.")
+                    color: Colours.palette.m3onSurfaceVariant
+                    font: Tokens.font.body.medium
+                    horizontalAlignment: Text.AlignHCenter
+                }
+                StyledText {
+                    width: parent.width
+                    visible: !win.query && win.subconceptBlocks.length === 0 && !!win.selectedGroup
+                    text: qsTr("No notes saved for this view.")
                     color: Colours.palette.m3onSurfaceVariant
                     font: Tokens.font.body.medium
                     horizontalAlignment: Text.AlignHCenter
@@ -1157,7 +1568,7 @@ Item {
                         id: sourceList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        model: win.selectedGroup?.notes || []
+                        model: win.filteredNotes
                         spacing: 8
                         clip: true
                         ScrollBar.vertical: ScrollBar {}
@@ -1179,12 +1590,27 @@ Item {
                                 spacing: 8
                                 RowLayout {
                                     Layout.fillWidth: true
+                                    spacing: 8
                                     StyledText {
                                         Layout.fillWidth: true
                                         text: win.displayTitle(sourceCard.modelData)
-                                        color: Colours.palette.m3onSurface
+                                        color: win.isRecent(sourceCard.modelData.created_at) ? Colours.palette.m3primary : Colours.palette.m3onSurface
                                         font: Tokens.font.label.builders.medium.weight(Font.DemiBold).build()
                                         elide: Text.ElideRight
+                                    }
+                                    StyledRect {
+                                        visible: !!sourceCard.modelData.subconcept
+                                        radius: Tokens.rounding.full
+                                        color: Colours.tPalette.m3surfaceContainerHigh
+                                        implicitHeight: 20
+                                        implicitWidth: scBadge.implicitWidth + 12
+                                        StyledText {
+                                            id: scBadge
+                                            anchors.centerIn: parent
+                                            text: sourceCard.modelData.subconcept || ""
+                                            font: Tokens.font.label.small
+                                            color: Colours.palette.m3primary
+                                        }
                                     }
                                     TextButton {
                                         text: qsTr("Delete")
@@ -1194,15 +1620,12 @@ Item {
                                         onClicked: Notes.remove(sourceCard.modelData.id)
                                     }
                                 }
-                                StyledText {
+                                SelectableText {
                                     Layout.fillWidth: true
                                     text: sourceCard.modelData.raw_content || ""
                                     color: Colours.palette.m3onSurfaceVariant
                                     font: sourceCard.modelData.technical_type === "command"
                                         ? Tokens.font.mono.small : Tokens.font.body.small
-                                    wrapMode: Text.WrapAnywhere
-                                    maximumLineCount: 8
-                                    elide: Text.ElideRight
                                 }
                             }
                         }
@@ -1216,7 +1639,7 @@ Item {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 18
             z: 80
-            visible: !!win.recentlyDeletedId
+            visible: !!win.recentlyDeletedId || !!win.recentlyDeletedTopic
             implicitWidth: undoRow.implicitWidth + 24
             implicitHeight: 38
             radius: 19
@@ -1226,14 +1649,64 @@ Item {
                 anchors.centerIn: parent
                 spacing: 12
                 StyledText {
-                    text: qsTr("Source deleted")
+                    text: win.recentlyDeletedTopic
+                        ? qsTr("Concept '%1' deleted").arg(win.recentlyDeletedTopic)
+                        : qsTr("Source deleted")
                     color: Colours.palette.m3inverseOnSurface
                     font: Tokens.font.label.small
                 }
                 TextButton {
                     text: qsTr("Undo")
                     type: TextButton.Text
-                    onClicked: Notes.restore(win.recentlyDeletedId)
+                    onClicked: {
+                        if (win.recentlyDeletedTopic) {
+                            Notes.restoreTopic(win.recentlyDeletedTopic)
+                            win.recentlyDeletedTopic = ""
+                        } else if (win.recentlyDeletedId) {
+                            Notes.restore(win.recentlyDeletedId)
+                            win.recentlyDeletedId = ""
+                        }
+                    }
+                }
+            }
+        }
+        // ── Floating Flag Inspector Tooltip ───────────────────────
+        Rectangle {
+            id: flagTooltipPill
+            z: 999
+            visible: !!win.activeFlagText && !!win.activeFlagExplanation
+            x: Math.max(16, Math.min(parent.width - width - 16, win.flagTooltipX - 10))
+            y: Math.max(16, win.flagTooltipY - height - 8)
+            implicitWidth: tooltipRow.implicitWidth + 20
+            implicitHeight: Math.max(30, tooltipRow.implicitHeight + 10)
+            radius: 8
+            color: Colours.palette.m3inverseSurface
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+            RowLayout {
+                id: tooltipRow
+                anchors.centerIn: parent
+                spacing: 8
+                Rectangle {
+                    implicitWidth: flagBadge.implicitWidth + 8
+                    implicitHeight: 20
+                    radius: 4
+                    color: Qt.alpha(Colours.palette.m3primary, 0.25)
+                    StyledText {
+                        id: flagBadge
+                        anchors.centerIn: parent
+                        text: win.activeFlagText
+                        font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 11, weight: Font.Bold })
+                        color: Colours.palette.m3primary
+                    }
+                }
+                StyledText {
+                    Layout.maximumWidth: 320
+                    text: win.activeFlagExplanation
+                    font: Tokens.font.body.small
+                    color: Colours.palette.m3inverseOnSurface
+                    wrapMode: Text.Wrap
                 }
             }
         }

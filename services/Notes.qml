@@ -42,6 +42,9 @@ Singleton {
     property string _listOutput: ""
     property string _mutationOutput: ""
     property string _organizeOutput: ""
+    readonly property bool generatingTopic: generateTopicProc.running
+    property var _generateTopicInput: ({})
+    property string _generateTopicOutput: ""
 
     signal noteCreated(var note, bool formattingQueued)
     signal draftSaved(var note, string clientToken)
@@ -50,6 +53,8 @@ Singleton {
     signal noteChanged(var note)
     signal noteDeleted(string noteId)
     signal organizationFinished(string noteId, bool success, string message)
+    signal topicGenerated(string topic, int count, string action, string message)
+    signal topicGenerateFailed(string message)
 
     function parseResult(text): var {
         try {
@@ -74,9 +79,13 @@ Singleton {
             raw_content: content,
             organize: organizeAfterSave === true
         }
-        createProc.command = ["python3", root.backendPath, "create"]
+        createProc.command = ["python3", root.backendPath, "smart-upsert"]
         createProc.running = true
         return true
+    }
+
+    function smartUpsert(content): bool {
+        return root.create(content, true)
     }
 
     function refresh(): void {
@@ -87,12 +96,27 @@ Singleton {
         listProc.running = true
     }
 
+    function generateTopic(topicQuery): bool {
+        const query = String(topicQuery || "").trim()
+        if (!query) return false
+        if (generateTopicProc.running) {
+            Toaster.toast(qsTr("Notes"), qsTr("Already generating a topic in the background…"), "hourglass_top")
+            return false
+        }
+        root._generateTopicOutput = ""
+        root._generateTopicInput = { topic: query }
+        generateTopicProc.command = ["python3", root.backendPath, "generate-topic"]
+        generateTopicProc.running = true
+        Toaster.toast(qsTr("Generating notes…"), qsTr("Creating topic notes for \"%1\"").arg(query), "auto_awesome")
+        return true
+    }
+
     function saveDraft(noteId, rawContent, clientToken, analyzeAfterSave): bool {
         const content = String(rawContent || "").trim()
         if (!content) return false
         const id = String(noteId || "")
         const request = {
-            action: id ? "update" : "create",
+            action: id ? "update" : (analyzeAfterSave === true ? "smart-upsert" : "create"),
             payload: id ? { id: id, raw_content: content } : { raw_content: content },
             client_token: String(clientToken || ""),
             analyze: analyzeAfterSave === true
@@ -170,6 +194,14 @@ Singleton {
         return root._mutate("restore", { id: String(noteId || "") })
     }
 
+    function removeTopic(topic): bool {
+        return root._mutate("delete-topic", { topic: String(topic || "") })
+    }
+
+    function restoreTopic(topic): bool {
+        return root._mutate("restore-topic", { topic: String(topic || "") })
+    }
+
     function _mutate(action, payload): bool {
         if (mutationProc.running) {
             root.errorMessage = qsTr("Another note change is still being saved.")
@@ -208,19 +240,25 @@ Singleton {
             root.saving = false
             const result = root.parseResult(root._createOutput)
             root._createOutput = ""
-            if (!result.success || !result.note) {
+            if (!result.success || (!result.note && result.action !== "ignore")) {
                 root.errorMessage = result.error || qsTr("The note could not be saved.")
                 root.saveFailed(root.errorMessage)
+                return
+            }
+            if (result.action === "ignore") {
+                Toaster.toast(qsTr("Duplicate Note"), qsTr("Already covered, duplicate ignored."), "check_circle")
                 return
             }
             const shouldOrganize = root._createInput.organize === true
             root.noteCreated(result.note, shouldOrganize)
             root.refresh()
-            if (shouldOrganize) {
+            if (result.action === "merge") {
+                Toaster.toast(qsTr("Note merged"), qsTr("Merged into note (%1)").arg(result.subconcept || ""), "call_merge")
+            } else if (shouldOrganize) {
                 root.queueOrganization(result.note.id)
                 Toaster.toast(qsTr("Note saved"), qsTr("Formatting in the background…"), "auto_awesome")
             } else {
-                Toaster.toast(qsTr("Note saved"), qsTr("Added to your notes inbox"), "note_add")
+                Toaster.toast(qsTr("Note saved"), qsTr("Added to %1 / %2").arg(result.domain || result.note.topic || "Inbox").arg(result.subconcept || "Core"), "note_add")
             }
         }
     }
@@ -330,6 +368,39 @@ Singleton {
             root.refresh()
             if (rerun) root.queueOrganization(noteId)
             else root._startNextOrganization()
+        }
+    }
+
+    Process {
+        id: generateTopicProc
+
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._generateTopicInput) + "\n")
+        stdout: SplitParser {
+            onRead: data => root._generateTopicOutput += data
+        }
+        onExited: exitCode => {
+            const result = root.parseResult(root._generateTopicOutput)
+            root._generateTopicOutput = ""
+            if (result.success) {
+                root.refresh()
+                const action = result.action || "created"
+                const count = result.count || 0
+                const topic = result.topic || ""
+                const message = result.message || ""
+                root.topicGenerated(topic, count, action, message)
+                if (action === "already_covered") {
+                    Toaster.toast(qsTr("Already covered"), message || qsTr("Topic \"%1\" is already covered.").arg(topic), "check_circle")
+                } else if (action === "merged") {
+                    Toaster.toast(qsTr("Merged into topic"), message || qsTr("Merged %1 notes into \"%2\"").arg(count).arg(topic), "call_merge")
+                } else {
+                    Toaster.toast(qsTr("Topic created"), message || qsTr("Created dedicated topic \"%1\" with %2 notes").arg(topic).arg(count), "auto_awesome")
+                }
+            } else {
+                const msg = result.error || qsTr("Failed to generate notes for this topic.")
+                root.topicGenerateFailed(msg)
+                Toaster.toast(qsTr("Generation failed"), msg, "error")
+            }
         }
     }
 

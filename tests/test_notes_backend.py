@@ -334,6 +334,213 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(saved_by_section["JVM Options"]["technical_type"], "command")
         self.assertEqual(saved_by_section["JVM Options"]["exact_excerpts"][0]["content"], "-Xmx2g")
 
+    def test_generate_topic_creates_structured_notes(self):
+        response = json.dumps([
+            {"section": "Overview", "kind": "bullet", "content": "Git workflow describes branching and integration strategies."},
+            {"section": "Workflows", "kind": "command", "content": "Creates a new feature branch", "command": "git checkout -b feature/xyz"},
+            {"section": "Pull Requests", "kind": "command", "content": "Pushes branch and sets upstream", "command": "git push -u origin feature/xyz"},
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
+            res = notes.generate_topic({"topic": "git workflow"})
+        self.assertTrue(res["success"])
+        self.assertEqual(res["topic"], "Git")  # Inferred via TOPIC_PATTERNS
+        self.assertEqual(res["count"], 3)
+
+        created = [n for n in notes.list_notes({})["notes"] if n["topic"] == "Git"]
+        self.assertEqual(len(created), 3)
+        sections = {n["topic_section"] for n in created}
+        self.assertEqual(sections, {"Overview", "Workflows", "Pull Requests"})
+
+    def test_generate_topic_already_covered_skips_insertion(self):
+        # 1. Populate Git with 3 notes
+        response = json.dumps([
+            {"section": "Overview", "kind": "bullet", "content": "Git is a distributed version control system."},
+            {"section": "Commands", "kind": "command", "content": "Clone repo", "command": "git clone url"},
+            {"section": "Workflows", "kind": "bullet", "content": "Feature branch workflow with pull requests."},
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
+            res1 = notes.generate_topic({"topic": "Git"})
+        self.assertEqual(res1["action"], "created")
+        self.assertEqual(res1["count"], 3)
+
+        # 2. Querying "Git" again should detect already covered without running provider
+        with mock.patch.object(notes, "_run_provider", side_effect=AssertionError("Should not call AI")):
+            res2 = notes.generate_topic({"topic": "git"})
+        self.assertTrue(res2["success"])
+        self.assertEqual(res2["action"], "already_covered")
+        self.assertEqual(res2["topic"], "Git")
+        self.assertEqual(res2["count"], 0)
+        self.assertIn("Already covered in topic 'Git'", res2["message"])
+
+        # 3. Querying subtopic already covered ("git workflow") should also detect coverage
+        with mock.patch.object(notes, "_run_provider", side_effect=AssertionError("Should not call AI")):
+            res3 = notes.generate_topic({"topic": "git workflow"})
+        self.assertTrue(res3["success"])
+        self.assertEqual(res3["action"], "already_covered")
+        self.assertEqual(res3["topic"], "Git")
+        self.assertEqual(res3["count"], 0)
+
+    def test_generate_topic_merges_into_existing_topic(self):
+        # 1. Populate Git with basic notes
+        response = json.dumps([
+            {"section": "Overview", "kind": "bullet", "content": "Git is a distributed version control system."},
+            {"section": "Commands", "kind": "command", "content": "Clone repo", "command": "git clone url"},
+            {"section": "Commands", "kind": "command", "content": "Commit changes", "command": "git commit -m msg"},
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")):
+            notes.generate_topic({"topic": "Git"})
+
+        # 2. Querying an uncovered subtopic ("git bisect") merges into Git
+        bisect_response = json.dumps([
+            {"section": "Debugging", "kind": "command", "content": "Starts binary search session", "command": "git bisect start"},
+            {"section": "Debugging", "kind": "command", "content": "Marks bad commit", "command": "git bisect bad"},
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(bisect_response, "gemini")):
+            res = notes.generate_topic({"topic": "git bisect"})
+        self.assertTrue(res["success"])
+        self.assertEqual(res["action"], "merged")
+        self.assertEqual(res["topic"], "Git")
+        self.assertEqual(res["count"], 2)
+        self.assertIn("Merged 2 notes into existing topic 'Git'", res["message"])
+
+    def test_smart_upsert_create_assigns_subconcept_and_updates_json(self):
+        llm_reply = json.dumps({
+            "action": "create",
+            "domain": "docker",
+            "subconcept": "Compose",
+            "formatted_content": "### Docker Compose\nRun multi-container apps."
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(llm_reply, "gemini")):
+            res = notes.smart_upsert({"raw_content": "docker compose up -d"})
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["action"], "create")
+        self.assertEqual(res["domain"], "docker")
+        self.assertEqual(res["subconcept"], "Compose")
+        self.assertEqual(res["note"]["subconcept"], "Compose")
+
+        # Verify notes.json exists and contains the note with subconcept
+        json_path = self.db_path.parent / "notes.json"
+        self.assertTrue(json_path.exists())
+        with open(json_path, "r", encoding="utf-8") as f:
+            saved_notes = json.load(f)
+        self.assertTrue(any(n["subconcept"] == "Compose" for n in saved_notes))
+
+    def test_smart_upsert_merge_updates_existing_note_and_subconcept(self):
+        # 1. Create an initial note
+        initial = notes.create_note({"raw_content": "docker run -d nginx", "topic": "docker", "subconcept": "Core"})["note"]
+
+        # 2. Smart upsert decides to MERGE into initial note
+        llm_reply = json.dumps({
+            "action": "merge",
+            "existing_id": initial["id"],
+            "updated_subconcept": "Containers",
+            "updated_content": "### Docker Containers\n`docker run -d nginx`\n`docker stop <id>`"
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(llm_reply, "gemini")):
+            res = notes.smart_upsert({"raw_content": "docker stop <id>"})
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["action"], "merge")
+        self.assertEqual(res["note"]["id"], initial["id"])
+        self.assertEqual(res["subconcept"], "Containers")
+        self.assertEqual(res["note"]["subconcept"], "Containers")
+        self.assertIn("docker stop", res["note"]["formatted_content"])
+
+    def test_smart_upsert_ignore_duplicate(self):
+        llm_reply = json.dumps({"action": "ignore"})
+        with mock.patch.object(notes, "_run_provider", return_value=(llm_reply, "gemini")):
+            res = notes.smart_upsert({"raw_content": "identical repeated command"})
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["action"], "ignore")
+
+    def test_infer_subconcept_rules(self):
+        self.assertEqual(notes.infer_subconcept("Docker", "docker compose up", "", "docker compose up"), "Compose")
+        self.assertEqual(notes.infer_subconcept("Docker", "docker volume create", "", "docker volume"), "Volumes")
+        self.assertEqual(notes.infer_subconcept("Docker", "docker build -t img .", "", "docker build"), "Images & Build")
+        self.assertEqual(notes.infer_subconcept("Docker", "docker ps -a", "", "docker ps"), "Containers & CLI")
+        self.assertEqual(notes.infer_subconcept("Git", "Setup GitHub Actions workflow", "", "actions"), "GitHub Actions")
+        self.assertEqual(notes.infer_subconcept("Git", "Git Rebase Main", "", "git rebase main"), "Branching & Workflows")
+        self.assertEqual(notes.infer_subconcept("RabbitMQ", "Exchange Routing", "", "exchange"), "Exchanges & Routing")
+        self.assertEqual(notes.infer_subconcept("Rust", "Mutex and Arc synchronization", "", "std::sync::Mutex"), "Synchronization")
+
+    def test_refactor_subconcepts_command(self):
+        # Create notes with empty subconcept
+        with notes.database() as db:
+            db.execute("INSERT INTO notes (id, created_at, updated_at, raw_content, topic, subconcept) VALUES (?, ?, ?, ?, ?, ?)",
+                       ("test-1", notes.utc_now(), notes.utc_now(), "docker build -t test .", "Docker", ""))
+            db.execute("INSERT INTO notes (id, created_at, updated_at, raw_content, topic, subconcept) VALUES (?, ?, ?, ?, ?, ?)",
+                       ("test-2", notes.utc_now(), notes.utc_now(), "git checkout -b new-branch", "Git", ""))
+
+        result = notes.refactor_subconcepts()
+        self.assertTrue(result["success"])
+        self.assertGreaterEqual(result["refactored_count"], 2)
+
+        note1 = notes.get_note({"id": "test-1"})["note"]
+        note2 = notes.get_note({"id": "test-2"})["note"]
+        self.assertEqual(note1["subconcept"], "Images & Build")
+        self.assertEqual(note2["subconcept"], "Branching & Workflows")
+
+    def test_generate_topic_clean_structure(self):
+        llm_reply = json.dumps([
+            {
+                "section": "Overview",
+                "subconcept": "Volumes",
+                "kind": "bullet",
+                "content": "Volumes persist data outside the container lifecycle.",
+                "command": "",
+                "code": ""
+            },
+            {
+                "section": "Commands",
+                "subconcept": "Volumes",
+                "kind": "command",
+                "content": "Creates a named volume.",
+                "command": "docker volume create my-vol",
+                "code": ""
+            }
+        ])
+        with mock.patch.object(notes, "_run_provider", return_value=(llm_reply, "gemini")):
+            res = notes.generate_topic({"topic": "Docker"})
+
+        self.assertTrue(res["success"])
+        stored = notes.list_notes({})["notes"]
+        vol_notes = [n for n in stored if n.get("subconcept") == "Volumes"]
+        self.assertGreaterEqual(len(vol_notes), 2)
+        for n in vol_notes:
+            self.assertFalse(n["title"].startswith(("notes: ", "overview: ", "commands: ")))
+
+    def test_delete_and_restore_topic(self):
+        notes.create_note({"raw_content": "docker ps", "topic": "DockerTest"})
+        notes.create_note({"raw_content": "docker run nginx", "topic": "DockerTest"})
+
+        del_res = notes.delete_topic({"topic": "DockerTest"})
+        self.assertTrue(del_res["success"])
+        self.assertEqual(del_res["deleted_count"], 2)
+
+        # Confirm notes are deleted
+        all_notes = notes.list_notes({})["notes"]
+        self.assertFalse(any(n["topic"] == "DockerTest" for n in all_notes))
+
+        # Restore
+        res_res = notes.restore_topic({"topic": "DockerTest"})
+        self.assertTrue(res_res["success"])
+        self.assertEqual(res_res["restored_count"], 2)
+
+        # Confirm restored
+        all_notes = notes.list_notes({})["notes"]
+        self.assertEqual(len([n for n in all_notes if n["topic"] == "DockerTest"]), 2)
+
+    def test_explain_flag(self):
+        res = notes.explain_flag({"tool": "docker", "flag": "-d"})
+        self.assertTrue(res["success"])
+        self.assertIn("detached", res["explanation"].lower())
+
+        git_res = notes.explain_flag({"tool": "git", "flag": "--rebase"})
+        self.assertTrue(git_res["success"])
+        self.assertIn("commits", git_res["explanation"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

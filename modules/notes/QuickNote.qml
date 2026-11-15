@@ -75,6 +75,11 @@ Scope {
                     if (win.st) win.st.quickNote = false
                 }
 
+                function resetWindowSize(): void {
+                    win.width = win.preferredWidth
+                    win.height = win.preferredHeight
+                }
+
                 screen: loader.modelData
                 visible: win.st?.quickNote ?? false
                 title: win.reviewMode ? qsTr("Quick Notes") : qsTr("Quick Note")
@@ -83,10 +88,14 @@ Scope {
 
                 implicitWidth: preferredWidth
                 implicitHeight: preferredHeight
-                minimumSize.width: preferredWidth
-                minimumSize.height: preferredHeight
-                maximumSize.width: preferredWidth
-                maximumSize.height: preferredHeight
+                minimumSize.width: win.reviewMode
+                    ? Math.min(600, Math.round(loader.modelData.width * 0.8))
+                    : Math.min(400, Math.round(loader.modelData.width * 0.8))
+                minimumSize.height: win.reviewMode
+                    ? Math.min(400, Math.round(loader.modelData.height * 0.6))
+                    : Math.min(120, Math.round(loader.modelData.height * 0.3))
+                maximumSize.width: Math.round(loader.modelData.width * 0.96)
+                maximumSize.height: Math.round(loader.modelData.height * 0.92)
 
                 contentItem.Config.screen: loader.modelData.name
                 contentItem.Tokens.screen: loader.modelData.name
@@ -99,6 +108,10 @@ Scope {
                 onVisibleChanged: {
                     if (visible) {
                         win.saveError = ""
+                        win.modeTransitioning = true
+                        win.resizeAttempts = 0
+                        win.resetWindowSize()
+                        resizeTimer.restart()
                         Qt.callLater(() => {
                             if (win.reviewMode) reviewView.forceActiveFocus()
                             else win.beginCapture()
@@ -110,6 +123,7 @@ Scope {
                     if (win.reviewMode) win.saveDraft(true)
                     win.modeTransitioning = true
                     win.resizeAttempts = 0
+                    win.resetWindowSize()
                     resizeTimer.restart()
                     if (visible) {
                         Qt.callLater(() => {
@@ -125,6 +139,9 @@ Scope {
                     interval: 80
                     onTriggered: {
                         win.resizeAttempts += 1
+                        if (win.visible) {
+                            win.resetWindowSize()
+                        }
                         if (win.resizeAttempts < 3) {
                             resizeTimer.restart()
                         } else {

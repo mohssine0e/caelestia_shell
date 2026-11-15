@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 TAG_PATTERN = re.compile(r"(?<![\w#])#([\w-]+)", re.UNICODE)
 ORGANIZER_PROMPT = (
     "You are a technical note formatter. Format the supplied raw developer note as "
@@ -100,6 +100,7 @@ TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("Java", re.compile(r"(?i)\b(?:java|javac|maven|mvn|gradle|jvm|spring)\b")),
     ("Rust", re.compile(r"(?i)\b(?:rust|cargo|rustc)\b")),
     ("Go", re.compile(r"(?i)\b(?:golang|go run|go build|go test)\b")),
+    ("RabbitMQ", re.compile(r"(?i)\b(?:rabbitmq|amqp|erlang)\b")),
     ("SQL", re.compile(r"(?i)\b(?:sql|sqlite|postgres(?:ql)?|mysql)\b")),
     ("OCI Networking", re.compile(r"(?i)\b(?:oci networking|vcn|subnet|route table)\b")),
 )
@@ -178,6 +179,7 @@ def connect() -> sqlite3.Connection:
         "topic_locked": "ALTER TABLE notes ADD COLUMN topic_locked INTEGER NOT NULL DEFAULT 0",
         "display_edits_json": "ALTER TABLE notes ADD COLUMN display_edits_json TEXT NOT NULL DEFAULT '{}'",
         "topic_section": "ALTER TABLE notes ADD COLUMN topic_section TEXT NOT NULL DEFAULT ''",
+        "subconcept": "ALTER TABLE notes ADD COLUMN subconcept TEXT NOT NULL DEFAULT ''",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -214,6 +216,15 @@ def connect() -> sqlite3.Connection:
     db.execute("CREATE INDEX IF NOT EXISTS notes_keep_updated ON notes(keep_decision, updated_at DESC)")
     db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     db.commit()
+    try:
+        empty_subc = db.execute(
+            "SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL AND (subconcept IS NULL OR subconcept = '')"
+        ).fetchone()[0]
+        if empty_subc > 0:
+            _refactor_subconcepts_internal(db)
+            db.commit()
+    except Exception:
+        pass
     _secure_path(path)
     for suffix in ("-wal", "-shm"):
         sidecar = Path(str(path) + suffix)
@@ -268,6 +279,78 @@ def _infer_local_topic(raw: str, tags: list[str] | None = None) -> str:
     return ""
 
 
+def _has_word(pattern: str, text: str) -> bool:
+    return bool(re.search(r"\b(" + pattern + r")\b", text, re.IGNORECASE))
+
+
+def infer_subconcept(topic: str, title: str = "", section: str = "", content: str = "", tech: str = "") -> str:
+    combined = f"{topic} {tech} {title} {section} {content}"
+    t = (topic or "").strip().lower()
+
+    if "docker" in t or _has_word("docker", combined):
+        if _has_word("compose|docker-compose|stack", combined):
+            return "Compose"
+        if _has_word("volume|volumes|persist|storage|mount|bind", combined):
+            return "Volumes"
+        if _has_word("network|networks|bridge|overlay|host driver", combined):
+            return "Networking"
+        if _has_word("build|dockerfile|layer|layers|cache|caching|image|images|pull|push|tag|registry|rmi", combined):
+            return "Images & Build"
+        if _has_word("ps|exec|logs?|stop|run|container|containers|kill|rm|cli", combined):
+            return "Containers & CLI"
+        if _has_word("gotchas?|traps?|error|leak", combined):
+            return "Gotchas"
+        return "Core Docker"
+
+    if "git" in t or _has_word("git|github", combined):
+        if re.search(r"\b(github actions?|gh actions?|ci/cd|\.github|workflow_dispatch|pull_request|repository secrets?)\b", combined, re.I) or (_has_word("github", combined) and _has_word("actions?|secrets?|pull_request|workflow", combined)) or "actions" in tech.lower():
+            return "GitHub Actions"
+        if _has_word(r"bisect|diff|diffs|blame|inspect", combined) or re.search(r"\b(commit history|git log|git graph)\b", combined, re.I):
+            return "History & Inspection"
+        if _has_word(r"stash|stage|staging|patch|reset|untracked|clean|index", combined):
+            return "State & Stash"
+        if _has_word(r"branch|branches|branching|rebase|merge|merging|cherry-pick|pull|push|remote|remotes|fetch|prune|workflow|workflows", combined):
+            return "Branching & Workflows"
+        if _has_word(r"config|configuration|author|setup", combined) and not _has_word(r"actions?|workflow", combined):
+            return "Configuration"
+        return "Core Git"
+
+    if "rabbitmq" in t or _has_word("rabbitmq|amqp", combined):
+        if _has_word("exchange|exchanges|routing|dlx|dead letter|fanout|direct|topic exchange", combined):
+            return "Exchanges & Routing"
+        if _has_word("queue|queues|consumer|consumers|prefetch|ack|acknowledge|acknowledgement|worker", combined):
+            return "Queues & Consumers"
+        if _has_word("cluster|admin|stop|list|status|management|cli", combined):
+            return "CLI & Administration"
+        if _has_word("gotchas?|traps?|error|leak", combined):
+            return "Gotchas"
+        return "Core RabbitMQ"
+
+    if "rust" in t or _has_word("rust", combined):
+        if _has_word("channel|channels|mpsc|message|messaging", combined):
+            return "Channels & Messaging"
+        if _has_word("mutex|arc|sync|lock|locks|atomic|rwlock", combined):
+            return "Synchronization"
+        if _has_word("thread|threads|spawn|concurrency|join|handle", combined):
+            return "Concurrency & Threads"
+        if _has_word("gotchas?|traps?|deadlock", combined):
+            return "Gotchas"
+        return "Core Rust"
+
+    if "oci" in t or _has_word("oci|vcn|vnic|subnet", combined):
+        if _has_word("vcn|vnic|subnet|route table|gateway", combined):
+            return "Networking"
+        return "Core OCI"
+
+    clean_sec = (section or "").strip()
+    if clean_sec and clean_sec.lower() not in ("none", "bullet", "notes", "note", "overview", "general"):
+        return clean_sec.title()
+
+    if t:
+        return f"Core {topic.strip().title()}"
+    return "General"
+
+
 def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     note = dict(row)
     try:
@@ -298,6 +381,7 @@ def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     note["technical_type"] = note.get("technical_type") or ""
     note["technology"] = note.get("technology") or ""
     note["topic_section"] = note.get("topic_section") or ""
+    note["subconcept"] = note.get("subconcept") or ""
     note["sensitive_reason"] = note.get("sensitive_reason") or ""
     note["duplicate_of"] = note.get("duplicate_of") or ""
     note["topic"] = note.get("topic") or _infer_local_topic(
@@ -314,6 +398,128 @@ def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     return note
 
 
+def sync_notes_json(db: sqlite3.Connection) -> None:
+    try:
+        path = database_path().parent / "notes.json"
+        _secure_path(path)
+        rows = db.execute("SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC").fetchall()
+        data = [_row_to_note(r) for r in rows]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _refactor_subconcepts_internal(db: sqlite3.Connection) -> int:
+    rows = db.execute(
+        "SELECT id, topic, topic_section, technical_type, title, raw_content, technology, essentials_json, excerpts_json FROM notes"
+    ).fetchall()
+    updated_count = 0
+    for row in rows:
+        raw = str(row["raw_content"] or "").strip()
+        topic = str(row["topic"] or "").strip()
+        if not topic:
+            topic = _infer_local_topic(raw) or "General"
+        title = str(row["title"] or "").strip()
+        clean_title = re.sub(
+            r"^(?:commands|notes|overview|idioms|best practices|gotchas|container management|image registry|image management|network architecture|state management|repository management|remote synchronization|workflows|configuration|history & inspection):\s*",
+            "",
+            title,
+            flags=re.I
+        ).strip()
+        if not clean_title and raw:
+            clean_title = raw.splitlines()[0][:75].strip()
+
+        old_sec = str(row["topic_section"] or "").strip().lower()
+        old_ttype = str(row["technical_type"] or "").strip().lower()
+
+        try:
+            essentials = json.loads(row["essentials_json"] or "[]")
+        except Exception:
+            essentials = []
+        try:
+            excerpts = json.loads(row["excerpts_json"] or "[]")
+        except Exception:
+            excerpts = []
+
+        is_cmd = (
+            old_ttype == "command"
+            or raw.startswith(("$", "docker ", "git ", "gh ", "kubectl ", "pacman ", "systemctl ", "cargo ", "npm ", "rabbitmqadmin ", "rabbitmqctl "))
+            or bool(re.match(r"^(?:sudo\s+)?(?:docker|git|gh|kubectl|pacman|systemctl|cargo|npm|rabbitmqadmin|rabbitmqctl)\b", raw))
+        )
+        is_code = (
+            old_ttype == "code"
+            or raw.startswith(("use std::", "fn main", "impl ", "struct ", "name:", "on:\n", "jobs:\n"))
+        )
+        is_error = (
+            old_ttype == "error_fix"
+            or old_sec in ("gotchas", "errors")
+            or bool(re.search(r"\b(gotchas?|traps?|deadlock|avoid|danger|corrupt|risks?)\b", raw, re.I))
+        )
+
+        if is_cmd:
+            ttype = "command"
+            sec = "commands"
+            clean_cmd = raw.lstrip("$ ").strip()
+            if not excerpts:
+                excerpts = [{"language": "bash", "content": clean_cmd}]
+            if not essentials:
+                essentials = [clean_title or clean_cmd]
+        elif is_code:
+            ttype = "code"
+            sec = "code"
+            if not excerpts:
+                lang = "rust" if "std::" in raw or "fn " in raw else ("yaml" if "jobs:" in raw else "")
+                excerpts = [{"language": lang, "content": raw}]
+            if not essentials:
+                essentials = [clean_title]
+        elif is_error:
+            ttype = "error_fix"
+            sec = "errors"
+            if not essentials:
+                essentials = [clean_title or raw]
+        elif old_sec in ("configuration", "config"):
+            ttype = "configuration"
+            sec = "configuration"
+            if not essentials:
+                essentials = [clean_title or raw]
+        else:
+            ttype = "concept"
+            sec = "notes"
+            if not essentials:
+                essentials = [clean_title or raw]
+
+        sc = infer_subconcept(
+            topic,
+            clean_title,
+            sec,
+            raw,
+            row["technology"] or "",
+        )
+        db.execute(
+            """UPDATE notes SET
+               topic = ?,
+               subconcept = ?,
+               title = ?,
+               topic_section = ?,
+               technical_type = ?,
+               essentials_json = ?,
+               excerpts_json = ?
+               WHERE id = ?""",
+            (topic, sc, clean_title, sec, ttype, json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), row["id"]),
+        )
+        updated_count += 1
+    if updated_count > 0:
+        sync_notes_json(db)
+    return updated_count
+
+
+def refactor_subconcepts(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    with database() as db:
+        count = _refactor_subconcepts_internal(db)
+    return {"success": True, "refactored_count": count}
+
+
 def create_note(payload: dict[str, Any]) -> dict[str, Any]:
     raw = str(payload.get("raw_content", "")).strip()
     if not raw:
@@ -323,14 +529,21 @@ def create_note(payload: dict[str, Any]) -> dict[str, Any]:
     note_id = str(uuid.uuid4())
     now = utc_now()
     tags = _normalise_tags(payload.get("tags"), raw)
+    subconcept = str(payload.get("subconcept", "")).strip()
+    topic = str(payload.get("topic") or payload.get("domain", "")).strip()
+    if not topic:
+        topic = _infer_local_topic(raw, tags) or "General"
+    if not subconcept:
+        subconcept = infer_subconcept(topic, "", "", raw)
     with database() as db:
         db.execute(
             """INSERT INTO notes
                (id, created_at, updated_at, raw_content, tags_json, status,
-                category, keep_decision, schema_version)
-               VALUES (?, ?, ?, ?, ?, 'inbox', 'unclassified', 'pending', ?)""",
-            (note_id, now, now, raw, json.dumps(tags, ensure_ascii=False), SCHEMA_VERSION),
+                category, keep_decision, subconcept, topic, schema_version)
+               VALUES (?, ?, ?, ?, ?, 'inbox', 'unclassified', 'pending', ?, ?, ?)""",
+            (note_id, now, now, raw, json.dumps(tags, ensure_ascii=False), subconcept, topic, SCHEMA_VERSION),
         )
+        sync_notes_json(db)
         row = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
     return {"success": True, "note": _row_to_note(row)}
 
@@ -420,6 +633,10 @@ def update_note(payload: dict[str, Any]) -> dict[str, Any]:
             db.execute("UPDATE notes SET topic = ?, category = 'technical', keep_decision = 'keep' WHERE id = ?",
                        (row["topic"], note_id))
             updated = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+        if "subconcept" in payload:
+            db.execute("UPDATE notes SET subconcept = ? WHERE id = ?", (str(payload["subconcept"]).strip(), note_id))
+            updated = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+        sync_notes_json(db)
     return {"success": True, "note": _row_to_note(updated)}
 
 
@@ -431,8 +648,9 @@ def delete_note(payload: dict[str, Any]) -> dict[str, Any]:
             "UPDATE notes SET deleted_at = ?, updated_at = ?, format_token = NULL WHERE id = ? AND deleted_at IS NULL",
             (now, now, note_id),
         )
-    if cursor.rowcount != 1:
-        raise ValueError("Note not found.")
+        if cursor.rowcount != 1:
+            raise ValueError("Note not found.")
+        sync_notes_json(db)
     return {"success": True, "id": note_id}
 
 
@@ -444,9 +662,107 @@ def restore_note(payload: dict[str, Any]) -> dict[str, Any]:
             "UPDATE notes SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
             (now, note_id),
         )
-    if cursor.rowcount != 1:
-        raise ValueError("Deleted note not found.")
+        if cursor.rowcount != 1:
+            raise ValueError("Deleted note not found.")
+        sync_notes_json(db)
     return get_note({"id": note_id})
+
+
+def delete_topic(payload: dict[str, Any]) -> dict[str, Any]:
+    topic = str(payload.get("topic", "")).strip()
+    if not topic:
+        raise ValueError("Topic is required.")
+    now = utc_now()
+    with database() as db:
+        cursor = db.execute(
+            "UPDATE notes SET deleted_at = ?, updated_at = ? WHERE topic = ? COLLATE NOCASE AND deleted_at IS NULL",
+            (now, now, topic),
+        )
+        count = cursor.rowcount
+        sync_notes_json(db)
+    return {"success": True, "topic": topic, "deleted_count": count}
+
+
+def restore_topic(payload: dict[str, Any]) -> dict[str, Any]:
+    topic = str(payload.get("topic", "")).strip()
+    if not topic:
+        raise ValueError("Topic is required.")
+    now = utc_now()
+    with database() as db:
+        cursor = db.execute(
+            "UPDATE notes SET deleted_at = NULL, updated_at = ? WHERE topic = ? COLLATE NOCASE AND deleted_at IS NOT NULL",
+            (now, topic),
+        )
+        count = cursor.rowcount
+        sync_notes_json(db)
+    return {"success": True, "topic": topic, "restored_count": count}
+
+
+def explain_flag(payload: dict[str, Any]) -> dict[str, Any]:
+    tool = str(payload.get("tool", "")).strip().lower()
+    flag = str(payload.get("flag", "")).strip()
+    command = str(payload.get("command", "")).strip()
+
+    if not flag:
+        raise ValueError("Flag is required.")
+
+    builtin = {
+        "docker": {
+            "-d": "Run container in background (detached mode) and print container ID",
+            "-p": "Publish container port(s) to host (HOST:CONTAINER)",
+            "-v": "Bind mount a storage volume or directory into the container",
+            "--rm": "Automatically remove container file system when it exits",
+            "-it": "Interactive terminal session (combines -i and -t)",
+            "--name": "Assign a custom name to the container",
+            "-a": "Show all containers, including stopped ones",
+            "-f": "Force removal of a running container",
+        },
+        "git": {
+            "-b": "Create and switch to a new branch",
+            "-m": "Set commit message",
+            "-am": "Stage all tracked modified files and commit with message",
+            "-p": "Interactive patch mode: review and select hunks individually",
+            "-f": "Force overwrite remote branch history",
+            "--rebase": "Reapply commits on top of base branch instead of merge commit",
+            "--no-ff": "Create a merge commit even if fast-forward is possible",
+            "-d": "Delete branch safely only if already merged",
+            "-D": "Force delete branch even if unmerged",
+            "--hard": "Reset working tree and index; discards uncommitted changes",
+            "--oneline": "Format each commit as a single condensed line",
+            "--graph": "Draw text-based ASCII graphical commit tree",
+        }
+    }
+    if tool in builtin and flag in builtin[tool]:
+        return {"success": True, "tool": tool, "flag": flag, "explanation": builtin[tool][flag]}
+
+    with database() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS flag_cache (
+            tool TEXT NOT NULL,
+            flag TEXT NOT NULL,
+            explanation TEXT NOT NULL,
+            PRIMARY KEY(tool, flag)
+        )""")
+        row = db.execute("SELECT explanation FROM flag_cache WHERE tool = ? AND flag = ?", (tool, flag)).fetchone()
+        if row:
+            return {"success": True, "tool": tool, "flag": flag, "explanation": row["explanation"]}
+
+    explanation = ""
+    try:
+        proc = subprocess.run([tool, "--help"], capture_output=True, text=True, timeout=1.5)
+        out = proc.stdout or proc.stderr
+        escaped = re.escape(flag)
+        m = re.search(r"^\s*(?:[A-Za-z0-9_,-]+\s+)*" + escaped + r"(?:[=\s,].*?)?\s{2,}(.+)$", out, re.M)
+        if m:
+            explanation = m.group(1).strip()
+    except Exception:
+        pass
+
+    if explanation:
+        with database() as db:
+            db.execute("INSERT OR REPLACE INTO flag_cache (tool, flag, explanation) VALUES (?, ?, ?)", (tool, flag, explanation))
+            db.commit()
+
+    return {"success": True, "tool": tool, "flag": flag, "explanation": explanation or "CLI Option"}
 
 
 def provider_status(_: dict[str, Any]) -> dict[str, Any]:
@@ -700,6 +1016,8 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
         markdown_parts.append("**AI-added context**\n" + "\n".join(f"- {item}" for item in completions))
     formatted = "\n\n".join(markdown_parts)
     decision = "keep" if triage["keep"] else "skip"
+    t_topic = triage.get("topic") or _infer_local_topic(raw) or "General"
+    subc = infer_subconcept(t_topic, triage.get("title") or "", "", formatted or raw, triage.get("technology") or "")
     with database() as db:
         duplicate_of = _find_duplicate(db, note_id, raw)
         cursor = db.execute(
@@ -709,7 +1027,7 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
                triage_token = NULL, provider = ?, title = ?, technical_type = ?,
                technology = ?, topic = CASE WHEN topic_locked THEN topic ELSE ? END, ai_tags_json = ?, essentials_json = ?,
                completions_json = ?, excerpts_json = ?, local_only = 0,
-               sensitive_reason = NULL, duplicate_of = ?, updated_at = ?, schema_version = ?
+               sensitive_reason = NULL, duplicate_of = ?, subconcept = ?, updated_at = ?, schema_version = ?
                WHERE id = ? AND triage_token = ? AND deleted_at IS NULL""",
             (formatted or None, triage["category"], decision, provider,
              triage["title"], triage["technical_type"], triage["technology"], triage["topic"],
@@ -717,8 +1035,9 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
              json.dumps(essentials, ensure_ascii=False),
              json.dumps(completions, ensure_ascii=False),
              json.dumps(triage["exact_excerpts"], ensure_ascii=False), duplicate_of or None,
-             utc_now(), SCHEMA_VERSION, note_id, token),
+             subc, utc_now(), SCHEMA_VERSION, note_id, token),
         )
+        sync_notes_json(db)
     if cursor.rowcount != 1:
         return {"success": False, "stale": True, "id": note_id}
     return get_note({"id": note_id})
@@ -965,10 +1284,12 @@ def _insert_accepted_line(db: sqlite3.Connection, item: dict[str, Any]) -> str:
                    "references": "reference"}.get(section.lower(), "concept")
         excerpts = []
 
+    subc = item.get("subconcept") or infer_subconcept(item["topic"], item.get("title") or "", section, content)
     db.execute("""UPDATE notes SET technical_type = ?, topic_section = ?, essentials_json = ?,
-        excerpts_json = ?, formatted_content = ?, category = 'technical' WHERE id = ?""",
+        excerpts_json = ?, formatted_content = ?, subconcept = ?, category = 'technical' WHERE id = ?""",
         (subtype, section, json.dumps([content], ensure_ascii=False),
-         json.dumps(excerpts, ensure_ascii=False), content, note_id))
+         json.dumps(excerpts, ensure_ascii=False), content, subc, note_id))
+    sync_notes_json(db)
     return note_id
 
 
@@ -1061,7 +1382,7 @@ def dismiss_gap(payload: dict[str, Any]) -> dict[str, Any]:
     return learning_list(payload)
 
 
-def _insert_topic_note(db, topic: str, raw: str, origin: str, title: str = "") -> str:
+def _insert_topic_note(db, topic: str, raw: str, origin: str, title: str = "", subconcept: str = "") -> str:
     if not raw or len(raw) > 200000:
         raise ValueError("Enter a note of 1 to 200,000 characters.")
     note_id, now = str(uuid.uuid4()), utc_now()
@@ -1069,15 +1390,385 @@ def _insert_topic_note(db, topic: str, raw: str, origin: str, title: str = "") -
     db.execute("""INSERT INTO notes
         (id, created_at, updated_at, raw_content, formatted_content, topic, topic_locked,
          category, keep_decision, status, origin, title, technical_type, local_only,
-         sensitive_reason, schema_version)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 'technical', 'keep', ?, ?, ?, 'concept', ?, ?, ?)""",
+         sensitive_reason, subconcept, schema_version)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 'technical', 'keep', ?, ?, ?, 'concept', ?, ?, ?, ?)""",
         (note_id, now, now, raw, raw if origin == "ai" else None, topic,
          "formatted" if origin == "ai" else "inbox", origin, title,
-         int(bool(sensitive)), sensitive or None, SCHEMA_VERSION))
+         int(bool(sensitive)), sensitive or None, subconcept, SCHEMA_VERSION))
     return note_id
 
 
+def _find_topic_coverage(db: sqlite3.Connection, query: str) -> tuple[str, str, int, str]:
+    query_clean = _clean_section_name(query).strip()
+    query_lower = query_clean.lower()
+
+    rows = db.execute("SELECT DISTINCT topic FROM notes WHERE deleted_at IS NULL AND topic IS NOT NULL AND topic != ''").fetchall()
+    existing_topics = [r[0] for r in rows if r[0]]
+
+    # 1. Exact match with an existing topic
+    for t in existing_topics:
+        if t.lower() == query_lower or _clean_section_name(t).lower() == query_lower:
+            count = db.execute("SELECT COUNT(*) FROM notes WHERE topic = ? COLLATE NOCASE AND deleted_at IS NULL", (t,)).fetchone()[0]
+            if count >= 3:
+                return (t, "already_covered", count, f"Already covered in topic '{t}' ({count} notes)")
+            return (t, "merge_candidate", count, f"Topic '{t}' exists, merging into it")
+
+    # 2. Check if query maps to an existing topic (e.g. 'git workflow' -> 'Git', 'docker compose' -> 'Docker')
+    inferred = _infer_local_topic(query)
+    target_topic = None
+    if inferred:
+        for t in existing_topics:
+            if t.lower() == inferred.lower():
+                target_topic = t
+                break
+
+    if not target_topic:
+        for t in existing_topics:
+            t_lower = t.lower()
+            if query_lower.startswith(t_lower + " ") or query_lower.endswith(" " + t_lower) or f" {t_lower} " in f" {query_lower} ":
+                target_topic = t
+                break
+
+    if target_topic:
+        notes = db.execute(
+            "SELECT id, title, topic_section, formatted_content, raw_content FROM notes WHERE topic = ? COLLATE NOCASE AND deleted_at IS NULL",
+            (target_topic,)
+        ).fetchall()
+
+        stopwords = {"the", "a", "an", "in", "for", "to", "of", "and", "or", "how", "what", "guide", "notes", "commands", "basic", "basics", "quick"}
+        query_words = [w for w in re.split(r'\W+', query_lower) if len(w) > 2 and w != target_topic.lower() and w not in stopwords]
+
+        if query_words and notes:
+            matching = []
+            for n in notes:
+                text = f"{n['title'] or ''} {n['topic_section'] or ''} {n['formatted_content'] or ''} {n['raw_content'] or ''}".lower()
+                if all(w in text for w in query_words):
+                    matching.append(n)
+            if matching:
+                return (target_topic, "already_covered", len(notes), f"Already covered in topic '{target_topic}'")
+
+        return (target_topic, "merge_candidate", len(notes), f"Topic '{target_topic}' exists, merging into it")
+
+    candidate = inferred or query_clean
+    return (candidate, "new_topic", 0, f"New dedicated topic '{candidate}'")
+
+
+def generate_topic(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_query = str(payload.get("topic", "")).strip()
+    if not topic_query or len(topic_query) > 120:
+        raise ValueError("Enter a topic of 1 to 120 characters.")
+    if _detect_sensitive_content(topic_query):
+        raise ValueError("This topic prompt contains sensitive content.")
+
+    with database() as db:
+        canonical_topic, match_type, existing_count, message = _find_topic_coverage(db, topic_query)
+        if match_type == "already_covered":
+            return {
+                "success": True,
+                "action": "already_covered",
+                "topic": canonical_topic,
+                "count": 0,
+                "message": message
+            }
+
+    prompt = (
+        f"You are an expert software engineer and technical teacher. Generate 4 to 7 essential, practical developer notes "
+        f"for the topic or workflow: '{topic_query}'.\n"
+        f"Structure them into domain-appropriate sections (e.g. Overview, Workflows, Commands, Configuration, Gotchas, Best Practices, etc.).\n"
+        f"Return ONLY a strict JSON array of objects with the schema:\n"
+        f"[\n"
+        f'  {{\n'
+        f'    "section": "concise section heading (e.g. Overview, Commands, Idioms, Configuration, Gotchas)",\n'
+        f'    "subconcept": "domain sub-concept pill (e.g. for Git: Branching & Workflows, GitHub Actions, History & Inspection, State & Stash, Core Git; for Docker: Containers & CLI, Images & Build, Volumes, Compose)",\n'
+        f'    "kind": "bullet" | "command" | "code",\n'
+        f'    "content": "one concise factual note or explanation",\n'
+        f'    "command": "exact CLI command (if kind is command, else empty)",\n'
+        f'    "code": "exact code snippet (if kind is code, else empty)",\n'
+        f'    "language": "code syntax language (e.g. java, python, bash, or empty)"\n'
+        f'  }}\n'
+        f"]\n"
+        f"Ensure at least one Overview bullet defining the topic/workflow clearly.\n"
+        f"Provide exact, reliable syntax for commands and code. Do not hallucinate credentials or paths."
+    )
+
+    response, provider = _run_provider(prompt, json.dumps({"topic": canonical_topic}))
+    response = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip())
+    try:
+        items = json.loads(response)
+    except ValueError as exc:
+        raise ValueError("The AI returned an invalid response. Try again.") from exc
+    if not isinstance(items, list) or not items:
+        raise ValueError("The AI could not generate notes for this topic.")
+
+    created_ids = []
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+
+        # Deduplication against existing notes in this topic
+        existing_items = db.execute(
+            "SELECT topic_section, formatted_content, raw_content, title FROM notes WHERE topic = ? COLLATE NOCASE AND deleted_at IS NULL",
+            (canonical_topic,)
+        ).fetchall()
+        existing_contents = {
+            str(r["formatted_content"] or r["raw_content"] or "").strip().lower() for r in existing_items
+        }
+        existing_titles = {
+            str(r["title"] or "").strip().lower() for r in existing_items
+        }
+
+        for item in items[:8]:
+            if not isinstance(item, dict):
+                continue
+            section = _clean_section_name(item.get("section"))
+            content = str(item.get("content", "")).strip()
+            command = str(item.get("command", "")).strip()
+            code = str(item.get("code", "")).strip()
+            language = str(item.get("language", "")).strip()
+            kind = str(item.get("kind", "")).strip().lower()
+            if not kind:
+                if command:
+                    kind = "command"
+                elif code:
+                    kind = "code"
+                else:
+                    kind = "bullet"
+            if kind not in ("bullet", "command", "code"):
+                kind = "bullet"
+            if not content:
+                continue
+
+            raw = command if kind == "command" else (code if kind == "code" else content)
+            title = (command or code or content)[:80].strip()
+
+            # Avoid duplicate inserts
+            if content.lower() in existing_contents or title.lower() in existing_titles:
+                continue
+
+            note_id = _insert_topic_note(db, canonical_topic, raw, "ai", title)
+
+            if kind == "command":
+                subtype = "command"
+                excerpts = [{"language": "bash", "content": command}]
+            elif kind == "code":
+                subtype = "code"
+                excerpts = [{"language": language or _infer_local_topic(raw), "content": code or raw}]
+            else:
+                subtype = {"configuration": "configuration", "errors": "error_fix",
+                           "references": "reference"}.get(section.lower(), "concept")
+                excerpts = []
+
+            subc = str(item.get("subconcept") or "").strip()
+            if not subc:
+                subc = infer_subconcept(canonical_topic, title, section, content)
+
+            db.execute("""UPDATE notes SET technical_type = ?, topic_section = ?, essentials_json = ?,
+                excerpts_json = ?, formatted_content = ?, subconcept = ?, category = 'technical' WHERE id = ?""",
+                (subtype, section, json.dumps([content], ensure_ascii=False),
+                 json.dumps(excerpts, ensure_ascii=False), content, subc, note_id))
+            created_ids.append(note_id)
+            existing_contents.add(content.lower())
+            existing_titles.add(title.lower())
+
+        if created_ids:
+            sync_notes_json(db)
+
+    if not created_ids:
+        return {
+            "success": True,
+            "action": "already_covered",
+            "topic": canonical_topic,
+            "count": 0,
+            "message": f"Already covered in topic '{canonical_topic}'"
+        }
+
+    action = "merged" if match_type == "merge_candidate" else "created"
+    if action == "merged":
+        msg = f"Merged {len(created_ids)} notes into existing topic '{canonical_topic}'"
+    else:
+        msg = f"Created new dedicated topic '{canonical_topic}' with {len(created_ids)} notes"
+
+    return {
+        "success": True,
+        "action": action,
+        "topic": canonical_topic,
+        "count": len(created_ids),
+        "message": msg
+    }
+
+
+def _heuristic_upsert(raw_text: str, existing_summary: list[dict[str, Any]]) -> dict[str, Any]:
+    norm_raw = _normalise_similarity_text(raw_text)
+    # 1. Ignore if duplicate
+    for ex in existing_summary:
+        title = _normalise_similarity_text(ex.get("title", ""))
+        if title and (norm_raw == title or SequenceMatcher(None, norm_raw, title).ratio() > 0.88):
+            return {"action": "ignore"}
+
+    # 2. Check if belongs to existing domain/note to merge
+    inferred = _infer_local_topic(raw_text) or "General"
+    inferred_subc = infer_subconcept(inferred, raw_text, "", raw_text)
+    for ex in existing_summary:
+        ex_domain = str(ex.get("domain", "")).lower()
+        if ex_domain and ex_domain == inferred.lower():
+            return {
+                "action": "merge",
+                "existing_id": ex.get("id"),
+                "updated_subconcept": ex.get("subconcept") or inferred_subc,
+                "updated_content": raw_text
+            }
+
+    # 3. Otherwise create
+    return {
+        "action": "create",
+        "domain": inferred,
+        "subconcept": inferred_subc,
+        "formatted_content": raw_text
+    }
+
+
+def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_text = str(payload.get("raw_content") or payload.get("raw_text") or payload.get("text") or "").strip()
+    if not raw_text:
+        raise ValueError("The note is empty.")
+    if len(raw_text) > 200_000:
+        raise ValueError("The note is too large (maximum 200,000 characters).")
+
+    with database() as db:
+        rows = db.execute(
+            "SELECT id, topic, subconcept, title, raw_content FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50"
+        ).fetchall()
+        existing_summary = [
+            {
+                "id": str(r["id"]),
+                "domain": str(r["topic"] or "general").lower(),
+                "subconcept": str(r["subconcept"] or "Core"),
+                "title": str(r["title"] or r["raw_content"][:50]).strip(),
+            }
+            for r in rows
+        ]
+        domain_subconcepts: dict[str, set[str]] = {}
+        for r in rows:
+            dom = str(r["topic"] or "").strip()
+            subc = str(r["subconcept"] or "").strip()
+            if dom and subc and subc.lower() != "general":
+                domain_subconcepts.setdefault(dom, set()).add(subc)
+
+    subconcepts_text = "\n".join(
+        f"- {dom}: {', '.join(sorted(subcs))}"
+        for dom, subcs in sorted(domain_subconcepts.items())
+    ) or "- Docker: Containers & CLI, Images & Build, Volumes, Compose\n- Git: Core Git, Branching & Workflows, GitHub Actions, History & Inspection, State & Stash, Configuration"
+
+    prompt = (
+        "You are a technical knowledge manager. The user is submitting a new note.\n"
+        f"Here are their existing notes: {json.dumps(existing_summary, ensure_ascii=False)}.\n\n"
+        f"Current knowledge domains and their active subconcepts:\n{subconcepts_text}\n\n"
+        f"New note: {raw_text}.\n\n"
+        "You must decide how to process this and categorize it:\n\n"
+        "CREATE: If this is a new concept. You MUST assign a concise domain (e.g. Docker, Git, RabbitMQ, Rust) "
+        "and choose an appropriate subconcept (matching one of the domain's known subconcepts listed above if applicable, "
+        "or a clean new subconcept if it represents a distinct category). "
+        "Return: {\"action\": \"create\", \"domain\": \"Docker\", \"subconcept\": \"Compose\", \"formatted_content\": \"markdown text\"}.\n\n"
+        "MERGE: If this belongs inside an existing note, merge the info. "
+        "Return: {\"action\": \"merge\", \"existing_id\": \"1\", \"updated_subconcept\": \"Compose\", \"updated_content\": \"full rewritten markdown\"}.\n\n"
+        "IGNORE: If it's a duplicate. Return: {\"action\": \"ignore\"}."
+    )
+
+    parsed = None
+    try:
+        response, provider = _run_provider(
+            "You are a technical knowledge manager. Output strict JSON only.",
+            prompt
+        )
+        cleaned = response.strip()
+        fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
+        if fence:
+            cleaned = fence.group(1).strip()
+        parsed = json.loads(cleaned)
+    except Exception:
+        parsed = _heuristic_upsert(raw_text, existing_summary)
+
+    action = str(parsed.get("action", "create")).lower()
+
+    if action == "ignore":
+        return {
+            "success": True,
+            "action": "ignore",
+            "message": "Duplicate note ignored."
+        }
+
+    now = utc_now()
+    with database() as db:
+        if action == "merge":
+            existing_id = str(parsed.get("existing_id") or "").strip()
+            updated_subconcept = str(parsed.get("updated_subconcept") or "").strip()
+            updated_content = str(parsed.get("updated_content") or raw_text).strip()
+
+            target_row = None
+            if existing_id:
+                target_row = db.execute("SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL", (existing_id,)).fetchone()
+            if not target_row and existing_summary:
+                target_row = db.execute("SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL", (existing_summary[0]["id"],)).fetchone()
+
+            if target_row:
+                nid = target_row["id"]
+                subc = updated_subconcept or target_row["subconcept"] or "Core"
+                db.execute(
+                    """UPDATE notes SET
+                       formatted_content = ?,
+                       subconcept = ?,
+                       updated_at = ?
+                       WHERE id = ?""",
+                    (updated_content, subc, now, nid),
+                )
+                sync_notes_json(db)
+                updated_row = db.execute("SELECT * FROM notes WHERE id = ?", (nid,)).fetchone()
+                return {
+                    "success": True,
+                    "action": "merge",
+                    "note": _row_to_note(updated_row),
+                    "subconcept": subc,
+                    "message": f"Merged into note {nid}"
+                }
+
+        # Otherwise action == "create"
+        domain = str(parsed.get("domain") or _infer_local_topic(raw_text) or "General").strip()
+        subconcept = str(parsed.get("subconcept") or "").strip()
+        if not subconcept:
+            subconcept = infer_subconcept(domain, raw_text, "", raw_text)
+        formatted_content = str(parsed.get("formatted_content") or raw_text).strip()
+        note_id = str(uuid.uuid4())
+
+        is_cmd = raw_text.strip().startswith(("$", "docker ", "git ", "kubectl ", "pacman ", "systemctl ", "cargo ", "npm "))
+        tech_type = "command" if is_cmd else "concept"
+        sec = "commands" if is_cmd else "notes"
+        excerpts = [{"language": "bash", "content": raw_text.strip().lstrip("$ ").strip()}] if is_cmd else []
+        essentials = [formatted_content]
+
+        db.execute(
+            """INSERT INTO notes
+               (id, created_at, updated_at, raw_content, formatted_content, topic, subconcept,
+                status, category, keep_decision, technical_type, topic_section, essentials_json, excerpts_json, schema_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'formatted', 'technical', 'keep', ?, ?, ?, ?, ?)""",
+            (note_id, now, now, raw_text, formatted_content, domain, subconcept,
+             tech_type, sec, json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), SCHEMA_VERSION),
+        )
+        sync_notes_json(db)
+        new_row = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+        return {
+            "success": True,
+            "action": "create",
+            "note": _row_to_note(new_row),
+            "domain": domain,
+            "subconcept": subconcept,
+            "message": f"Created note in {domain} / {subconcept}"
+        }
+
+
 COMMANDS = {
+    "smart-upsert": smart_upsert,
+    "upsert": smart_upsert,
+    "refactor-subconcepts": refactor_subconcepts,
+    "generate-topic": generate_topic,
     "fill-topic": fill_topic,
     "accept-topic-line": accept_topic_line,
     "accept-all-topic-lines": accept_all_topic_lines,
@@ -1091,6 +1782,9 @@ COMMANDS = {
     "update": update_note,
     "delete": delete_note,
     "restore": restore_note,
+    "delete-topic": delete_topic,
+    "restore-topic": restore_topic,
+    "explain-flag": explain_flag,
     "organize": organize_note,
     "triage": triage_note,
     "retry": organize_note,

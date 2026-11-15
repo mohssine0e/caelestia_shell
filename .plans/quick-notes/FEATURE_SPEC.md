@@ -333,3 +333,44 @@ text for provenance.
 - [x] Update `NotesView.qml` `buildKnowledge()` to collect and expose dynamic sections, rendering custom headers with format-aware delegates (bullets, copyable command table, or code blocks).
 - [x] Keep Overview pinned first while rendering custom dynamic sections seamlessly alongside existing legacy notes.
 - [x] Add automated unit tests covering dynamic section suggestions and multi-kind candidate acceptance.
+
+## 16. Background AI topic generation (2026-11-14)
+
+- [x] Add an AI topic generation input field to the review window header next to Search (`AI generate topic…`).
+- [x] Implement backend `generate-topic` command producing 4-7 structured notes (Overview, workflows, CLI commands, code) from a raw prompt (e.g. `git workflow`, `docker networking`).
+- [x] Add background `Notes.generateTopic()` pipeline with asynchronous notification toasts and live focus auto-selection on completion.
+- [x] Enable text selection across all note sections, commands, code blocks, and source cards via `SelectableText.qml`.
+- [x] Run 24 unit tests covering topic generation, dynamic section extraction, and live shell reload.
+
+## 17. Recent additions indicator (2026-11-14)
+
+- [x] Add a subtle 5px primary dot indicator (`Colours.palette.m3primary`) to recently added items (<24h).
+- [x] Highlight recently created bullets in `InlineEntry.qml` (Overview, Notes, Configuration, Errors, References, and custom domain sections).
+- [x] Highlight recently created rows in the Commands table (standard and dynamic) and code cards.
+- [x] Display a tiny dot badge on topic pills in the header banner when the topic contains recently added notes.
+- [x] Show the recent dot in the Sources drawer alongside newly captured note cards.
+
+## 18. Window resizing & Assistant HUD sizing (2026-11-14)
+
+- [x] Enable manual window resizing on Quick Notes via `Super+x` (Hyprland window resize dispatcher) by expanding `minimumSize` and `maximumSize` constraints in `modules/notes/QuickNote.qml`.
+- [x] Enforce fixed initial window size on every open/switch (`600x150` for capture, `900x620` for review) via Hyprland window rules in `~/.config/hypr/hyprland/rules.lua` and `execs.lua`.
+- [x] Augment Assistant HUD initial window dimensions in `modules/assistant/AssistantHUD.qml` and `AssistantFloating.qml` (width up to 760px, empty viewport height up to 280px, total opening height ~480-500px).
+- [x] Verify live shell reload and window sizing across Hyprland clients.
+
+## 19. Topic destination feedback & duplicate prevention (2026-11-14)
+
+- [x] Implement `_find_topic_coverage` in `scripts/notes_backend.py` to classify incoming AI queries into `already_covered`, `merge_candidate`, or `new_topic`.
+- [x] Prevent duplicate insertions: if an exact topic or sub-topic is already covered in the database, return immediately without calling external AI providers.
+- [x] Deduplicate generated items against existing note titles and contents before inserting into an existing topic.
+- [x] Update `Notes.topicGenerated` signal to pass `(topic, count, action, message)`.
+- [x] Add an interactive header feedback pill in `NotesView.qml` top bar displaying the action icon and destination description (e.g., `Already covered in topic 'Git'`, `Merged 5 notes into existing topic 'Git'`, or `Created new dedicated topic 'Rust' with 5 notes`).
+- [x] Add automated unit tests covering exact duplicate detection, subtopic coverage check, and merge behavior (26 tests passing).
+
+## 20. Type-based contextual highlights (2026-11-14)
+
+- [x] Retain recent dot indicator solely on banner topic/tag pills (`hasRecent`).
+- [x] Remove separate floating indicator dots from note lines, commands, code blocks, and source cards.
+- [x] Highlight bullet sections (Overview, Notes, Configuration, dynamic bullets) by transforming the bullet dot itself (7px primary dot with soft halo on recent items vs 4px muted dot on standard items).
+- [x] Highlight Commands section by styling recent command syntax in terminal green (`Colours.palette.m3success || "#4ade80"`).
+- [x] Highlight Code cards with subtle primary border tinting on recent snippets.
+- [x] Replace unsupported `trimEnd()` with `replace(/\s+$/, "")` in `NotesView.qml`.
