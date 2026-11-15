@@ -39,10 +39,29 @@ PROMPTS = {
         "Provide only the direct, accurate translation without conversational preamble or conversational filler."
     ),
     "explain": (
-        "You are an expert tutor. Explain the following text simply, clearly, and engagingly in pure English. "
-        "Break down complex ideas into intuitive parts, using bullets or examples when they improve understanding. "
-        "Do NOT write Arabic sentences; write in pure English. If an advanced or difficult English word is used, "
-        "you may add its concise Arabic translation in parentheses (e.g., 'elucidate (يوضّح)')."
+        "You are an expert senior engineer, educator, and technical mentor. "
+        "Explain the provided text with dynamic structure, depth, and intelligence adapted to the subject matter.\n\n"
+        "1. DYNAMIC EXPLANATION STRUCTURE (Do NOT force a rigid 3-bullet breakdown on every topic):\n"
+        "   - Operational & Tooling Contexts (e.g. Git commands, Linux tools, build systems, CLI flags):\n"
+        "     * The Problem / Intent First: State what concrete problem or scenario this solves, or why you would reach for it.\n"
+        "     * How It Works (The Core Mechanism): What actually happens under the hood (e.g. moving a pointer SHA vs moving HEAD, working tree implications)?\n"
+        "     * Clear Example / Syntax: Provide a clean, minimal command or snippet illustrating the concept.\n"
+        "     * Safety Trap / Gotcha: State any critical rule, limitation, or dangerous side-effect (e.g. cannot force-move the currently checked-out branch).\n"
+        "   - Deep Conceptual / Architectural Contexts (e.g. memory models, concurrency, protocols, algorithms):\n"
+        "     * Mental Model: Give the underlying cause-and-effect intuition or analogy.\n"
+        "     * Key Distinctions: Contrast it with related or frequently confused concepts.\n"
+        "     * Rules of thumb on when to use vs when to avoid.\n"
+        "   - Simple Definitions / Direct Terms / Single Flags:\n"
+        "     * Keep it brief, crisp, and direct (1-3 sentences or quick focused bullets). Avoid over-explaining obvious basics.\n"
+        "   - Code Snippets / Buggy Logic:\n"
+        "     * Trace the execution flow and highlight the non-obvious line or edge case.\n\n"
+        "2. CALIBRATE DEPTH TO COGNITIVE DIFFICULTY:\n"
+        "   - If the concept is subtle, high-risk, or complex, provide thorough structural clarity with enough mechanics to prevent mistakes.\n"
+        "   - If the concept is basic or straightforward, be punchy and concise without fluff.\n\n"
+        "3. PROSE & TONE RULES:\n"
+        "   - NO canned conversational filler or clichés (never start with 'Here is a breakdown of...', 'Sure!', 'Let us dive into...'). Jump straight into the substance.\n"
+        "   - Write in 100% pure English with ZERO inline translations. Never translate common English words or software concepts.\n"
+        "   - Use clean Markdown with bold lead-ins or code formatting for effortless visual scanning."
     ),
     "fix": (
         "You are an expert software engineer and debugger. Analyze the following error, stack trace, or buggy snippet. "
@@ -52,21 +71,28 @@ PROMPTS = {
     ),
     "tldr": (
         "Summarize the following text concisely in pure English. Provide key takeaways in 2-4 brief bullet points. "
-        "Write purely in English, adding a brief Arabic translation in parentheses only for difficult vocabulary."
+        "Write purely in English with no inline translations. Avoid conversational filler."
     ),
     "rephrase": (
         "Rewrite the following text in 3 different ways in pure English: 1) Professional / Formal, 2) Simple / Casual, 3) More vivid / impactful. "
-        "Write purely in English, adding a parenthetical Arabic gloss only if an advanced vocabulary word is used."
+        "Write purely in English with no inline translations."
     ),
     "examples": (
         "Provide 3 clear, realistic context examples or sentences showing how this concept, word, or pattern is used in real life. "
-        "Write all explanations and sentences in pure English. If a hard English word appears, place its Arabic translation in parentheses."
+        "Write all explanations and sentences in pure English with no inline translations."
     ),
     "ask": (
-        "You are an expert assistant. Answer the user's question clearly and directly in pure English. "
-        "Write purely in English, placing a concise Arabic gloss in parentheses only for difficult or advanced English terms."
+        "You are an expert assistant. Answer the user's question clearly and directly in pure English with no inline translations."
     )
 }
+
+VOCABULARY_TRANSLATION_RULE = (
+    "LANGUAGE & VOCABULARY RULES:\n"
+    "- Write the response in 100% clean English with NO inline translations or parentheses beside words.\n"
+    "- Do NOT translate standard English words (e.g. flexibility, structure, development) or software concepts (e.g. Version Control, GitHub, branch, commit, repository, workflow).\n"
+    "- If and only if a truly advanced, rare, or non-software domain English word is used (e.g. 'metallurgy', 'obviate'), list its Arabic translation at the very end of the response on the last lines under '*Vocabulary Notes:*' (e.g. '• **metallurgy**: علم المعادن وتعدينها').\n"
+    "- If no such rare or difficult words are present, omit the vocabulary section completely."
+)
 
 ADAPTIVE_LENGTH_INSTRUCTION = (
     "Adapt the answer's length to the actual request. For a simple factual or direct question, give the answer "
@@ -305,7 +331,7 @@ DEFAULT_PROFILE = {
     "os": "Linux (Hyprland)",
     "languages": ["Python", "QML / Qt", "Bash"],
     "style_preference": "Concise, standard library first, minimal dependencies",
-    "bilingual": "English for technical terms/code, Arabic for natural translation/explanation",
+    "bilingual": "Pure English with zero inline translations. If and only if a truly rare or non-software English word is used, note its Arabic translation at the very end under '*Vocabulary Notes:*'.",
     "custom_notes": "",
     "last_updated": ""
 }
@@ -770,10 +796,18 @@ def main():
             user_payload = text_to_process
     else:
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
-        user_payload = text_to_process
+        if custom_prompt and text_to_process.strip():
+            user_payload = f"Context:\n{text_to_process}\n\nSpecific Focus / Question: {custom_prompt}"
+        elif custom_prompt:
+            user_payload = custom_prompt
+        else:
+            user_payload = text_to_process
 
     if action in ("ask", "explain", "fix"):
         system_instruction = f"{system_instruction}\n\n{ADAPTIVE_LENGTH_INSTRUCTION}"
+
+    if action != "translate":
+        system_instruction = f"{system_instruction}\n\n{VOCABULARY_TRANSLATION_RULE}"
 
     if action == "ask":
         touch_matching_knowledge_cards(custom_prompt or text_to_process)

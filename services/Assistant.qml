@@ -85,7 +85,7 @@ Singleton {
         "os": "Linux (Hyprland)",
         "languages": ["Python", "QML / Qt", "Bash"],
         "style_preference": "Concise, standard library first, minimal dependencies",
-        "bilingual": "English for technical terms/code, Arabic for natural translation/explanation",
+        "bilingual": "Pure English explanations with zero inline translations. Do not translate common English words or software concepts. If and only if an advanced/rare English vocabulary word is used, note its Arabic translation at the very end under '*Vocabulary Notes:*'.",
         "custom_notes": "",
         "last_updated": "2026-10-14"
     })

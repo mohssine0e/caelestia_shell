@@ -74,7 +74,7 @@ Scope {
 
                 implicitWidth: hudCard.implicitWidth
                 implicitHeight: hudCard.implicitHeight
-                minimumSize.width: Math.min(520, Math.round(loader.modelData.width * 0.94))
+                minimumSize.width: Math.min(560, Math.round(loader.modelData.width * 0.94))
                 minimumSize.height: hudCard.minimumHudHeight
                 maximumSize.width: Math.max(minimumSize.width, Math.round(loader.modelData.width * 0.94))
                 maximumSize.height: Math.max(minimumSize.height, Math.round(loader.modelData.height * 0.9))

@@ -88,7 +88,7 @@ FocusScope {
 
 
     focus: true
-    implicitWidth: Math.min(root.currentView === "assistant" ? 640 : 680, root.maximumHudWidth)
+    implicitWidth: Math.min(root.currentView === "assistant" ? 760 : 800, root.maximumHudWidth)
     implicitHeight: Math.min(mainCard.implicitHeight, root.maximumHudHeight)
     readonly property real assistantChromeHeight: headerContainer.implicitHeight
         + snippetCard.implicitHeight
@@ -99,20 +99,20 @@ FocusScope {
         + 2
         + (inlineErrorPanel.visible ? inlineErrorPanel.implicitHeight : 0)
     readonly property real maxResponseViewportHeight: Math.max(0, root.maximumHudHeight - root.assistantChromeHeight)
-    readonly property real minimumResponseViewportHeight: Math.min(140, root.maxResponseViewportHeight)
+    readonly property real minimumResponseViewportHeight: Math.min(220, root.maxResponseViewportHeight)
     readonly property real preferredResponseViewportHeight: {
-        if (Assistant.isLoading && Assistant.messages.length === 0) return 220
-        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 200
-        if (Assistant.messages.length === 0) return 180
-        if (Assistant.isGenerating) return 160
-        return Math.max(180, chatList.contentHeight + Tokens.padding.medium * 2)
+        if (Assistant.isLoading && Assistant.messages.length === 0) return 320
+        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 280
+        if (Assistant.messages.length === 0) return 280
+        if (Assistant.isGenerating) return 240
+        return Math.max(280, chatList.contentHeight + Tokens.padding.medium * 2)
     }
     readonly property real preferredAssistantHeight: Math.min(root.maximumHudHeight,
         root.assistantChromeHeight + Math.min(root.maxResponseViewportHeight, root.preferredResponseViewportHeight))
     readonly property real minimumHudHeight: Math.min(root.maximumHudHeight,
         root.currentView === "assistant"
             ? root.assistantChromeHeight + root.minimumResponseViewportHeight
-            : Math.max(420, Math.min(460, root.maximumHudHeight)))
+            : Math.max(480, Math.min(540, root.maximumHudHeight)))
 
     Behavior on implicitHeight {
         enabled: root.currentView === "assistant"
