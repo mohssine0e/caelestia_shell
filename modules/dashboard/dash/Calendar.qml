@@ -29,12 +29,15 @@ CustomMouseArea {
     property real animTranslate
     property real animOpacity: 1
 
-    function onWheel(event: WheelEvent): void {
-        if (event.angleDelta.y > 0)
-            screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth - 1, 1);
-        else if (event.angleDelta.y < 0)
-            screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth + 1, 1);
+    readonly property bool compact: width < 650
+    property bool showMonth: false
+    property bool showLaterEvents: false
+    readonly property string agendaEndKey: {
+        const parts = todayKey.split("-").map(Number);
+        const end = new Date(parts[0], parts[1] - 1, parts[2] + 14);
+        return dateToKey(end);
     }
+    readonly property bool hasLaterEvents: Object.keys(gcalEvents).some(k => k >= agendaEndKey && gcalEvents[k].length > 0)
 
     property var gcalEvents: ({})
     property bool gcalConfigured: false
@@ -43,7 +46,6 @@ CustomMouseArea {
     onIsAddingEventChanged: root.screenState.dashboardNeedsFocus = root.isAddingEvent
 
     // Reactive date from Time service (auto-updates at midnight)
-    readonly property date todayDate: Time.date
     readonly property string todayKey: dateToKey(Time.date)
     readonly property string effectiveDateKey: selectedDateKey !== "" ? selectedDateKey : todayKey
 
@@ -125,12 +127,12 @@ CustomMouseArea {
             return items;
         }
 
-        // Mode 2: Full upcoming agenda feed (Today + Next 14 active days)
+        // Build from the day key, not the second-by-second clock.
         const result = [];
         const todayStr = root.todayKey;
-        const sortedKeys = Object.keys(root.gcalEvents).filter(k => k >= todayStr).sort();
-
-        const todayObj = new Date(Time.date.getFullYear(), Time.date.getMonth(), Time.date.getDate());
+        const todayParts = todayStr.split("-").map(Number);
+        const todayObj = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
+        const sortedKeys = Object.keys(root.gcalEvents).filter(k => k >= todayStr && (root.showLaterEvents || k < root.agendaEndKey)).sort();
         const tomorrowObj = new Date(todayObj);
         tomorrowObj.setDate(todayObj.getDate() + 1);
         const tomorrowKey = root.dateToKey(tomorrowObj);
@@ -183,7 +185,6 @@ CustomMouseArea {
         }
 
         // Future active days
-        let addedDays = 0;
         for (let k of sortedKeys) {
             if (k === todayStr) continue;
             const evs = root.gcalEvents[k] || [];
@@ -229,8 +230,6 @@ CustomMouseArea {
                 });
             }
 
-            addedDays++;
-            if (addedDays >= 14) break;
         }
 
         return result;
@@ -452,9 +451,21 @@ CustomMouseArea {
 
             Item { Layout.fillWidth: true }
 
+            IconButton {
+                visible: root.compact
+                icon: root.showMonth ? "view_agenda" : "calendar_month"
+                isRound: true
+                type: IconButton.Text
+                onClicked: root.showMonth = !root.showMonth
+                ToolTip.visible: hovered
+                ToolTip.text: root.showMonth ? "Show agenda" : "Browse dates"
+            }
+
             // Filter status / Reset button
             IconButton {
                 icon: "view_agenda"
+                ToolTip.visible: hovered
+                ToolTip.text: "Back to upcoming events"
                 isRound: true
                 type: IconButton.Tonal
                 font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
@@ -468,6 +479,8 @@ CustomMouseArea {
 
             IconButton {
                 icon: "today"
+                ToolTip.visible: hovered
+                ToolTip.text: "Back to today"
                 isRound: true
                 type: IconButton.Text
                 font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
@@ -480,6 +493,8 @@ CustomMouseArea {
 
             IconButton {
                 icon: root.isAddingEvent ? "remove" : "add"
+                ToolTip.visible: hovered
+                ToolTip.text: root.isAddingEvent ? "Cancel new event" : "Add event"
                 isRound: true
                 type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
                 font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
@@ -489,6 +504,8 @@ CustomMouseArea {
 
             IconButton {
                 id: syncBtn
+                ToolTip.visible: hovered
+                ToolTip.text: syncProc.running ? "Syncing calendar…" : "Sync calendar"
                 icon: "sync"
                 isRound: true
                 type: IconButton.Text
@@ -576,13 +593,16 @@ CustomMouseArea {
 
         // Main Side-by-Side Split Body
         RowLayout {
+            id: splitBody
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Tokens.spacing.large
+            spacing: 20
 
             // LEFT PANE: Spacious Month Navigator
             ColumnLayout {
-                Layout.preferredWidth: 330
+                visible: !root.compact || root.showMonth
+                Layout.preferredWidth: root.compact ? splitBody.width : 276
+                Layout.maximumWidth: root.compact ? splitBody.width : 276
                 Layout.fillHeight: true
                 spacing: Tokens.spacing.small
 
@@ -652,7 +672,8 @@ CustomMouseArea {
                 MonthGrid {
                     id: grid
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 234
+                    Layout.minimumHeight: 210
 
                     month: root.currMonth
                     year: root.currYear
@@ -693,6 +714,7 @@ CustomMouseArea {
                             visible: !dayItem.isToday && !dayItem.isSelected
                             onClicked: {
                                 root.isAddingEvent = false;
+                                root.showMonth = false;
                                 if (root.selectedDateKey === dayItem.dayKey) {
                                     root.selectedDateKey = "";
                                 } else {
@@ -703,9 +725,13 @@ CustomMouseArea {
 
                         MouseArea {
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            ToolTip.visible: containsMouse && dayItem.eventsCount > 0
+                            ToolTip.text: dayItem.eventsCount + (dayItem.eventsCount === 1 ? " event" : " events")
                             onClicked: {
                                 root.isAddingEvent = false;
+                                root.showMonth = false;
                                 if (root.selectedDateKey === dayItem.dayKey) {
                                     root.selectedDateKey = "";
                                 } else {
@@ -748,13 +774,30 @@ CustomMouseArea {
                                     color: dayItem.isToday ? Colours.palette.m3onPrimary : Colours.palette.m3tertiary
                                 }
                             }
+                            StyledText {
+                                visible: dayItem.eventsCount > 3
+                                text: "+"
+                                font.pixelSize: 9
+                                color: dayItem.isToday ? Colours.palette.m3onPrimary : Colours.palette.m3tertiary
+                            }
                         }
                     }
+                }
+
+                Item { Layout.fillHeight: true }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    text: root.selectedDateKey ? "Showing selected day" : "Select a day to see its schedule"
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3onSurfaceVariant
+                    wrapMode: Text.WordWrap
                 }
             }
 
             // VERTICAL SEPARATOR
             Rectangle {
+                visible: !root.compact
                 width: 1
                 Layout.fillHeight: true
                 color: Colours.palette.m3outlineVariant
@@ -763,6 +806,7 @@ CustomMouseArea {
 
             // RIGHT PANE: Spacious Multi-Day Event Cards
             ColumnLayout {
+                visible: !root.compact || !root.showMonth
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: Tokens.spacing.small
@@ -773,10 +817,11 @@ CustomMouseArea {
                     spacing: Tokens.spacing.small
 
                     StyledText {
-                        text: root.selectedDateKey !== "" ? ("Schedule for " + root.formatDateStr(root.selectedDateKey)) : "Upcoming Agenda"
+                        text: root.selectedDateKey !== "" ? root.formatDateStr(root.selectedDateKey) : root.showLaterEvents ? "Upcoming" : "Next 14 days"
                         font: Tokens.font.title.small
                         color: Colours.palette.m3onSurface
                         Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
                     }
 
                     Rectangle {
@@ -801,204 +846,180 @@ CustomMouseArea {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    spacing: Tokens.spacing.small
+                    spacing: 4
                     boundsBehavior: Flickable.StopAtBounds
 
                     model: root.flatAgendaItems
 
+                    footer: Item {
+                        width: agendaView.width - 12
+                        height: laterLink.visible ? 40 : 8
+
+                        StyledText {
+                            id: laterLink
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: !root.selectedDateKey && root.hasLaterEvents
+                            text: root.showLaterEvents ? "Show next 14 days only" : "Show later events"
+                            color: Colours.palette.m3primary
+                            font: Tokens.font.label.medium
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: laterLink.visible
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.showLaterEvents = !root.showLaterEvents;
+                                agendaView.positionViewAtBeginning();
+                            }
+                        }
+                    }
+
                     StyledScrollBar.vertical: StyledScrollBar {
                         flickable: agendaView
+                        policy: ScrollBar.AlwaysOn
+                    }
+
+                    Connections {
+                        target: root
+                        function onSelectedDateKeyChanged() { agendaView.positionViewAtBeginning(); }
                     }
 
                     delegate: Item {
                         id: delegateRoot
                         required property var modelData
+                        required property int index
 
-                        width: agendaView.width - Tokens.padding.small
-                        implicitHeight: modelData.isHeader ? headerCol.implicitHeight + 4 : (modelData.isEmptyNotice ? emptyCard.implicitHeight : eventCard.implicitHeight)
+                        width: agendaView.width - 12
+                        implicitHeight: modelData.isHeader ? dayHeading.implicitHeight + (index > 0 ? 12 : 0)
+                            : modelData.isEmptyNotice ? emptyLabel.implicitHeight + 8 : eventCard.implicitHeight
 
-                        // 1. SECTION HEADER DELEGATE
                         RowLayout {
-                            id: headerCol
+                            id: dayHeading
+                            anchors.bottom: parent.bottom
                             width: parent.width
                             visible: delegateRoot.modelData.isHeader
-                            spacing: Tokens.spacing.small
+                            spacing: 10
 
-                            Rectangle {
-                                radius: 6
-                                color: Colours.palette.m3primaryContainer
-                                implicitHeight: 24
-                                implicitWidth: headerText.implicitWidth + 14
-
-                                StyledText {
-                                    id: headerText
-                                    anchors.centerIn: parent
-                                    text: delegateRoot.modelData.title || ""
-                                    font: Tokens.font.label.builders.small.weight(Font.Bold).build()
-                                    color: Colours.palette.m3onPrimaryContainer
-                                }
-                            }
-
-                            Rectangle {
+                            StyledText {
                                 Layout.fillWidth: true
-                                height: 1
-                                color: Colours.palette.m3outlineVariant
-                                opacity: 0.3
+                                text: (delegateRoot.modelData.title || "").replace(" • ", "  ·  ")
+                                font: Tokens.font.label.builders.small.weight(Font.DemiBold).build()
+                                color: Colours.palette.m3primary
+                                wrapMode: Text.WordWrap
+                            }
+
+                            StyledText {
+                                text: (root.gcalEvents[delegateRoot.modelData.dateKey] || []).length
+                                font: Tokens.font.label.small
+                                color: Colours.palette.m3onSurfaceVariant
                             }
                         }
 
-                        // 2. EMPTY NOTICE CARD
-                        Rectangle {
-                            id: emptyCard
+                        StyledText {
+                            id: emptyLabel
                             width: parent.width
+                            anchors.verticalCenter: parent.verticalCenter
                             visible: delegateRoot.modelData.isEmptyNotice
-                            radius: Tokens.rounding.medium
-                            color: Colours.palette.m3surfaceContainerLow
-                            border.width: 1
-                            border.color: Colours.palette.m3outlineVariant
-                            implicitHeight: 46
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: Tokens.padding.small
-                                spacing: Tokens.spacing.small
-
-                                MaterialIcon {
-                                    text: "event_available"
-                                    color: Colours.palette.m3outline
-                                    fontStyle: Tokens.font.icon.small
-                                }
-
-                                StyledText {
-                                    text: delegateRoot.modelData.title || "Nothing scheduled"
-                                    font: Tokens.font.body.builders.small.italic(true).build()
-                                    color: Colours.palette.m3outline
-                                    Layout.fillWidth: true
-                                }
-                            }
+                            text: delegateRoot.modelData.title || "Nothing scheduled"
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurfaceVariant
+                            wrapMode: Text.WordWrap
                         }
 
-                        // 3. MODERN MATERIAL 3 EVENT CARD
                         Rectangle {
                             id: eventCard
                             width: parent.width
                             visible: !delegateRoot.modelData.isHeader && !delegateRoot.modelData.isEmptyNotice
-                            radius: Tokens.rounding.medium
-                            color: cardMouse.containsMouse ? Colours.palette.m3surfaceContainerHighest : Colours.palette.m3surfaceContainerHigh
-                            border.width: 1
-                            border.color: cardMouse.containsMouse ? Colours.palette.m3outline : Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-                            implicitHeight: cardRow.implicitHeight + Tokens.padding.small * 2
+                            radius: Tokens.rounding.small
+                            color: eventHover.hovered ? Colours.palette.m3surfaceContainerHigh : "transparent"
+                            implicitHeight: eventContent.implicitHeight + 12
 
-                            Behavior on color { Anim { type: Anim.FastEffects } }
-                            Behavior on border.color { Anim { type: Anim.FastEffects } }
+                            HoverHandler { id: eventHover }
 
-                            MouseArea {
-                                id: cardMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.topMargin: 9
+                                width: 3
+                                height: 16
+                                radius: 1.5
+                                color: delegateRoot.modelData.is_local ? Colours.palette.m3secondary : Colours.palette.m3primary
                             }
 
-                            RowLayout {
-                                id: cardRow
-                                anchors.fill: parent
-                                anchors.margins: Tokens.padding.small
-                                spacing: Tokens.spacing.medium
+                            ColumnLayout {
+                                id: eventContent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 14
+                                anchors.rightMargin: 8
+                                anchors.topMargin: 6
+                                spacing: 3
 
-                                // Left accent strip
-                                Rectangle {
-                                    width: 4
-                                    Layout.fillHeight: true
-                                    radius: 2
-                                    color: delegateRoot.modelData.is_local ? Colours.palette.m3secondary : Colours.palette.m3primary
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: delegateRoot.modelData.title || "Untitled"
+                                    font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                                    color: Colours.palette.m3onSurface
+                                    wrapMode: Text.Wrap
                                 }
 
-                                // Event content column
-                                ColumnLayout {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 2
+                                    spacing: 8
 
                                     StyledText {
-                                        text: delegateRoot.modelData.title || "Untitled"
-                                        font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
-                                        color: Colours.palette.m3onSurface
-                                        elide: Text.ElideRight
                                         Layout.fillWidth: true
-                                    }
-
-                                    StyledText {
-                                        text: delegateRoot.modelData.location || ""
+                                        text: delegateRoot.modelData.time || "All day"
                                         font: Tokens.font.label.small
                                         color: Colours.palette.m3onSurfaceVariant
-                                        elide: Text.ElideRight
-                                        visible: text !== ""
-                                        Layout.fillWidth: true
-                                    }
-                                }
-
-                                // Right Controls Row
-                                RowLayout {
-                                    spacing: Tokens.spacing.small
-                                    Layout.alignment: Qt.AlignVCenter
-
-                                    // Time Badge
-                                    Rectangle {
-                                        radius: 6
-                                        color: delegateRoot.modelData.all_day ? Colours.palette.m3surfaceContainerHighest : Colours.palette.m3secondaryContainer
-                                        implicitHeight: 24
-                                        implicitWidth: timeBadgeText.implicitWidth + 14
-
-                                        StyledText {
-                                            id: timeBadgeText
-                                            anchors.centerIn: parent
-                                            text: delegateRoot.modelData.time || "All day"
-                                            font: Tokens.font.label.small
-                                            color: delegateRoot.modelData.all_day ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3onSecondaryContainer
-                                        }
+                                        wrapMode: Text.WordWrap
                                     }
 
-                                    // Join Meeting Button Chip
-                                    Rectangle {
-                                        visible: delegateRoot.modelData.meetUrl !== ""
-                                        radius: 6
-                                        color: Colours.palette.m3primary
-                                        implicitHeight: 24
-                                        implicitWidth: joinChipText.implicitWidth + 16
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: Qt.openUrlExternally(delegateRoot.modelData.meetUrl)
-                                        }
-
-                                        RowLayout {
-                                            anchors.centerIn: parent
-                                            spacing: 3
-                                            MaterialIcon {
-                                                text: "videocam"
-                                                color: Colours.palette.m3onPrimary
-                                                fontStyle: Tokens.font.icon.small
-                                            }
-                                            StyledText {
-                                                id: joinChipText
-                                                text: "Join"
-                                                font: Tokens.font.label.builders.small.weight(Font.Bold).build()
-                                                color: Colours.palette.m3onPrimary
-                                            }
-                                        }
-                                    }
-
-                                    // Delete Button (Local Events Only)
                                     IconButton {
-                                        icon: "delete"
+                                        visible: delegateRoot.modelData.meetUrl !== ""
+                                        icon: "videocam"
+                                        type: IconButton.Tonal
                                         isRound: true
-                                        type: IconButton.Text
-                                        font: Tokens.font.icon.builders.small.weight(Font.Normal).build()
-                                        padding: 2
+                                        padding: 4
+                                        font: Tokens.font.icon.small
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Open meeting link"
+                                        onClicked: Qt.openUrlExternally(delegateRoot.modelData.meetUrl)
+                                    }
+
+                                    IconButton {
                                         visible: delegateRoot.modelData.is_local
-                                        opacity: cardMouse.containsMouse ? 1 : 0.4
+                                        icon: "delete"
+                                        type: IconButton.Text
+                                        isRound: true
+                                        padding: 4
+                                        font: Tokens.font.icon.small
+                                        opacity: hovered || eventHover.hovered ? 1 : 0.5
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Delete local event"
                                         onClicked: root.deleteLocalEvent(delegateRoot.modelData.dateKey, delegateRoot.modelData.id, delegateRoot.modelData.title)
                                     }
                                 }
+
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    visible: text !== ""
+                                    text: delegateRoot.modelData.location || ""
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3onSurfaceVariant
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                anchors.left: parent.left
+                                anchors.leftMargin: 14
+                                anchors.right: parent.right
+                                height: 1
+                                color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
                             }
                         }
                     }
