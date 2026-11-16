@@ -204,7 +204,7 @@ Item {
 
         // TRANSLATORS: %1 = system uptime, e.g. "2 days, 3 hours"
         text: Tr.trCtx("up %1", "system uptime").arg(SysInfo.uptimeShort)
-        width: Tokens.sizes.dashboard.userWidth - x - Tokens.padding.extraLarge
+        width: Math.max(0, root.parent.width - x - Tokens.padding.extraLarge)
         elide: Text.ElideRight
     }
 
@@ -270,7 +270,7 @@ Item {
                 text: SysInfo.wm + "..."
                 color: Colours.palette.m3onSecondaryContainer
                 font: Tokens.font.body.builders.small.vaxis("slnt", -4).build()
-                width: Math.min(implicitWidth, Tokens.sizes.dashboard.userWidth - wmContainer.x - Tokens.padding.medium * 2 - wmIcon.implicitWidth - wmLabel.spacing - Tokens.padding.extraLarge)
+                width: Math.max(0, Math.min(implicitWidth, root.parent.width - wmContainer.x - Tokens.padding.medium * 2 - wmIcon.implicitWidth - wmLabel.spacing - Tokens.padding.extraLarge))
                 elide: Text.ElideRight
             }
         }

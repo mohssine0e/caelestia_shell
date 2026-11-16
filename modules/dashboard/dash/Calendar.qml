@@ -29,33 +29,53 @@ CustomMouseArea {
     property real animTranslate
     property real animOpacity: 1
 
-    function onWheel(event: WheelEvent): void {
-        if (event.angleDelta.y > 0)
-            screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth - 1, 1);
-        else if (event.angleDelta.y < 0)
-            screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth + 1, 1);
-    }
-
     property var gcalEvents: ({})
     property bool gcalConfigured: false
     property string selectedDateKey: ""
     property bool isAddingEvent: false
     onIsAddingEventChanged: root.screenState.dashboardNeedsFocus = root.isAddingEvent
 
-    readonly property string effectiveDateKey: selectedDateKey !== "" ? selectedDateKey : dateToKey(new Date())
-    readonly property var currentDayEvents: gcalEvents[effectiveDateKey] || []
+    readonly property string todayKey: dateToKey(Time.date)
+    readonly property string effectiveDateKey: selectedDateKey !== "" ? selectedDateKey : todayKey
 
-    readonly property var nextUpcomingEvent: {
-        const todayStr = root.dateToKey(new Date());
-        const keys = Object.keys(root.gcalEvents).filter(k => k >= todayStr).sort();
-        if (keys.length > 0) {
-            const nextDate = keys[0];
-            const evs = root.gcalEvents[nextDate];
-            if (evs && evs.length > 0) {
-                return { dateKey: nextDate, event: evs[0] };
+    function formatAgendaDate(key: string): string {
+        const parts = key.split("-").map(Number);
+        if (parts.length !== 3) return key;
+        return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString(Qt.locale(), "ddd, MMM d");
+    }
+
+    readonly property var agendaItems: {
+        const today = root.todayKey;
+        const parts = today.split("-").map(Number);
+        const tomorrow = new Date(parts[0], parts[1] - 1, parts[2] + 1);
+        const tomorrowKey = root.dateToKey(tomorrow);
+        const end = new Date(parts[0], parts[1] - 1, parts[2] + 14);
+        const endKey = root.dateToKey(end);
+        const keys = root.selectedDateKey ? [root.selectedDateKey]
+            : [today].concat(Object.keys(root.gcalEvents).filter(key => key > today && key < endKey).sort());
+        const result = [];
+        for (const key of keys) {
+            const events = (root.gcalEvents[key] || []).slice().sort((a, b) =>
+                (Number(!!a.all_day) - Number(!!b.all_day)) * -1 || String(a.time || "").localeCompare(String(b.time || "")));
+            if (events.length === 0 && key !== today && key !== root.selectedDateKey)
+                continue;
+            const allDayCount = events.filter(event =>
+                event.all_day || !String(event.time || "").trim() || /^all\s*day$/i.test(String(event.time).trim())).length;
+            const dayTitle = key === today ? "TODAY" : key === tomorrowKey ? "TOMORROW" : root.formatAgendaDate(key);
+            const countLabel = events.length === 0 ? "" :
+                allDayCount === events.length ? ` · ${events.length} all-day ${events.length === 1 ? "event" : "events"}` :
+                ` · ${events.length} ${events.length === 1 ? "event" : "events"}${allDayCount ? `, ${allDayCount} all day` : ""}`;
+            result.push({ kind: "heading", title: dayTitle + countLabel });
+            if (events.length === 0)
+                result.push({ kind: "empty", title: key === today ? "No events today" : "No events scheduled" });
+            for (const event of events) {
+                const time = String(event.time || "").trim();
+                const isAllDay = event.all_day || !time || /^all\s*day$/i.test(time);
+                result.push({ kind: "event", title: event.title || "Untitled Event",
+                    time: isAllDay ? "" : time, location: event.location || "" });
             }
         }
-        return null;
+        return result;
     }
 
     function dateToKey(d: var): string {
@@ -158,7 +178,7 @@ CustomMouseArea {
 
     anchors.left: parent.left
     anchors.right: parent.right
-    implicitHeight: inner.implicitHeight + inner.anchors.margins * 2
+    implicitHeight: 360
 
     acceptedButtons: Qt.MiddleButton
     onClicked: root.screenState.dashboardDate = new Date()
@@ -212,10 +232,20 @@ CustomMouseArea {
 
     ColumnLayout {
         id: inner
-
         anchors.fill: parent
         anchors.margins: Tokens.padding.large
         spacing: Tokens.spacing.extraSmall
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Tokens.spacing.medium
+
+            ColumnLayout {
+                Layout.preferredWidth: 330
+                Layout.maximumWidth: 330
+                Layout.fillHeight: true
+                spacing: Tokens.spacing.extraSmall
 
         RowLayout {
             id: monthNavigationRow
@@ -266,26 +296,7 @@ CustomMouseArea {
                     anchors.centerIn: parent
                     text: grid.title
                     color: Colours.palette.m3primary
-                    font: Tokens.font.title.builders.small.capitalisation(Font.Capitalize).build()
-                }
-            }
-
-            IconButton {
-                id: syncBtn
-                isRound: true
-                icon: "sync"
-                type: IconButton.Text
-                font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                padding: Tokens.padding.small
-                enabled: !syncProc.running
-                onClicked: syncProc.running = true
-
-                NumberAnimation on rotation {
-                    running: syncProc.running
-                    loops: Animation.Infinite
-                    from: 0
-                    to: 360
-                    duration: 1000
+                    font: Tokens.font.title.builders.medium.capitalisation(Font.Capitalize).build()
                 }
             }
 
@@ -310,13 +321,14 @@ CustomMouseArea {
 
                 horizontalAlignment: Text.AlignHCenter
                 text: model.shortName
-                font: Tokens.font.body.builders.small.weight(Font.Medium).build()
+                font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
                 color: (model.day === 0 || model.day === 6) ? Colours.palette.m3tertiary : Colours.palette.m3onSurface
             }
         }
 
         Item {
             Layout.fillWidth: true
+            Layout.fillHeight: true
             implicitHeight: grid.implicitHeight
 
             opacity: root.animOpacity
@@ -391,7 +403,7 @@ CustomMouseArea {
                             return Colours.palette.m3onSurfaceVariant;
                         }
                         opacity: dayItem.model.today || dayItem.model.month === grid.month ? 1 : 0.4
-                        font: Tokens.font.body.small
+                        font: Tokens.font.body.medium
                     }
 
                     Rectangle {
@@ -444,269 +456,246 @@ CustomMouseArea {
             }
         }
 
-        // Event List / Agenda for selected day, today, or upcoming
-        ColumnLayout {
-            id: agendaSection
 
-            Layout.fillWidth: true
-            spacing: Tokens.spacing.extraSmall
-            visible: root.selectedDateKey !== "" || root.currentDayEvents.length > 0 || (root.gcalConfigured && root.nextUpcomingEvent !== null)
-
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: Colours.palette.m3outlineVariant
-                opacity: 0.35
-                Layout.topMargin: Tokens.spacing.extraSmall
-                Layout.bottomMargin: Tokens.spacing.extraSmall / 2
             }
 
-            // Day Agenda Header (when a date is selected or today has events)
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Tokens.spacing.small
-                visible: root.selectedDateKey !== "" || root.currentDayEvents.length > 0
-
-                StyledText {
-                    text: {
-                        const targetKey = root.effectiveDateKey;
-                        const parts = targetKey.split("-");
-                        if (parts.length < 3) return "";
-                        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                        const today = new Date();
-                        const isToday = d.getDate() === today.getDate() &&
-                                        d.getMonth() === today.getMonth() &&
-                                        d.getFullYear() === today.getFullYear();
-                        const dateStr = d.toLocaleDateString(Qt.locale(), "ddd, MMM d");
-                        return isToday ? ("Today • " + dateStr) : dateStr;
-                    }
-                    font: Tokens.font.title.small
-                    color: Colours.palette.m3onSurface
-                    Layout.fillWidth: true
-                }
-
-                IconButton {
-                    icon: root.isAddingEvent ? "remove" : "add"
-                    isRound: true
-                    type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
-                    font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                    padding: Tokens.padding.extraSmall
-                    visible: root.selectedDateKey !== "" || root.currentDayEvents.length === 0
-                    onClicked: {
-                        root.isAddingEvent = !root.isAddingEvent;
-                    }
-                }
-
-                IconButton {
-                    icon: "close"
-                    isRound: true
-                    type: IconButton.Text
-                    font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                    padding: Tokens.padding.extraSmall
-                    visible: root.selectedDateKey !== ""
-                    onClicked: {
-                        root.selectedDateKey = "";
-                        root.isAddingEvent = false;
-                    }
-                }
+            Rectangle {
+                Layout.fillHeight: true
+                implicitWidth: 1
+                color: Qt.alpha(Colours.palette.m3outlineVariant, 0.45)
             }
 
-            // Inline Quick-Add Mini-Input
-            Rectangle {
-                id: quickAddBox
+            ColumnLayout {
                 Layout.fillWidth: true
-                visible: root.isAddingEvent
-                radius: Tokens.rounding.small
-                color: Colours.palette.m3surfaceContainer
-                border.width: 1
-                border.color: Colours.palette.m3outlineVariant
-                implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
-
-                onVisibleChanged: {
-                    if (visible) {
-                        eventTitleInput.text = "";
-                        eventTimeInput.text = "";
-                        Qt.callLater(() => eventTitleInput.forceActiveFocus());
-                    }
-                }
+                Layout.fillHeight: true
+                spacing: Tokens.spacing.extraSmall
 
                 RowLayout {
-                    id: quickAddLayout
-                    anchors.fill: parent
-                    anchors.margins: Tokens.padding.small
+                    Layout.fillWidth: true
                     spacing: Tokens.spacing.small
 
-                    StyledTextField {
-                        id: eventTitleInput
+                    StyledText {
                         Layout.fillWidth: true
-                        placeholderText: "Event title..."
-                        placeholderFloats: false
-                        verticalPadding: Tokens.padding.extraSmall
-                        font: Tokens.font.body.small
-                        onAccepted: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
-                        Keys.onEscapePressed: root.isAddingEvent = false
-                    }
-
-                    StyledTextField {
-                        id: eventTimeInput
-                        Layout.preferredWidth: 80
-                        placeholderText: "14:00"
-                        placeholderFloats: false
-                        verticalPadding: Tokens.padding.extraSmall
-                        font: Tokens.font.body.small
-                        onAccepted: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
-                        Keys.onEscapePressed: root.isAddingEvent = false
+                        text: root.selectedDateKey ? root.formatAgendaDate(root.selectedDateKey) : "Upcoming · 14 days"
+                        font: Tokens.font.title.small
+                        color: Colours.palette.m3onSurface
+                        elide: Text.ElideRight
                     }
 
                     IconButton {
-                        icon: "check"
-                        isRound: true
-                        type: IconButton.Filled
-                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                        padding: Tokens.padding.extraSmall / 2
-                        onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
-                    }
-
-                    IconButton {
+                        visible: root.selectedDateKey !== ""
                         icon: "close"
                         isRound: true
                         type: IconButton.Text
-                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                        padding: Tokens.padding.extraSmall / 2
-                        onClicked: root.isAddingEvent = false
+                        padding: Tokens.padding.extraSmall
+                        onClicked: {
+                            root.selectedDateKey = "";
+                            root.isAddingEvent = false;
+                        }
                     }
+
+            IconButton {
+                id: syncBtn
+                isRound: true
+                icon: "sync"
+                type: IconButton.Text
+                font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                padding: Tokens.padding.small
+                enabled: !syncProc.running
+                onClicked: syncProc.running = true
+
+                NumberAnimation on rotation {
+                    running: syncProc.running
+                    loops: Animation.Infinite
+                    from: 0
+                    to: 360
+                    duration: 1000
                 }
             }
 
-            // Events for the selected day or today
-            Repeater {
-                model: (root.selectedDateKey !== "" || root.currentDayEvents.length > 0) ? root.currentDayEvents : []
+                    IconButton {
+                        icon: root.isAddingEvent ? "remove" : "add"
+                        isRound: true
+                        type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
+                        padding: Tokens.padding.extraSmall
+                        ToolTip.visible: hovered
+                        ToolTip.text: root.isAddingEvent ? "Cancel new event" : "Add event"
+                        onClicked: root.isAddingEvent = !root.isAddingEvent
+                    }
+                }
 
-                delegate: RowLayout {
-                    id: eventItem
-                    required property var modelData
-
+                Rectangle {
+                    id: quickAddBox
                     Layout.fillWidth: true
-                    spacing: Tokens.spacing.small
+                    visible: root.isAddingEvent
+                    radius: Tokens.rounding.small
+                    color: Colours.palette.m3surfaceContainerHigh
+                    border.width: 1
+                    border.color: Colours.palette.m3outlineVariant
+                    implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
+
+                    onVisibleChanged: {
+                        if (visible) {
+                            eventTitleInput.text = "";
+                            eventTimeInput.text = "";
+                            Qt.callLater(() => eventTitleInput.forceActiveFocus());
+                        }
+                    }
+
+                    RowLayout {
+                        id: quickAddLayout
+                        anchors.fill: parent
+                        anchors.margins: Tokens.padding.small
+                        spacing: Tokens.spacing.extraSmall
+
+                        StyledTextField {
+                            id: eventTitleInput
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            placeholderText: "Event title"
+                            placeholderFloats: false
+                            verticalPadding: Tokens.padding.extraSmall
+                            font: Tokens.font.body.small
+                            onAccepted: root.commitAddEvent(text, eventTimeInput.text)
+                            Keys.onEscapePressed: root.isAddingEvent = false
+                        }
+
+                        StyledTextField {
+                            id: eventTimeInput
+                            Layout.preferredWidth: 66
+                            placeholderText: "14:00"
+                            placeholderFloats: false
+                            verticalPadding: Tokens.padding.extraSmall
+                            font: Tokens.font.body.small
+                            onAccepted: root.commitAddEvent(eventTitleInput.text, text)
+                            Keys.onEscapePressed: root.isAddingEvent = false
+                        }
+
+                        IconButton {
+                            icon: "check"
+                            isRound: true
+                            type: IconButton.Filled
+                            padding: 2
+                            onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    ListView {
+                        id: agendaView
+                        anchors.fill: parent
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        spacing: Tokens.spacing.extraSmall
+                        model: root.agendaItems
+
+                        HoverHandler {
+                            id: agendaHover
+                        }
+
+                        StyledScrollBar.vertical: StyledScrollBar {
+                            flickable: agendaView
+                            policy: agendaHover.hovered ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+                        }
+
+                        Connections {
+                            target: root
+                            function onSelectedDateKeyChanged() { agendaView.positionViewAtBeginning(); }
+                        }
+
+                        delegate: Item {
+                            id: agendaItem
+                            required property var modelData
+                            width: agendaView.width - 10
+                            implicitHeight: modelData.kind === "heading" ? heading.implicitHeight + 12
+                                : modelData.kind === "empty" ? emptyText.implicitHeight + 12
+                                : eventContent.implicitHeight + 10
+
+                            StyledText {
+                                id: heading
+                                anchors.bottom: parent.bottom
+                                visible: agendaItem.modelData.kind === "heading"
+                                text: agendaItem.modelData.title || ""
+                                font: Tokens.font.label.builders.small.weight(Font.Bold).build()
+                                color: Colours.palette.m3primary
+                            }
+
+                            StyledText {
+                                id: emptyText
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: agendaItem.modelData.kind === "empty"
+                                width: parent.width
+                                text: agendaItem.modelData.title || ""
+                                font: Tokens.font.body.small
+                                color: Colours.palette.m3onSurfaceVariant
+                                wrapMode: Text.WordWrap
+                            }
+
+                            RowLayout {
+                                id: eventContent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: agendaItem.modelData.kind === "event"
+                                spacing: Tokens.spacing.small
+
+                                Rectangle {
+                                    implicitWidth: 3
+                                    Layout.minimumWidth: 3
+                                    Layout.preferredHeight: eventText.implicitHeight
+                                    radius: 2
+                                    color: Colours.palette.m3tertiary
+                                }
+
+                                ColumnLayout {
+                                    id: eventText
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    spacing: 1
+
+                                    StyledText {
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                        text: agendaItem.modelData.title || "Untitled Event"
+                                        font: Tokens.font.body.small
+                                        color: Colours.palette.m3onSurface
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+
+                                    StyledText {
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                        visible: text !== ""
+                                        text: {
+                                            const item = agendaItem.modelData;
+                                            return [item.time, item.location].filter(Boolean).join(" · ");
+                                        }
+                                        font: Tokens.font.label.small
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     Rectangle {
-                        width: 3
-                        Layout.preferredHeight: contentCol.implicitHeight
-                        radius: 1.5
-                        color: Colours.palette.m3tertiary
-                    }
-
-                    ColumnLayout {
-                        id: contentCol
-                        Layout.fillWidth: true
-                        spacing: 1
-
-                        StyledText {
-                            text: eventItem.modelData.title || "Untitled Event"
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurface
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
-
-                        StyledText {
-                            text: {
-                                let t = eventItem.modelData.time || "";
-                                if (eventItem.modelData.location) {
-                                    t = t ? (t + " • " + eventItem.modelData.location) : eventItem.modelData.location;
-                                }
-                                return t;
-                            }
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
-                            elide: Text.ElideRight
-                            visible: text !== ""
-                            Layout.fillWidth: true
-                        }
-                    }
-                }
-            }
-
-            // Empty state for explicitly selected day with 0 events
-            StyledText {
-                visible: root.currentDayEvents.length === 0 && root.selectedDateKey !== "" && !root.isAddingEvent
-                text: !root.gcalConfigured ? "Google Calendar not linked yet\nPaste your private iCal link into ~/.config/caelestia/calendar_url.txt" : "No events scheduled"
-                horizontalAlignment: Text.AlignHCenter
-                font: Tokens.font.body.small
-                color: Colours.palette.m3outline
-                Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: Tokens.padding.extraSmall
-                Layout.bottomMargin: Tokens.padding.extraSmall
-            }
-
-            // Next Upcoming Event block (when today has no events & no date selected)
-            ColumnLayout {
-                id: upcomingBlock
-                Layout.fillWidth: true
-                spacing: Tokens.spacing.extraSmall
-                visible: root.selectedDateKey === "" && root.currentDayEvents.length === 0 && root.nextUpcomingEvent !== null
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Tokens.spacing.small
-
-                    StyledText {
-                        text: "Upcoming"
-                        font: Tokens.font.title.small
-                        color: Colours.palette.m3onSurface
-                        Layout.fillWidth: true
-                    }
-
-                    StyledText {
-                        text: {
-                            if (!root.nextUpcomingEvent) return "";
-                            const parts = root.nextUpcomingEvent.dateKey.split("-");
-                            const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                            return d.toLocaleDateString(Qt.locale(), "MMM d, yyyy");
-                        }
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3primary
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Tokens.spacing.small
-
-                    Rectangle {
-                        width: 3
-                        Layout.preferredHeight: upcomingContentCol.implicitHeight
-                        radius: 1.5
-                        color: Colours.palette.m3tertiary
-                    }
-
-                    ColumnLayout {
-                        id: upcomingContentCol
-                        Layout.fillWidth: true
-                        spacing: 1
-
-                        StyledText {
-                            text: root.nextUpcomingEvent ? (root.nextUpcomingEvent.event.title || "Untitled Event") : ""
-                            font: Tokens.font.body.small
-                            color: Colours.palette.m3onSurface
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
-
-                        StyledText {
-                            text: {
-                                if (!root.nextUpcomingEvent) return "";
-                                let t = root.nextUpcomingEvent.event.time || "";
-                                if (root.nextUpcomingEvent.event.location) {
-                                    t = t ? (t + " • " + root.nextUpcomingEvent.event.location) : root.nextUpcomingEvent.event.location;
-                                }
-                                return t;
-                            }
-                            font: Tokens.font.label.small
-                            color: Colours.palette.m3onSurfaceVariant
-                            elide: Text.ElideRight
-                            visible: text !== ""
-                            Layout.fillWidth: true
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 18
+                        visible: agendaView.contentHeight > agendaView.height && !agendaView.atYEnd
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.alpha(Colours.tPalette.m3surfaceContainer, 0) }
+                            GradientStop { position: 1; color: Colours.tPalette.m3surfaceContainer }
                         }
                     }
                 }
