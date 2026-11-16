@@ -157,8 +157,15 @@ Item {
         root.forceUpdate();
     }
 
+    onShownChanged: {
+        if (root.shown) {
+            root.syncTrack();
+            root.forceUpdate();
+        }
+    }
+
     Timer {
-        running: root.player ? root.player.isPlaying : false
+        running: root.shown && (root.player ? root.player.isPlaying : false)
         interval: 200
         triggeredOnStart: true
         repeat: true

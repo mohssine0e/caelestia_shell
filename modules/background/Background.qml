@@ -115,7 +115,7 @@ Variants {
 
                     PropertyChanges {
                         target: clockLoader
-                        anchors.verticalCenterOffset: -200
+                        anchors.verticalCenterOffset: -400
                     }
                 },
                 State {
