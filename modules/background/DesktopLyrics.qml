@@ -21,7 +21,7 @@ Item {
     readonly property bool betterEnabled: true
     readonly property bool fallbackEnabled: true
     readonly property bool useBetter: root.betterEnabled && BetterLyrics.hasLyrics
-    readonly property bool useShell: !root.useBetter && root.fallbackEnabled && Lyrics.hasLyrics
+    readonly property bool useShell: !root.useBetter && !BetterLyrics.loading && root.fallbackEnabled && Lyrics.hasLyrics
     readonly property bool activeHasLyrics: root.useBetter || root.useShell
     readonly property var activeTexts: root.useBetter ? BetterLyrics.texts : (root.useShell ? Lyrics.lyrics : [])
     readonly property bool activeLoading: !root.activeHasLyrics && (BetterLyrics.loading || (root.fallbackEnabled && Lyrics.loading))
@@ -43,8 +43,13 @@ Item {
     property string displayedLyric: ""
     property string previousLyricText: ""
     property string nextLyricText: ""
+    property real userOffset: 0.0
 
-    function isInstrumental(str) {
+    function isArabic(text: string): bool {
+        return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text || "");
+    }
+
+    function isInstrumental(str: string): bool {
         if (!str) return false;
         const s = str.trim().toLowerCase();
         if (s === "♪" || s === "♪ ♪" || s === "♪ ♪ ♪" || s === "♫" || s === "..." || s === ". . .")
@@ -53,7 +58,7 @@ Item {
                s.includes("interlude") || s.includes("outro") || s.includes("break");
     }
 
-    function formatLine(str) {
+    function formatLine(str: string): string {
         if (!str) return "";
         if (root.isInstrumental(str))
             return "♪  ♫  ♪";
@@ -67,7 +72,8 @@ Item {
     implicitWidth: Math.min(650, root.screen.width * 0.7)
     implicitHeight: 120
 
-    function syncTrack() {
+    function syncTrack(): void {
+        root.userOffset = 0.0;
         const active = root.player;
         if (active && (active.trackTitle ?? "").length > 0) {
             const artist = active.trackArtist ?? "";
@@ -103,7 +109,7 @@ Item {
         }
     }
 
-    function refreshLyrics() {
+    function refreshLyrics(): void {
         const texts = root.activeTexts;
         if (!root.activeHasLyrics || !texts || texts.length === 0) {
             root.displayedLyric = "";
@@ -123,15 +129,16 @@ Item {
         }
     }
 
-    function activeIndexForTime(time: real) {
+    function activeIndexForTime(time: real): int {
+        const t = time - root.userOffset;
         if (root.useBetter)
-            return BetterLyrics.indexForTime(time);
+            return BetterLyrics.indexForTime(t);
         if (root.useShell)
-            return Lyrics.indexForTime(time);
+            return Lyrics.indexForTime(t);
         return -1;
     }
 
-    function forceUpdate() {
+    function forceUpdate(): void {
         const pos = root.player ? root.player.position : 0;
         const nextIndex = root.activeHasLyrics ? root.activeIndexForTime(pos) : -1;
         if (nextIndex === root.currentIndex) {
@@ -213,7 +220,9 @@ Item {
             StyledText {
                 Layout.fillWidth: true
                 text: root.formatLine(root.previousLyricText)
-                font: Tokens.font.body.medium
+                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
+                font.pixelSize: root.isArabic(text) ? 20 : 16
+                font.weight: Font.Medium
                 color: Colours.palette.m3onSurfaceVariant
                 opacity: 0.55
                 horizontalAlignment: Text.AlignHCenter
@@ -246,7 +255,10 @@ Item {
                 Layout.fillWidth: true
                 visible: !root.isCurrentInstrumental
                 text: root.activeLoading ? qsTr("Loading lyrics...") : root.displayedLyric
-                font: Tokens.font.title.builders.large.weight(Font.Bold).build()
+                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
+                font.pixelSize: root.isArabic(text) ? 30 : 25
+                font.weight: Font.Bold
+                lineHeight: root.isArabic(text) ? 1.4 : 1.2
                 color: Colours.palette.m3primary
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
@@ -262,7 +274,9 @@ Item {
             StyledText {
                 Layout.fillWidth: true
                 text: root.formatLine(root.nextLyricText)
-                font: Tokens.font.body.medium
+                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
+                font.pixelSize: root.isArabic(text) ? 20 : 16
+                font.weight: Font.Medium
                 color: Colours.palette.m3onSurfaceVariant
                 opacity: 0.55
                 horizontalAlignment: Text.AlignHCenter

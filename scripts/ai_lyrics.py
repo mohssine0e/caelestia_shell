@@ -97,18 +97,61 @@ def parse_lrc(lrc_text: str):
     return lines
 
 
+def extract_search_candidates(artist: str, title: str):
+    candidates = []
+    # Split bilingual YouTube titles and artists (pipes, slashes)
+    title_parts = re.split(r"\s*[|/]\s*", title)
+    artist_parts = [a.strip() for a in re.split(r"\s*[|/]\s*", artist) if a.strip()]
+
+    noise_pattern = r"\(.*?(official|video|audio|lyric|clip|visualizer|exclusive|remaster|hd|4k|mv|حصريا|حصرياً|فيديو|كليب|كلمات|أغنية|النسخة|الأصلية).*?\)"
+    bracket_noise = r"\[.*?(official|video|audio|lyric|clip|visualizer|exclusive|remaster|hd|4k|mv|حصريا|حصرياً|فيديو|كليب|كلمات|أغنية|النسخة|الأصلية).*?\]"
+
+    cleaned_segments = []
+    for p in title_parts:
+        cp = re.sub(noise_pattern, "", p, flags=re.IGNORECASE)
+        cp = re.sub(bracket_noise, "", cp, flags=re.IGNORECASE)
+        cp = re.sub(r"[\(\)\[\]]", "", cp).strip(" -:_|")
+        if cp:
+            cleaned_segments.append(cp)
+
+    # Extract purely Arabic text segments
+    arabic_matches = re.findall(r"[\u0600-\u06FF\s\-]+", title)
+    for am in arabic_matches:
+        cam = re.sub(r"[\(\)\[\]]", "", am).strip(" -:_|")
+        cam = re.sub(r"\b(حصرياً|حصريا|فيديو|كليب|كلمات|أغنية|الرسمية|النسخة|الأصلية)\b", "", cam).strip(" -:_|")
+        if len(cam) >= 3 and cam not in cleaned_segments:
+            cleaned_segments.append(cam)
+
+    for seg in cleaned_segments:
+        candidates.append(seg)
+        # Try stripping artist from title segment if present (e.g. "Artist - Song" -> "Song")
+        for ap in artist_parts:
+            if seg.lower().startswith(ap.lower()):
+                stripped = seg[len(ap):].lstrip(" -:_|")
+                if stripped:
+                    candidates.append(stripped)
+                    candidates.append(f"{ap} {stripped}")
+            elif ap not in seg:
+                candidates.append(f"{ap} {seg}")
+
+    # Fallback generic combinations
+    for ap in artist_parts:
+        candidates.append(f"{ap} {clean_title(title, artist)}")
+
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for c in candidates:
+        norm = " ".join(c.split()).strip()
+        if norm and len(norm) >= 2 and norm not in seen:
+            seen.add(norm)
+            result.append(norm)
+    return result
+
+
 def fetch_lrclib(artist: str, title: str, duration: float = 0):
-    cleaned = clean_title(title, artist)
-    queries = [
-        f"{artist} {cleaned}".strip(),
-        cleaned,
-        title
-    ]
-    seen_queries = set()
+    queries = extract_search_candidates(artist, title)
     for q in queries:
-        if not q or q in seen_queries:
-            continue
-        seen_queries.add(q)
         try:
             url = "https://lrclib.net/api/search?q=" + urllib.parse.quote(q)
             req = urllib.request.Request(url, headers={"User-Agent": "CaelestiaShell/1.0"})
@@ -303,7 +346,7 @@ def main():
 
     # Part 3: JSON Parsing and Normalization with word-level timing
     normalized = []
-    for item in lyrics:
+    for idx, item in enumerate(lyrics):
         try:
             t = float(item.get("time", 0.0))
         except (ValueError, TypeError):
@@ -330,11 +373,19 @@ def main():
                     except (ValueError, TypeError):
                         pass
         else:
-            # Word-level interpolation for line-level sources (e.g. LRCLIB)
+            # Dynamic word-level timing based on actual gap to next line
             line_words = txt.split()
             if line_words:
-                est_span = 3.2
-                step = est_span / max(1, len(line_words))
+                next_t = t + 4.0
+                if idx + 1 < len(lyrics):
+                    try:
+                        nt = float(lyrics[idx + 1].get("time", t + 4.0))
+                        if nt > t:
+                            next_t = nt
+                    except (ValueError, TypeError):
+                        pass
+                real_span = max(1.0, min(7.0, (next_t - t) * 0.92))
+                step = real_span / max(1, len(line_words))
                 words_array = [{"w": w, "t": round(max(0.0, t + i * step), 2)} for i, w in enumerate(line_words)]
 
         normalized.append({

@@ -57,7 +57,7 @@ Singleton {
     // Results are kept for the session so skipping back to a track does not refetch it.
     property var cache: ({})
 
-    function setTrack(artist, title, album, duration) {
+    function setTrack(artist: string, title: string, album: string, duration: real): void {
         if (!root.enabled) {
             root.clearTrack();
             return;
@@ -100,7 +100,7 @@ Singleton {
         root.fetchTtml(root.requestSerial, a, t, al, d);
     }
 
-    function clearTrack() {
+    function clearTrack(): void {
         if (aiProc.running)
             aiProc.running = false;
         root.requestSerial += 1;
@@ -118,7 +118,7 @@ Singleton {
     }
 
     // Last line whose start time is <= time, or -1 before the first line.
-    function indexForTime(time) {
+    function indexForTime(time: real): int {
         const arr = root.lines;
         if (!arr || arr.length === 0)
             return -1;
@@ -137,14 +137,14 @@ Singleton {
         return ans;
     }
 
-    function buildUrl(endpoint, artist, title, album, duration) {
+    function buildUrl(endpoint: string, artist: string, title: string, album: string, duration: real): string {
         let url = endpoint + "?s=" + encodeURIComponent(title) + "&a=" + encodeURIComponent(artist) + "&al=" + encodeURIComponent(album);
         if (isFinite(duration) && duration > 0)
             url += "&d=" + Math.round(duration);
         return url;
     }
 
-    function getJson(url, serial, done) {
+    function getJson(url: string, serial: int, done: var): void {
         const xhr = new XMLHttpRequest();
         let finished = false;
 
@@ -190,7 +190,7 @@ Singleton {
         }
     }
 
-    function fetchTtml(serial, artist, title, album, duration) {
+    function fetchTtml(serial: int, artist: string, title: string, album: string, duration: real): void {
         const url = root.buildUrl("https://api.betterlyrics.org/getLyrics", artist, title, album, duration);
         root.getJson(url, serial, function (err, text) {
             if (serial !== root.requestSerial)
@@ -214,7 +214,7 @@ Singleton {
         });
     }
 
-    function fetchQq(serial, artist, title, album, duration) {
+    function fetchQq(serial: int, artist: string, title: string, album: string, duration: real): void {
         const url = root.buildUrl("https://api.betterlyrics.org/qq/getLyrics", artist, title, album, duration);
         root.getJson(url, serial, function (err, text) {
             if (serial !== root.requestSerial)
@@ -238,7 +238,7 @@ Singleton {
         });
     }
 
-    function apply(serial, parsed, src) {
+    function apply(serial: int, parsed: var, src: string): void {
         if (serial !== root.requestSerial)
             return;
 
@@ -321,7 +321,7 @@ Singleton {
         }
     }
 
-    function fail(serial, message) {
+    function fail(serial: int, message: string): void {
         if (serial !== root.requestSerial)
             return;
         if (!aiProc.running && root.trackTitle.length > 0) {
@@ -332,7 +332,7 @@ Singleton {
         root.finalFail(serial, message);
     }
 
-    function finalFail(serial, message) {
+    function finalFail(serial: int, message: string): void {
         if (serial !== root.requestSerial)
             return;
         root.loading = false;
