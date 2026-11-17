@@ -717,7 +717,7 @@ def main():
         topic_anchor = str(stdin_payload.get("anchor", ""))
         extra_context = str(stdin_payload.get("context", ""))
         include_personal_context = stdin_payload.get("include_personal_context", True) is not False
-        include_sensitive_facts = stdin_payload.get("include_sensitive_facts") is True
+        include_sensitive_facts = stdin_payload.get("include_sensitive_facts")
         parsed_thread = stdin_payload.get("thread", [])
     else:
         mode = "auto"
@@ -725,7 +725,7 @@ def main():
         topic_anchor = ""
         extra_context = ""
         include_personal_context = True
-        include_sensitive_facts = False
+        include_sensitive_facts = None
         positional = []
         i = 2
         while i < len(sys.argv):
@@ -829,6 +829,11 @@ def main():
 
     if include_personal_context and action == "ask":
         touch_matching_knowledge_cards(custom_prompt or text_to_process)
+
+    if include_sensitive_facts is None and include_personal_context:
+        # The opt-in lives in user_facts.json and is changed from the Facts view.
+        include_sensitive_facts = user_facts.include_sensitive_setting()
+    include_sensitive_facts = include_sensitive_facts is True
 
     ctx = context_builder.build_context(
         action,

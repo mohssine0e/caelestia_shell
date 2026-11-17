@@ -117,6 +117,35 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(json.loads(bad.stdout)["error"], "not_found")
 
 
+class SettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = TempConfig()
+
+    def tearDown(self):
+        self.cfg.close()
+
+    def test_sensitive_opt_in_defaults_off_and_validates(self):
+        self.assertFalse(store.include_sensitive_setting())
+        store.mutate(lambda d: store.update_settings(d, {"include_sensitive_in_replies": True}))
+        self.assertTrue(store.include_sensitive_setting())
+        self.assertTrue(store.list_facts()["settings"]["include_sensitive_in_replies"])
+        with self.assertRaises(store.StoreError):
+            store.mutate(lambda d: store.update_settings(d, {"include_sensitive_in_replies": "yes"}))
+        with self.assertRaises(store.StoreError):
+            store.mutate(lambda d: store.update_settings(d, {"something": True}))
+
+    def test_cli_reads_one_line_with_stdin_left_open(self):
+        script = os.path.join(SCRIPTS, "user_facts.py")
+        proc = subprocess.Popen([sys.executable, script, "add", "--stdin-json"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, text=True, env=dict(os.environ))
+        proc.stdin.write(json.dumps({"fact": {"text": "Likes long walks", "category": "background"}}) + "\n")
+        proc.stdin.flush()
+        out = proc.stdout.readline()  # must answer without stdin being closed
+        proc.stdin.close()
+        proc.wait(10)
+        self.assertTrue(json.loads(out)["success"])
+
+
 class ReviewTransitionTests(unittest.TestCase):
     def setUp(self):
         self.cfg = TempConfig()

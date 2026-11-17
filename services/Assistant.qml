@@ -52,6 +52,8 @@ Singleton {
     property int _requestSerial: 0
     property string requestState: "idle" // idle | waiting | streaming | completed | failed | cancelled
     property var recalledContext: null
+    // What saved context went with the last request, and why (from assistant_api.py).
+    property var contextUsed: null
     property bool personalContextEnabled: true
     readonly property string historyPath: Quickshell.env("HOME") + "/.config/caelestia/assistant_history.json"
 
@@ -90,7 +92,6 @@ Singleton {
         "last_updated": "2026-10-14"
     })
     property var profile: defaultProfile
-    property var proposedProfile: null
     readonly property string profilePath: Quickshell.env("HOME") + "/.config/caelestia/assistant_profile.json"
 
     FileView {
@@ -243,6 +244,7 @@ Singleton {
         root.selectedText = ""
         root.isTruncated = false
         root.recalledContext = null
+        root.contextUsed = null
         root.currentThreadId = ""
         root.clearThread()
     }
@@ -562,6 +564,9 @@ Singleton {
                         if (msg.recalled_from !== undefined) {
                             root.recalledContext = msg.recalled_from
                         }
+                        if (msg.context_used !== undefined) {
+                            root.contextUsed = msg.context_used
+                        }
                     } else if (msg.type === "chunk") {
                         root.requestState = "streaming"
                         root.isLoading = false
@@ -603,6 +608,9 @@ Singleton {
                         }
                         if (msg.recalled_from !== undefined) {
                             root.recalledContext = msg.recalled_from
+                        }
+                        if (msg.context_used !== undefined) {
+                            root.contextUsed = msg.context_used
                         }
                         root.errorMessage = ""
                         root.errorType = ""
@@ -1079,8 +1087,9 @@ Singleton {
         root.history = list
         root.saveHistory()
 
-        // Debounced autonomous memory extraction & SRS distillation (2s after turn completes)
-        autoDistillTimer.restart()
+        // Debounced memory extraction after a turn. Personal off means no extraction (audit P01).
+        if (root.personalContextEnabled)
+            autoDistillTimer.restart()
     }
 
     function deleteHistoryItem(id) {
@@ -1270,7 +1279,7 @@ Singleton {
         interval: 1800
         repeat: false
         onTriggered: {
-            if (!Memory.isDistilling && !root.isStreaming && !root.isLoading) {
+            if (root.personalContextEnabled && !Memory.isDistilling && !root.isStreaming && !root.isLoading) {
                 Memory.distill()
             }
         }
@@ -1296,23 +1305,10 @@ Singleton {
         saveProfileProc.running = true
     }
 
-    function acceptProposedProfile() {
-        if (!root.proposedProfile) return
-        const merged = Object.assign({}, root.profile || root.defaultProfile, root.proposedProfile)
-        merged.last_updated = new Date().toISOString().slice(0, 10)
-        root.saveProfile(merged)
-        root.proposedProfile = null
-    }
-
-    function discardProposedProfile() {
-        root.proposedProfile = null
-    }
-
     function resetProfile() {
         const def = Object.assign({}, root.defaultProfile)
         def.last_updated = new Date().toISOString().slice(0, 10)
         root.saveProfile(def)
-        root.proposedProfile = null
     }
 
     function runAction(action, customPrompt, retrySourceText) {
@@ -1409,6 +1405,7 @@ Singleton {
         root.resultText = ""
         root.isTruncated = false
         root.recalledContext = null
+        root.contextUsed = null
 
         const scriptPath = Quickshell.env("HOME") + "/.config/quickshell/caelestia/scripts/assistant_api.py"
         const queryForContext = (action === "ask") ? (customPrompt || sourceText) : sourceText

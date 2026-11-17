@@ -84,8 +84,39 @@ def parse_time(value):
         return None
 
 
+DEFAULT_SETTINGS = {"include_sensitive_in_replies": False}
+
+
 def empty_document():
-    return {"version": SCHEMA_VERSION, "revision": 0, "facts": []}
+    return {"version": SCHEMA_VERSION, "revision": 0, "settings": dict(DEFAULT_SETTINGS), "facts": []}
+
+
+def get_settings(doc):
+    settings = dict(DEFAULT_SETTINGS)
+    raw = doc.get("settings")
+    if isinstance(raw, dict):
+        for key in DEFAULT_SETTINGS:
+            if isinstance(raw.get(key), bool):
+                settings[key] = raw[key]
+    return settings
+
+
+def update_settings(doc, changes):
+    unknown = set(changes or {}) - set(DEFAULT_SETTINGS)
+    if unknown:
+        raise StoreError("invalid", f"Unknown settings: {', '.join(sorted(unknown))}.")
+    settings = get_settings(doc)
+    for key, value in (changes or {}).items():
+        if not isinstance(value, bool):
+            raise StoreError("invalid", f"{key} must be true or false.")
+        settings[key] = value
+    doc["settings"] = settings
+    return {"settings": settings}
+
+
+def include_sensitive_setting(path=None):
+    doc, state = read_document(path)
+    return state != "corrupt" and get_settings(doc)["include_sensitive_in_replies"]
 
 
 def clean_text(value, limit):
@@ -413,7 +444,7 @@ def list_facts(path=None, now=None):
     sources = sorted({(f.get("source") or {}).get("ai") for f in doc["facts"] if (f.get("source") or {}).get("ai")})
     counts = {s: sum(1 for f in doc["facts"] if f.get("status") == s) for s in STATUSES}
     return {"success": state != "corrupt", "state": state, "revision": doc.get("revision", 0),
-            "facts": facts, "sources": sources, "counts": counts,
+            "settings": get_settings(doc), "facts": facts, "sources": sources, "counts": counts,
             "stale_count": sum(1 for f in facts if f["stale"] and f.get("status") == "approved")}
 
 
@@ -446,6 +477,8 @@ def run_command(cmd, payload):
     if cmd == "delete":
         return mutate(lambda d: delete_facts(d, payload.get("ids"), payload.get("source_ai"),
                                              payload.get("batch_id")), expected)
+    if cmd == "settings":
+        return mutate(lambda d: update_settings(d, payload.get("changes") or {}), expected)
     if cmd == "import":
         from facts_import import import_file
         return import_file(payload.get("path", ""), source_ai=payload.get("source_ai", ""),
@@ -457,13 +490,14 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         print(json.dumps({"success": False, "error": "usage",
-                          "message": "usage: user_facts.py <list|add|edit|status|confirm|batch_status|delete|import|recover> [--stdin-json]"}))
+                          "message": "usage: user_facts.py <list|add|edit|status|confirm|batch_status|delete|settings|import|recover> [--stdin-json]"}))
         return 2
     cmd = argv[0]
     payload = {}
     if "--stdin-json" in argv[1:]:
         try:
-            payload = json.loads(sys.stdin.read() or "{}")
+            # One JSON line: the shell keeps stdin open, so never read to EOF.
+            payload = json.loads(sys.stdin.readline() or "{}")
         except ValueError:
             payload = {}
     if cmd == "import" and not payload and len(argv) > 1 and argv[1] != "--stdin-json":

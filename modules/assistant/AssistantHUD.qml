@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Caelestia
@@ -153,7 +154,7 @@ FocusScope {
             event.accepted = true
             return
         }
-        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") {
+        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory" || root.currentView === "facts") {
             root.currentView = "assistant"
             event.accepted = true
             return
@@ -192,7 +193,7 @@ FocusScope {
             return
         }
 
-        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory") {
+        if (root.currentView === "history" || root.currentView === "profile" || root.currentView === "memory" || root.currentView === "facts") {
             event.accepted = false
             return
         }
@@ -288,6 +289,7 @@ FocusScope {
             if (root.currentView === "memory") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, memoryView.implicitHeight + Tokens.padding.medium * 2))
             if (root.currentView === "history") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, historyView.implicitHeight + Tokens.padding.medium * 2))
             if (root.currentView === "profile") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, profileView.implicitHeight + Tokens.padding.medium * 2))
+            if (root.currentView === "facts") return Math.min(root.maximumHudHeight, Math.max(root.minimumHudHeight, factsView.implicitHeight + Tokens.padding.medium * 2))
             return root.preferredAssistantHeight
         }
 
@@ -398,6 +400,46 @@ FocusScope {
                         }
                     }
 
+                    // What saved context went with this answer (facts, settings, workspace, cards)
+                    StyledRect {
+                        id: contextBadge
+                        readonly property var used: Assistant.contextUsed
+                        readonly property int factCount: used && used.facts ? used.facts.length : 0
+                        readonly property var parts: {
+                            const u = contextBadge.used
+                            if (!u) return []
+                            const out = []
+                            if (contextBadge.factCount > 0) out.push(contextBadge.factCount === 1 ? qsTr("1 fact") : qsTr("%1 facts").arg(contextBadge.factCount))
+                            if ((u.profile_fields || []).length > 0) out.push(qsTr("settings"))
+                            if (u.workspace) out.push(qsTr("window"))
+                            if (u.study_cards) out.push(qsTr("cards"))
+                            if (u.earlier_answer) out.push(qsTr("past answer"))
+                            if (u.quiz_results) out.push(qsTr("quiz"))
+                            return out
+                        }
+                        visible: Assistant.personalContextEnabled && Assistant.providerUsed.length > 0 && used !== null
+                        implicitWidth: contextBadgeText.implicitWidth + Tokens.padding.small * 2
+                        implicitHeight: 24
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3surfaceContainerHigh
+
+                        StyledText {
+                            id: contextBadgeText
+                            anchors.centerIn: parent
+                            text: contextBadge.parts.length > 0 ? qsTr("Used: %1").arg(contextBadge.parts.join(", ")) : qsTr("No personal context")
+                            font: Tokens.font.label.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
+
+                        HoverHandler {
+                            id: contextHover
+                        }
+
+                        ToolTip.visible: contextHover.hovered && contextBadge.factCount > 0
+                        ToolTip.text: (contextBadge.used && contextBadge.used.facts ? contextBadge.used.facts : [])
+                            .map(f => `• ${f.text} (${f.reason})`).join("\n")
+                    }
+
                     // Provider Badge with Live Dot & Latency (Click to open settings/dossier)
                     StyledRect {
                         visible: Assistant.providerUsed.length > 0
@@ -444,10 +486,25 @@ FocusScope {
                         implicitWidth: 28
                         implicitHeight: 28
                         onClicked: root.currentView = "profile"
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Profile and settings")
+                    }
 
-                        // Pending proposed updates dot indicator
+                    // Facts about you: review imported facts and manage what replies may use
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "person_book"
+                        font: Tokens.font.icon.small
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: root.currentView = "facts"
+                        ToolTip.visible: hovered
+                        ToolTip.text: UserFacts.pendingCount > 0 || UserFacts.staleCount > 0
+                            ? qsTr("About you: %1 to review, %2 due for a check").arg(UserFacts.pendingCount).arg(UserFacts.staleCount)
+                            : qsTr("About you")
+
                         StyledRect {
-                            visible: Assistant.proposedProfile !== null
+                            visible: UserFacts.pendingCount > 0 || UserFacts.staleCount > 0
                             anchors.top: parent.top
                             anchors.right: parent.right
                             anchors.topMargin: 2
@@ -1730,6 +1787,16 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Tokens.padding.medium
             visible: root.currentView === "profile"
+            onBackRequested: root.currentView = "assistant"
+            onCloseRequested: root.closeRequested()
+        }
+
+        FactsView {
+            id: factsView
+            windowRef: root.windowRef
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.medium
+            visible: root.currentView === "facts"
             onBackRequested: root.currentView = "assistant"
             onCloseRequested: root.closeRequested()
         }
