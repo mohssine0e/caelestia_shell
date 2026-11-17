@@ -27,7 +27,19 @@ TestCase {
     }
 
     function syncedState(text) {
-        return { status: "synced", lines: [{ time: 1, text: text }], plain: "", source: "test", approximate: false, match: null };
+        return {
+            status: "synced",
+            lines: [
+                {
+                    time: 1,
+                    text: text
+                }
+            ],
+            plain: "",
+            source: "test",
+            approximate: false,
+            match: null
+        };
     }
 
     function test_staleResultIsDroppedAndNotCached() {
@@ -41,7 +53,12 @@ TestCase {
 
         // A's answer arrives late.
         svc.finish(serialA, syncedState("A's line"));
-        verify(svc.applyTimed(serialA, [{ time: 2, text: "A's other line" }], "test"));
+        verify(svc.applyTimed(serialA, [
+            {
+                time: 2,
+                text: "A's other line"
+            }
+        ], "test"));
         compare(svc.status, "loading");
         compare(svc.lines.length, 0);
         verify(svc.cache[keyA] === undefined, "stale result must not be cached under A");
@@ -65,7 +82,12 @@ TestCase {
 
     function test_plainResultHasNoTiming() {
         svc.setTrack("Artist", "Song", "", 200);
-        svc.finish(svc.requestSerial, { status: "plain", lines: [], plain: "one\ntwo", source: "LRCLIB (not synced)" });
+        svc.finish(svc.requestSerial, {
+            status: "plain",
+            lines: [],
+            plain: "one\ntwo",
+            source: "LRCLIB (not synced)"
+        });
         compare(svc.status, "plain");
         compare(svc.lines.length, 0);
         verify(!svc.hasLyrics);
@@ -74,7 +96,10 @@ TestCase {
 
     function test_missIsNotCached() {
         svc.setTrack("Artist", "Song", "", 200);
-        svc.finish(svc.requestSerial, { status: "none", reason: "no matching recording" });
+        svc.finish(svc.requestSerial, {
+            status: "none",
+            reason: "no matching recording"
+        });
         compare(svc.status, "none");
         verify(svc.cache[svc.trackKey] === undefined);
     }
@@ -91,9 +116,31 @@ TestCase {
     function test_markersBecomeGapsAndOnlyMarkersFallThrough() {
         svc.setTrack("Artist", "Song", "", 200);
         // Nothing sung: the chain must go on to the next source.
-        verify(!svc.applyTimed(svc.requestSerial, [{ time: 1, text: "[Instrumental]" }, { time: 5, text: "\u266A" }], "test"));
+        verify(!svc.applyTimed(svc.requestSerial, [
+            {
+                time: 1,
+                text: "[Instrumental]"
+            },
+            {
+                time: 5,
+                text: "\u266A"
+            }
+        ], "test"));
         compare(svc.status, "loading");
-        verify(svc.applyTimed(svc.requestSerial, [{ time: 1, text: "Don't break my heart" }, { time: 5, text: "[Instrumental]" }, { time: 9, text: "Let me introduce myself" }], "test"));
+        verify(svc.applyTimed(svc.requestSerial, [
+            {
+                time: 1,
+                text: "Don't break my heart"
+            },
+            {
+                time: 5,
+                text: "[Instrumental]"
+            },
+            {
+                time: 9,
+                text: "Let me introduce myself"
+            }
+        ], "test"));
         compare(svc.texts, ["Don't break my heart", "", "Let me introduce myself"]);
     }
 

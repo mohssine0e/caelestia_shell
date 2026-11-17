@@ -27,23 +27,61 @@ TestCase {
     }
 
     function test_indexAndOffset() {
-        const lines = [{ time: 5, text: "a" }, { time: 10, text: "b" }];
+        const lines = [
+            {
+                time: 5,
+                text: "a"
+            },
+            {
+                time: 10,
+                text: "b"
+            }
+        ];
         compare(Logic.indexForTime(lines, 4.95, 0), 0);
         compare(Logic.indexForTime(lines, 5.5, 1), -1);
         compare(Logic.timeForIndex(lines, 1, 0.5), 10.5);
     }
 
     function test_overlayState() {
-        const base = { hasPlayer: true, covered: false, playback: "playing", status: "synced", lines: [{ time: 1, text: "a" }], index: 0 };
+        const base = {
+            hasPlayer: true,
+            covered: false,
+            playback: "playing",
+            status: "synced",
+            lines: [
+                {
+                    time: 1,
+                    text: "a"
+                }
+            ],
+            index: 0
+        };
         compare(Logic.overlayState(base).mode, "lyrics");
-        compare(Logic.overlayState(Object.assign({}, base, { playback: "stopped" })).mode, "hidden");
-        compare(Logic.overlayState(Object.assign({}, base, { playback: "paused", pauseGrace: true })).mode, "lyrics");
-        compare(Logic.overlayState(Object.assign({}, base, { playback: "paused", pauseGrace: false })).mode, "hidden");
-        compare(Logic.overlayState(Object.assign({}, base, { status: "loading", loadingDelayPassed: true, playback: "paused", pauseGrace: true })).mode, "hidden");
+        compare(Logic.overlayState(Object.assign({}, base, {
+            playback: "stopped"
+        })).mode, "hidden");
+        compare(Logic.overlayState(Object.assign({}, base, {
+            playback: "paused",
+            pauseGrace: true
+        })).mode, "lyrics");
+        compare(Logic.overlayState(Object.assign({}, base, {
+            playback: "paused",
+            pauseGrace: false
+        })).mode, "hidden");
+        compare(Logic.overlayState(Object.assign({}, base, {
+            status: "loading",
+            loadingDelayPassed: true,
+            playback: "paused",
+            pauseGrace: true
+        })).mode, "hidden");
     }
 
     function test_arabic() {
-        verify(Logic.isMostlyArabic([{ text: "\u062d\u0628\u064a\u0628\u064a" }]));
+        verify(Logic.isMostlyArabic([
+            {
+                text: "\u062d\u0628\u064a\u0628\u064a"
+            }
+        ]));
         compare(Logic.parseLrc("[00:01.00]\u0645\u0634\u064a\u062a").lines[0].text, "\u0645\u0634\u064a\u062a");
     }
 }
