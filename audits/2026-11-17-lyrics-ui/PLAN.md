@@ -126,7 +126,7 @@ The top popout is the dashboard drawer (`modules/drawers/Panels.qml` holds it; c
 
 ### Findings (static unless marked)
 
-1. **Magic numbers break the 4 px rhythm.** The theme's spacing, padding and rounding tokens are a clean 4, 8, 12, 16, 20, 28 scale (`plugin/src/Caelestia/Config/tokens.hpp`). `Calendar.qml` mixes in raw values: grid `spacing: 3`, day cell `+ 4` and `- 4`, agenda rows `+ 12` and `+ 10`, `width: agendaView.width - 10`, time field `66`, add button `padding: 2`, fade `18`, today indicator `- 1`. `Tabs.qml` uses `topMargin: 5`. These odd values are the usual source of "slightly off" alignment.
+1. **Magic numbers break the 4 px rhythm.** The theme's spacing, padding and rounding tokens are a clean 4, 8, 12, 16, 20, 28, 32, 48 scale (`plugin/src/Caelestia/Config/tokens.hpp`). `Calendar.qml` mixes in raw values: grid `spacing: 3`, day cell `+ 4` and `- 4`, agenda rows `+ 12` and `+ 10`, `width: agendaView.width - 10`, time field `66`, add button `padding: 2`, fade `18`, today indicator `- 1`. `Tabs.qml` uses `topMargin: 5`. These odd values are the usual source of "slightly off" alignment.
 2. **Fixed sizes.** `Calendar.qml` sets `implicitHeight: 360` and a 330 px month column; `Dash.qml` overrides the token widths with `Math.max(token, 350)` and `Math.max(token, 450)` (tokens are 275 and 340). Sizes now live in two places, and the fixed height either clips the agenda or leaves empty space depending on the month (needs live check).
 3. **Mixed button sizes in one row.** In the agenda header, close and add use `padding: extraSmall` while sync uses `padding: small`; the month arrows use `small`. Icons in one row end up different sizes and centres.
 4. **Colour roles overlap.** `m3tertiary` marks weekends, event dots and event bars. `m3primary` marks the month title, the today shape and the agenda headings. Selection is `m3primaryContainer` at 0.7 opacity. So "weekend" and "has events" look the same, and three primary elements compete for attention.
@@ -137,7 +137,7 @@ The top popout is the dashboard drawer (`modules/drawers/Panels.qml` holds it; c
 
 ### Prioritised tweaks
 
-1. **Snap to tokens** in `Calendar.qml` and `Tabs.qml`: 3 to `spacing.extraSmall`, 10 and 12 to `padding.small` or `padding.medium`, 66 to a width derived from the field's text, 18 to `spacing.large`. Test: every gap in a screenshot measures a multiple of 4 px.
+1. **Snap to tokens** in `Calendar.qml` and `Tabs.qml`: 3 to `spacing.extraSmall`, 10 and 12 to `padding.small` or `padding.medium`, 66 to a width derived from the field's text, 18 to `spacing.large` (16) or `spacing.largeIncreased` (20). Test: every gap in a screenshot measures a multiple of 4 px.
 2. **One icon button size per row** (pick `padding.small` everywhere in the calendar header and agenda header). Test: icon centres in a row share one y value.
 3. **Clarify colour roles, same palette:** `m3primary` only for "now" (today and the month title); agenda headings in `m3onSurfaceVariant` or `m3secondary`; weekends as a quieter `m3onSurfaceVariant` tint; `m3tertiary` reserved for events; selection as a full `m3secondaryContainer` (or an outline ring) so it never looks like today.
 4. **Unify radii** on `Dash.qml` cards (use `rounding.extraLarge` for all three).
@@ -165,6 +165,6 @@ The top popout is the dashboard drawer (`modules/drawers/Panels.qml` holds it; c
 
 ## Sources
 
-- [LRCLIB API documentation](https://lrclib.net/docs): `/api/get` duration matching (±2 s), `instrumental`, `hasWordSync`, `User-Agent` requirement, rate limits.
+- [LRCLIB API documentation](https://lrclib.net/docs): `/api/get` duration matching (±2 s), `/api/search`, `instrumental`, `hasWordSync`, `syncedLyrics` format.
 - [Quickshell MprisPlayer](https://quickshell.org/docs/v0.2.1/types/Quickshell.Services.Mpris/MprisPlayer/): `isPlaying`, `playbackState`, position polling guidance, track-change signals.
 - [WCAG 2.2 Understanding 1.4.3 Contrast (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html): contrast thresholds used as a yardstick.
