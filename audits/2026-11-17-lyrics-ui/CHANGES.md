@@ -102,7 +102,10 @@ Pure JavaScript, no QML types, so it is tested under node and under Qt's engine.
 - Colours unchanged: current line `m3primary`, side lines `m3onSurfaceVariant`, same shadow.
 
 ## Commits (oldest first)
-- `lyrics: shared timing, LRC parser and visibility logic with tests`
+- `lyrics: shared timing, LRC parser and visibility logic with tests` (the removal of
+  `scripts/ai_lyrics.py` and `scripts/lyrics_fetch.py` also landed in this commit by mistake, one
+  commit before `BetterLyrics.qml` stopped calling the AI script, so do not check out this commit
+  alone)
 - `lyrics: real lyrics only, no Gemini; drop stale fetch results`
 - `lyrics: one source for the overlay and the media tab, per-track offset controls`
 - `lyrics overlay: follow playback, stable layout, real fades, centred on the bars`
@@ -114,7 +117,7 @@ Pure JavaScript, no QML types, so it is tested under node and under Qt's engine.
   timestamp forms, offset tag both signs, gaps, word tags, Arabic), instrumental markers,
   normalisation, index/offset/seek, rows, Arabic detection, overlay states (stop, pause grace,
   loading delay, gaps, intro, plain/none notice, instrumental).
-- `python3 -m unittest tests.test_lrclib_lyrics`: 24 tests, OK. Title cleaning and version
+- `python3 -m unittest tests.test_lrclib_lyrics`: 23 tests, OK. Title cleaning and version
   labels, skip rules, LRC parsing, wrong-version rejection, duration window, approximate
   matches, bilingual titles, plain lyrics never timed, exact-get-first, network errors.
 - `bash tests/run_qml_tests.sh` (qmltestrunner, offscreen, stub Quickshell modules): 15 passed,
