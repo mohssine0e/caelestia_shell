@@ -330,7 +330,8 @@ CustomMouseArea {
                         horizontalAlignment: Text.AlignHCenter
                         text: model.shortName
                         font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
-                        color: (model.day === 0 || model.day === 6) ? Colours.palette.m3tertiary : Colours.palette.m3onSurface
+                        // Colour roles: primary = today, secondary = weekends and selection, tertiary = events.
+                        color: (model.day === 0 || model.day === 6) ? Colours.palette.m3secondary : Colours.palette.m3onSurface
                     }
                 }
 
@@ -352,7 +353,7 @@ CustomMouseArea {
 
                         anchors.fill: parent
 
-                        spacing: 3
+                        spacing: Tokens.spacing.extraSmall
                         locale: Tr.locale
 
                         delegate: Item {
@@ -361,20 +362,22 @@ CustomMouseArea {
                             required property var model
 
                             implicitWidth: implicitHeight
-                            implicitHeight: text.implicitHeight + Tokens.padding.small + 4
+                            implicitHeight: text.implicitHeight + Tokens.padding.medium
 
                             readonly property string dayKey: root.dateToKey(dayItem.model.date)
                             readonly property var events: root.gcalEvents[dayKey] || []
                             readonly property bool hasEvents: events.length > 0
                             readonly property bool isSelected: root.selectedDateKey === dayKey
 
+                            // Selection uses the secondary container at full strength, so it
+                            // never reads as a second "today" (primary) circle.
                             Rectangle {
                                 anchors.centerIn: parent
-                                width: Math.min(parent.width, parent.height) - 4
+                                width: Math.min(parent.width, parent.height) - Tokens.padding.extraSmall
                                 height: width
                                 radius: width / 2
-                                color: Colours.palette.m3primaryContainer
-                                opacity: dayItem.isSelected && !dayItem.model.today ? 0.7 : 0
+                                color: Colours.palette.m3secondaryContainer
+                                opacity: dayItem.isSelected && !dayItem.model.today ? 1 : 0
                                 Behavior on opacity {
                                     Anim {
                                         type: Anim.FastEffects
@@ -405,10 +408,10 @@ CustomMouseArea {
                                 text: grid.locale.toString(dayItem.model.day)
                                 color: {
                                     if (dayItem.isSelected && !dayItem.model.today)
-                                        return Colours.palette.m3onPrimaryContainer;
+                                        return Colours.palette.m3onSecondaryContainer;
                                     const dayOfWeek = dayItem.model.date.getDay();
                                     if (dayOfWeek === 0 || dayOfWeek === 6)
-                                        return Colours.palette.m3tertiary;
+                                        return Colours.palette.m3secondary;
 
                                     return Colours.palette.m3onSurfaceVariant;
                                 }
@@ -442,7 +445,7 @@ CustomMouseArea {
                         }
 
                         x: today ? today.x + (today.width - implicitWidth) / 2 : 0
-                        y: today ? today.y - Tokens.padding.extraSmall - 1 : 0
+                        y: today ? today.y + (today.height - implicitSize) / 2 : 0
 
                         implicitSize: today ? Math.max(today.implicitWidth, today.implicitHeight) + Tokens.padding.extraSmall * 2 : 0
                         shape: MaterialShape.Sunny
@@ -495,7 +498,8 @@ CustomMouseArea {
                         icon: "close"
                         isRound: true
                         type: IconButton.Text
-                        padding: Tokens.padding.extraSmall
+                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                        padding: Tokens.padding.small
                         onClicked: {
                             root.selectedDateKey = "";
                             root.isAddingEvent = false;
@@ -525,7 +529,8 @@ CustomMouseArea {
                         icon: root.isAddingEvent ? "remove" : "add"
                         isRound: true
                         type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
-                        padding: Tokens.padding.extraSmall
+                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+                        padding: Tokens.padding.small
                         ToolTip.visible: hovered
                         ToolTip.text: root.isAddingEvent ? "Cancel new event" : "Add event"
                         onClicked: root.isAddingEvent = !root.isAddingEvent
@@ -536,10 +541,8 @@ CustomMouseArea {
                     id: quickAddBox
                     Layout.fillWidth: true
                     visible: root.isAddingEvent
-                    radius: Tokens.rounding.small
+                    radius: Tokens.rounding.medium
                     color: Colours.palette.m3surfaceContainerHigh
-                    border.width: 1
-                    border.color: Colours.palette.m3outlineVariant
                     implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
 
                     onVisibleChanged: {
@@ -570,7 +573,8 @@ CustomMouseArea {
 
                         StyledTextField {
                             id: eventTimeInput
-                            Layout.preferredWidth: 66
+                            // Wide enough for "00:00" in the field's own font and padding.
+                            Layout.preferredWidth: Math.ceil(timeMetrics.advanceWidth) + leftPadding + rightPadding + Tokens.padding.small
                             placeholderText: "14:00"
                             placeholderFloats: false
                             verticalPadding: Tokens.padding.extraSmall
@@ -579,11 +583,18 @@ CustomMouseArea {
                             Keys.onEscapePressed: root.isAddingEvent = false
                         }
 
+                        TextMetrics {
+                            id: timeMetrics
+
+                            font: Tokens.font.body.small
+                            text: "00:00"
+                        }
+
                         IconButton {
                             icon: "check"
                             isRound: true
                             type: IconButton.Filled
-                            padding: 2
+                            padding: Tokens.padding.extraSmall
                             onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
                         }
                     }
@@ -620,8 +631,8 @@ CustomMouseArea {
                         delegate: Item {
                             id: agendaItem
                             required property var modelData
-                            width: agendaView.width - 10
-                            implicitHeight: modelData.kind === "heading" ? heading.implicitHeight + 12 : modelData.kind === "empty" ? emptyText.implicitHeight + 12 : eventContent.implicitHeight + 10
+                            width: agendaView.width - Tokens.padding.medium
+                            implicitHeight: modelData.kind === "heading" ? heading.implicitHeight + Tokens.padding.medium : modelData.kind === "empty" ? emptyText.implicitHeight + Tokens.padding.medium : eventContent.implicitHeight + Tokens.padding.small
 
                             StyledText {
                                 id: heading
@@ -629,7 +640,7 @@ CustomMouseArea {
                                 visible: agendaItem.modelData.kind === "heading"
                                 text: agendaItem.modelData.title || ""
                                 font: Tokens.font.label.builders.small.weight(Font.Bold).build()
-                                color: Colours.palette.m3primary
+                                color: Colours.palette.m3onSurfaceVariant
                             }
 
                             StyledText {
@@ -652,10 +663,10 @@ CustomMouseArea {
                                 spacing: Tokens.spacing.small
 
                                 Rectangle {
-                                    implicitWidth: 3
-                                    Layout.minimumWidth: 3
+                                    implicitWidth: 4
+                                    Layout.minimumWidth: 4
                                     Layout.preferredHeight: eventText.implicitHeight
-                                    radius: 2
+                                    radius: Tokens.rounding.full
                                     color: Colours.palette.m3tertiary
                                 }
 
@@ -699,7 +710,7 @@ CustomMouseArea {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        height: 18
+                        height: Tokens.spacing.largeIncreased
                         visible: agendaView.contentHeight > agendaView.height && !agendaView.atYEnd
                         gradient: Gradient {
                             GradientStop {
