@@ -36,6 +36,7 @@ ShellRoot {
         Brightness;
         Weather.reload();
         BetterLyrics;
+        LyricsSource;
 
         if (GlobalConfig.utilities.vpn.enabled)
             VPN;
