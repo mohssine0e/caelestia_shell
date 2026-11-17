@@ -14,12 +14,16 @@ from assistant_common import (
     CONFIG_PATH, HISTORY_PATH, MEMORY_PATH, PROFILE_PATH, LEARNER_PROFILE_PATH,
     GEMINI_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS, STOP_WORDS,
     CODE_TOKEN_PATTERN, WORD_PATTERN,
-    emit as _emit, load_config, load_profile, save_profile,
+    emit as _emit, load_config, save_profile,
+    load_profile as _load_saved_profile, load_learner_profile as _load_learner_profile,
     SECRETS_PATH, SECRET_SERVICE_NAME, atomic_write_json,
     load_config_document, credential_status, _load_private_file_credentials,
     _secret_tool_enabled, _secret_tool_lookup,
     extract_keywords, extract_code_tokens, normalize_concept_key
 )
+
+import context_builder
+import user_facts
 
 _request_id = ""
 
@@ -184,6 +188,27 @@ GROQ_CANDIDATE_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
+def build_gemini_payload(system_instruction, user_text, contents=None, gen_config=None):
+    """Trusted rules go in Gemini's systemInstruction field; user content stays in contents."""
+    payload = {
+        "contents": contents if contents else [{"role": "user", "parts": [{"text": user_text}]}],
+        "generationConfig": gen_config or {"temperature": 0.4, "maxOutputTokens": 8192},
+    }
+    if system_instruction:
+        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+    return payload
+
+
+def build_groq_messages(system_instruction, user_text, messages=None):
+    if messages:
+        return messages
+    out = []
+    if system_instruction:
+        out.append({"role": "system", "content": system_instruction})
+    out.append({"role": "user", "content": user_text})
+    return out
+
+
 def stream_gemini(api_key, system_instruction, user_text, contents=None):
     last_err = None
     for model_name in GEMINI_CANDIDATE_MODELS:
@@ -195,14 +220,7 @@ def stream_gemini(api_key, system_instruction, user_text, contents=None):
         if "2.5" in model_name or "2.0" in model_name:
             gen_config["thinkingConfig"] = {"thinkingBudget": 0}
 
-        payload = {
-            "contents": contents if contents else [
-                {
-                    "parts": [{"text": f"Instructions: {system_instruction}\n\nText:\n{user_text}"}]
-                }
-            ],
-            "generationConfig": gen_config
-        }
+        payload = build_gemini_payload(system_instruction, user_text, contents, gen_config)
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
@@ -252,10 +270,7 @@ def stream_groq(api_key, system_instruction, user_text, messages=None):
     for model_name in GROQ_CANDIDATE_MODELS:
         payload = {
             "model": model_name,
-            "messages": messages if messages else [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_text}
-            ],
+            "messages": build_groq_messages(system_instruction, user_text, messages),
             "temperature": 0.4,
             "max_tokens": 8192,
             "stream": True
@@ -323,10 +338,6 @@ def classify_error(err_str, http_code=None):
         "message": err_str or "An error occurred while generating response."
     }
 
-PROFILE_PATH = os.path.expanduser("~/.config/caelestia/assistant_profile.json")
-HISTORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_history.json")
-MEMORY_PATH = os.path.expanduser("~/.config/caelestia/assistant_memory.json")
-
 DEFAULT_PROFILE = {
     "os": "Linux (Hyprland)",
     "languages": ["Python", "QML / Qt", "Bash"],
@@ -336,67 +347,94 @@ DEFAULT_PROFILE = {
     "last_updated": ""
 }
 
+
 def load_profile():
-    if os.path.exists(PROFILE_PATH):
-        try:
-            with open(PROFILE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    prof = DEFAULT_PROFILE.copy()
-                    prof.update(data)
-                    return prof
-        except Exception:
-            pass
-    return DEFAULT_PROFILE.copy()
+    """Saved settings merged over the defaults. Only context_builder decides what is sent."""
+    prof = DEFAULT_PROFILE.copy()
+    data = _load_saved_profile()
+    if isinstance(data, dict):
+        prof.update(data)
+    return prof
 
-def save_profile(profile_data):
-    os.makedirs(os.path.dirname(PROFILE_PATH), exist_ok=True)
-    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
-        json.dump(profile_data, f, indent=2)
-    return {"success": True}
 
-LEARNER_PROFILE_PATH = os.path.expanduser("~/.config/caelestia/learner_profile.json")
+def load_learner_profile():
+    return _load_learner_profile()
 
-def get_learner_profile_injection():
-    if not os.path.exists(LEARNER_PROFILE_PATH):
-        return ""
-    try:
-        with open(LEARNER_PROFILE_PATH, "r", encoding="utf-8") as f:
-            prof = json.load(f)
-        active_ctx = prof.get("active_context") or "unknown workspace"
-        weakest = ", ".join(prof.get("weakest_domains", [])) or "none identified yet"
-        blindspots_list = prof.get("blindspots", [])
-        blindspots = "; ".join(blindspots_list[:4]) if blindspots_list else "none recorded"
-        return (
-            f"USER PROFILE: The user is currently working on [{active_ctx}]. "
-            f"Their weakest areas are [{weakest}]. "
-            f"They frequently fail on [{blindspots}]. "
-            f"Tailor your answers to their level. "
-            f"If they ask about a known blindspot, explicitly point it out.\n"
-        )
-    except Exception:
-        return ""
 
-def get_profile_prompt_prefix():
-    profile = load_profile()
-    parts = []
-    if profile.get("os"):
-        parts.append(f"OS: {profile['os']}")
-    langs = profile.get("languages", [])
-    if isinstance(langs, list) and langs:
-        parts.append(f"Tech: {', '.join(langs)}")
-    elif isinstance(langs, str) and langs.strip():
-        parts.append(f"Tech: {langs.strip()}")
-    if profile.get("style_preference"):
-        parts.append(f"Style: {profile['style_preference']}")
-    if profile.get("bilingual"):
-        parts.append(f"Language: {profile['bilingual']}")
-    if profile.get("custom_notes"):
-        parts.append(f"Notes: {profile['custom_notes']}")
+# Trusted, code-written behaviour for general questions. Saved data never goes here.
+MENTOR_ASK_PROMPT = (
+    "You are the user's personal assistant and mentor. Help with whatever they bring: studies, career and job "
+    "search, technical work, and everyday life.\n"
+    "- Answer the question that was actually asked. When it is not technical, answer it on its own terms and do "
+    "not steer it toward programming, tools or the user's projects.\n"
+    "- When the user asks for advice, a plan or a decision, give concrete next steps they can act on, and say "
+    "plainly when the answer depends on something you do not know.\n"
+    "- Do not lecture about productivity, habits or time management unless the user asks about them.\n"
+    "- Do not diagnose the user or describe their personality or feelings as facts; respond to what they said."
+)
+REFERENCE_TEXT_RULE = "When the user supplies a reference text, use it as the main source for the answer."
+FOLLOWUP_PROMPT = (
+    f"{MENTOR_ASK_PROMPT}\n"
+    "You are continuing a conversation. Answer the follow-up using the earlier turns and any reference material "
+    "the user supplied. Do not re-explain settled points unless asked; focus on the new aspect requested "
+    "(for example concrete examples, edge cases or a deeper breakdown)."
+)
+LATEX_SYMBOL_RULE = (
+    "Formatting rules: Always output standard Unicode characters directly for symbols and arrows "
+    "(e.g., →, ←, ↔, ⇒, ⇐, ⇔, ≈, ≠, ≤, ≥, ×, ·) instead of LaTeX math syntax like $\\rightarrow$ or \\rightarrow. "
+    "Never use raw LaTeX delimiters ($...$) or macros for arrows or basic symbols in plain text."
+)
+QUIZ_RESULTS_RULE = (
+    "If quiz_results appear in the context data and the request touches one of those weak areas or repeated "
+    "mistakes, point it out briefly."
+)
 
-    if not parts:
-        return ""
-    return f"[Developer Profile Context: {' | '.join(parts)}]\n"
+
+def compose_system_instruction(action, base_prompt, has_context_data):
+    """Only code-written text: the action prompt plus fixed rules."""
+    parts = [base_prompt]
+    if action in ("ask", "explain", "fix"):
+        parts.append(ADAPTIVE_LENGTH_INSTRUCTION)
+    if action != "translate":
+        parts.append(VOCABULARY_TRANSLATION_RULE)
+    if has_context_data:
+        parts.append(context_builder.CONTEXT_RULES)
+        parts.append(QUIZ_RESULTS_RULE)
+    parts.append(LATEX_SYMBOL_RULE)
+    return "\n\n".join(p for p in parts if p)
+
+
+def compose_messages(system_instruction, user_payload, thread, data_block="", anchor_text=""):
+    """Build the user turn and, for follow-ups, the provider message lists.
+
+    Saved context and reference material go in the final user turn, never in a
+    system message. Returns (final_user_text, gemini_contents, groq_messages);
+    the two lists are None for a single-turn request.
+    """
+    sections = []
+    if data_block:
+        sections.append(data_block)
+    if anchor_text:
+        sections.append(f"Reference material for this discussion:\n{anchor_text}")
+    if sections:
+        label = "Follow-up question" if thread else "Request"
+        final_user_text = "\n\n".join(sections + [f"{label}:\n{user_payload}"])
+    else:
+        final_user_text = user_payload
+    if not thread:
+        return final_user_text, None, None
+
+    groq_messages = [{"role": "system", "content": system_instruction}]
+    gemini_contents = []
+    for turn in thread:
+        is_assistant = turn.get("role") == "assistant"
+        content = str(turn.get("content", ""))
+        groq_messages.append({"role": "assistant" if is_assistant else "user", "content": content})
+        gemini_contents.append({"role": "model" if is_assistant else "user", "parts": [{"text": content}]})
+    groq_messages.append({"role": "user", "content": final_user_text})
+    gemini_contents.append({"role": "user", "parts": [{"text": final_user_text}]})
+    return final_user_text, gemini_contents, groq_messages
+
 
 def get_active_workspace_context():
     try:
@@ -435,7 +473,7 @@ def get_active_workspace_context():
                 pass
 
         if parts:
-            return f"[CURRENT DEVELOPER WORKSPACE: {' | '.join(parts)}]\n(Tailor your answer directly to this project, file, and technology.)\n"
+            return " | ".join(parts)
         return ""
     except Exception:
         return ""
@@ -491,10 +529,8 @@ def touch_matching_knowledge_cards(query):
                     c["last_touched"] = now_iso
                     touched = True
         if touched:
-            tmp = MEMORY_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(cards, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, MEMORY_PATH)
+            # Private file (0600), atomic replace; audit P06.
+            atomic_write_json(MEMORY_PATH, cards)
     except Exception:
         pass
 
@@ -681,6 +717,7 @@ def main():
         topic_anchor = str(stdin_payload.get("anchor", ""))
         extra_context = str(stdin_payload.get("context", ""))
         include_personal_context = stdin_payload.get("include_personal_context", True) is not False
+        include_sensitive_facts = stdin_payload.get("include_sensitive_facts") is True
         parsed_thread = stdin_payload.get("thread", [])
     else:
         mode = "auto"
@@ -688,6 +725,7 @@ def main():
         topic_anchor = ""
         extra_context = ""
         include_personal_context = True
+        include_sensitive_facts = False
         positional = []
         i = 2
         while i < len(sys.argv):
@@ -765,34 +803,20 @@ def main():
     is_followup = (action == "ask" and mode == "followup" and len(thread) > 0)
     user_payload = text_to_process
 
+    anchor_text = ""
     if action == "ask":
         if is_followup:
             anchor_text = topic_anchor.strip() if topic_anchor else (text_to_process[:350].strip() if text_to_process else "")
-            anchor_context = f"[Originating Topic & Reference Material: {anchor_text}]\n" if anchor_text else ""
-            system_instruction = (
-                f"You are an expert technical reading assistant continuing an active inquiry with the user.\n"
-                f"{anchor_context}"
-                f"Directly answer the user's follow-up question based on the whole discussion and reference material. "
-                f"Synthesize the prior discussion without re-explaining settled definitions unless requested. "
-                f"Focus specifically on the new aspect requested (e.g., concrete examples, edge cases, deeper breakdown)."
-            )
+            system_instruction = FOLLOWUP_PROMPT
             user_payload = custom_prompt if custom_prompt else text_to_process
         elif custom_prompt and text_to_process.strip():
-            system_instruction = (
-                "You are an expert reading assistant. Answer the user's question clearly "
-                "using the provided context text as reference when relevant."
-            )
-            user_payload = f"Context text:\n{text_to_process}\n\nUser Question: {custom_prompt}"
+            system_instruction = f"{MENTOR_ASK_PROMPT}\n{REFERENCE_TEXT_RULE}"
+            user_payload = f"Reference text:\n{text_to_process}\n\nQuestion: {custom_prompt}"
         elif custom_prompt:
-            system_instruction = (
-                "You are a helpful and knowledgeable AI assistant. "
-                "Directly and accurately answer the user's question."
-            )
+            system_instruction = MENTOR_ASK_PROMPT
             user_payload = custom_prompt
-        elif text_to_process.strip():
-            system_instruction = (
-                "You are an expert assistant. Explain or answer regarding the provided text clearly and directly."
-            )
+        else:
+            system_instruction = f"{MENTOR_ASK_PROMPT}\n{REFERENCE_TEXT_RULE}"
             user_payload = text_to_process
     else:
         system_instruction = PROMPTS.get(action, PROMPTS["explain"])
@@ -803,76 +827,38 @@ def main():
         else:
             user_payload = text_to_process
 
-    if action in ("ask", "explain", "fix"):
-        system_instruction = f"{system_instruction}\n\n{ADAPTIVE_LENGTH_INSTRUCTION}"
-
-    if action != "translate":
-        system_instruction = f"{system_instruction}\n\n{VOCABULARY_TRANSLATION_RULE}"
-
-    if action == "ask":
+    if include_personal_context and action == "ask":
         touch_matching_knowledge_cards(custom_prompt or text_to_process)
 
-    learner_injection = get_learner_profile_injection() if include_personal_context else ""
-    if learner_injection:
-        system_instruction = f"{learner_injection}\n{system_instruction}"
-
-    profile_prefix = get_profile_prompt_prefix() if include_personal_context else ""
-    if profile_prefix:
-        system_instruction = f"{profile_prefix}\n{system_instruction}"
-
-    workspace_context = get_active_workspace_context() if include_personal_context else ""
-    if workspace_context:
-        system_instruction = f"{workspace_context}\n{system_instruction}"
-
-    if extra_context:
-        system_instruction = f"{extra_context}\n{system_instruction}"
-
-    latex_symbol_rule = (
-        "Formatting rules: Always output standard Unicode characters directly for symbols and arrows "
-        "(e.g., →, ←, ↔, ⇒, ⇐, ⇔, ≈, ≠, ≤, ≥, ×, ·) instead of LaTeX math syntax like $\\rightarrow$ or \\rightarrow. "
-        "Never use raw LaTeX delimiters ($...$) or macros for arrows or basic symbols in plain text."
+    ctx = context_builder.build_context(
+        action,
+        custom_prompt,
+        source_text=text_to_process,
+        include_personal=include_personal_context,
+        facts=user_facts.approved_facts() if include_personal_context else [],
+        profile=load_profile() if include_personal_context else {},
+        default_profile=DEFAULT_PROFILE,
+        learner=load_learner_profile() if include_personal_context else {},
+        workspace_fn=get_active_workspace_context,
+        recall_fn=lambda: find_relevant_history(text_to_process, custom_prompt),
+        technical_cards=extra_context,
+        include_sensitive=include_sensitive_facts,
+        is_followup=is_followup,
     )
-    system_instruction = f"{system_instruction}\n{latex_symbol_rule}"
+    data_block = context_builder.render_data_block(ctx)
+    context_used = context_builder.summarize(ctx)
+    system_instruction = compose_system_instruction(action, system_instruction, bool(data_block))
 
-    recalled_item = find_relevant_history(text_to_process, custom_prompt) if include_personal_context and not is_followup else None
     recalled_meta = None
-    if recalled_item:
-        prior_title = (recalled_item.get("prompt") or recalled_item.get("text") or "")[:80].replace("\n", " ").strip()
-        prior_ans = (recalled_item.get("answer") or "")[:280].replace("\n", " ").strip()
-        context_injection = f"[Relevant Prior Context: User previously worked on \"{prior_title}\". Prior resolution: \"{prior_ans}\"]\n"
-        system_instruction = f"{context_injection}{system_instruction}"
+    if ctx.get("prior_answer"):
         recalled_meta = {
-            "id": str(recalled_item.get("id")),
-            "title": prior_title,
-            "timestamp": recalled_item.get("timestamp", 0)
+            "id": ctx["prior_answer"]["id"],
+            "title": ctx["prior_answer"]["question"],
+            "timestamp": ctx["prior_answer"]["timestamp"],
         }
 
-    gemini_contents = None
-    groq_messages = None
-
-    if is_followup:
-        # Groq: OpenAI-style messages array as-is
-        groq_messages = [{"role": "system", "content": system_instruction}]
-        for turn in thread:
-            t_role = "assistant" if turn.get("role") == "assistant" else "user"
-            groq_messages.append({"role": t_role, "content": turn.get("content", "")})
-        groq_messages.append({"role": "user", "content": user_payload})
-
-        # Gemini: convert to contents format (user/model, parts[{text}])
-        gemini_contents = []
-        first_user = True
-        for turn in thread:
-            g_role = "model" if turn.get("role") == "assistant" else "user"
-            t_content = turn.get("content", "")
-            if first_user and g_role == "user":
-                t_content = f"Instructions: {system_instruction}\n\n{t_content}"
-                first_user = False
-            gemini_contents.append({"role": g_role, "parts": [{"text": t_content}]})
-
-        final_user_text = user_payload
-        if first_user:
-            final_user_text = f"Instructions: {system_instruction}\n\n{final_user_text}"
-        gemini_contents.append({"role": "user", "parts": [{"text": final_user_text}]})
+    user_payload, gemini_contents, groq_messages = compose_messages(
+        system_instruction, user_payload, thread if is_followup else [], data_block, anchor_text)
 
     providers = []
     if primary == "groq":
@@ -896,7 +882,8 @@ def main():
                 "provider": prov_label,
                 "truncated": is_truncated,
                 "truncated_at": effective_limit,
-                "recalled_from": recalled_meta
+                "recalled_from": recalled_meta,
+                "context_used": context_used
             })
             chosen_provider = prov_label
 
@@ -924,7 +911,8 @@ def main():
             "latency_ms": elapsed_ms,
             "truncated": is_truncated,
             "truncated_at": effective_limit,
-            "recalled_from": recalled_meta
+            "recalled_from": recalled_meta,
+            "context_used": context_used
         })
     else:
         err_info = classify_error(last_err_str, last_http_code)
