@@ -62,7 +62,7 @@ StyledRect {
                 width: 8
                 height: 8
                 radius: 4
-                color: Qt.color("#38bdf8")
+                color: Colours.palette.m3secondary
             }
 
             // Question / Title

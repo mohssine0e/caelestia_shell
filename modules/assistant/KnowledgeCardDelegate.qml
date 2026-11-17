@@ -74,7 +74,7 @@ StyledRect {
     border.width: 1
     border.color: {
         if (root.isExpanded) return Qt.alpha(Colours.palette.m3primary, 0.5)
-        if (root.isMastered) return Qt.alpha(Qt.color("#4ade80"), 0.35)
+        if (root.isMastered) return Qt.alpha(Colours.palette.m3success, 0.35)
         return Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
     }
 
@@ -98,7 +98,7 @@ StyledRect {
                 width: 8
                 height: 8
                 radius: 4
-                color: root.isMastered ? "#4ade80" : "#fbbf24"
+                color: root.isMastered ? Colours.palette.m3success : Colours.palette.m3tertiary
             }
 
             StyledText {

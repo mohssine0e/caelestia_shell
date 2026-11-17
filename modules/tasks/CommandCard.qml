@@ -101,8 +101,17 @@ StyledRect {
         }
     }
 
+    function htmlHex(colour) {
+        const part = value => Math.round(value * 255).toString(16).padStart(2, "0")
+        return `#${part(colour.r)}${part(colour.g)}${part(colour.b)}`
+    }
+
     function formatSyntaxHighlight(text) {
         if (!text) return ""
+        const muted = htmlHex(Colours.palette.m3onSurfaceVariant)
+        const warning = htmlHex(Colours.palette.m3tertiary)
+        const command = htmlHex(Colours.palette.m3primary)
+        const flag = htmlHex(Colours.palette.m3secondary)
         let lines = text.split("\n")
         let formattedLines = []
         for (let i = 0; i < lines.length; i++) {
@@ -110,15 +119,15 @@ StyledRect {
             let trimmed = line.trim()
             if (trimmed.startsWith("#")) {
                 let escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.25;"><font color="#9595a8"><i>' + escaped + '</i></font></p>')
+                formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.25;"><font color="' + muted + '"><i>' + escaped + '</i></font></p>')
             } else if (trimmed === "") {
                 formattedLines.push('<p style="margin: 0; padding: 0; font-size: 6px; line-height: 6px;">&nbsp;</p>')
             } else {
                 let s = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                s = s.replace(/\b(sudo)\b/g, '<font color="#ffb74d"><b>$1</b></font>')
-                s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="#d0bcff"><b>$1</b></font>')
-                s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="#80d4ff">$2</font>')
-                s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="#fbc02d"><i>$1</i></font>')
+                s = s.replace(/\b(sudo)\b/g, '<font color="' + warning + '"><b>$1</b></font>')
+                s = s.replace(/\b(pacman|nmcli|systemctl|rfkill|bluetoothctl|warp-cli|curl|sed|ncdu|mount|paccache)\b/g, '<font color="' + command + '"><b>$1</b></font>')
+                s = s.replace(/(\s)(-[a-zA-Z0-9_-]+)/g, '$1<font color="' + flag + '">$2</font>')
+                s = s.replace(/(&lt;[a-zA-Z0-9_-]+&gt;)/g, '<font color="' + warning + '"><i>$1</i></font>')
                 formattedLines.push('<p style="margin: 0; padding: 0; line-height: 1.25;">' + s + '</p>')
             }
         }
@@ -278,7 +287,7 @@ StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: fullEdit.implicitHeight + 12
                 radius: Tokens.rounding.small
-                color: "#0a0a0f"
+                color: Colours.palette.m3surfaceContainerLowest
                 border.width: 1
                 border.color: Colours.palette.m3outlineVariant
 

@@ -38,10 +38,10 @@ StyledRect {
 
     Layout.fillWidth: true
     radius: Tokens.rounding.small
-    color: "#272325"
+    color: Colours.palette.m3surfaceContainer
     border.width: 1
-    border.color: root.isExpanded ? Qt.alpha("#ffca1b", 0.4)
-                                  : Qt.alpha("#ffca1b", 0.16)
+    border.color: root.isExpanded ? Qt.alpha(Colours.palette.m3tertiary, 0.4)
+                                  : Qt.alpha(Colours.palette.m3tertiary, 0.16)
     clip: true
 
     implicitHeight: root.isExpanded
@@ -295,7 +295,7 @@ StyledRect {
             MaterialIcon {
                 text: "edit_note"
                 fontStyle: Tokens.font.icon.small
-                color: "#ffca1b"
+                color: Colours.palette.m3tertiary
                 fill: 1
                 Layout.alignment: Qt.AlignVCenter
 
@@ -363,10 +363,10 @@ StyledRect {
                             implicitHeight: 26
                             implicitWidth: pillInnerRow.implicitWidth + 16
                             radius: Tokens.rounding.full
-                            color: isActive ? Qt.alpha("#ffca1b", 0.22) : "#302b2d"
+                            color: isActive ? Qt.alpha(Colours.palette.m3tertiary, 0.22) : Colours.palette.m3surfaceContainerHigh
 
                             border.width: 1
-                            border.color: isActive ? "#ffca1b" : Qt.alpha("#ffca1b", 0.18)
+                            border.color: isActive ? Colours.palette.m3tertiary : Qt.alpha(Colours.palette.m3tertiary, 0.18)
 
                             Behavior on color { CAnim {} }
                             Behavior on border.color { CAnim {} }
@@ -382,7 +382,7 @@ StyledRect {
                                     implicitWidth: 5
                                     implicitHeight: 5
                                     radius: Tokens.rounding.full
-                                    color: pillCard.isActive ? "#ffca1b" : Qt.alpha("#ede6df", 0.45)
+                                    color: pillCard.isActive ? Colours.palette.m3tertiary : Qt.alpha(Colours.palette.m3onSurface, 0.45)
                                     Layout.alignment: Qt.AlignVCenter
                                 }
 
@@ -391,7 +391,7 @@ StyledRect {
                                     visible: !pillCard.isEditing
                                     text: pillCard.modelData.title || qsTr("Untitled")
                                     font: Tokens.font.label.medium
-                                    color: pillCard.isActive ? "#ffca1b" : "#ede6df"
+                                    color: pillCard.isActive ? Colours.palette.m3tertiary : Colours.palette.m3onSurface
                                     Layout.alignment: Qt.AlignVCenter
                                 }
 
@@ -401,9 +401,9 @@ StyledRect {
                                     visible: pillCard.isEditing
                                     text: pillCard.modelData.title || ""
                                     font: Tokens.font.label.medium
-                                    color: "#ede6df"
-                                    selectionColor: Qt.alpha("#ffca1b", 0.4)
-                                    selectedTextColor: "#ffffff"
+                                    color: Colours.palette.m3onSurface
+                                    selectionColor: Qt.alpha(Colours.palette.m3tertiary, 0.4)
+                                    selectedTextColor: Colours.palette.m3onSurface
                                     verticalAlignment: TextInput.AlignVCenter
                                     Layout.preferredWidth: Math.max(65, contentWidth + 10)
 
@@ -421,7 +421,7 @@ StyledRect {
                                     visible: pillCard.isEditing
                                     text: "check"
                                     fontStyle: Tokens.font.icon.small
-                                    color: "#ffca1b"
+                                    color: Colours.palette.m3tertiary
                                     Layout.alignment: Qt.AlignVCenter
 
                                     MouseArea {
@@ -471,9 +471,9 @@ StyledRect {
                         implicitHeight: 26
                         implicitWidth: addPillRow.implicitWidth + 16
                         radius: Tokens.rounding.full
-                        color: "#302b2d"
+                        color: Colours.palette.m3surfaceContainerHigh
                         border.width: 1
-                        border.color: Qt.alpha("#ffca1b", 0.22)
+                        border.color: Qt.alpha(Colours.palette.m3tertiary, 0.22)
 
                         Behavior on color { CAnim {} }
                         Behavior on border.color { CAnim {} }
@@ -486,13 +486,13 @@ StyledRect {
                             MaterialIcon {
                                 text: "add"
                                 fontStyle: Tokens.font.icon.small
-                                color: "#ffca1b"
+                                color: Colours.palette.m3tertiary
                             }
 
                             StyledText {
                                 text: qsTr("New")
                                 font: Tokens.font.label.medium
-                                color: "#ffca1b"
+                                color: Colours.palette.m3tertiary
                             }
                         }
 
@@ -515,9 +515,9 @@ StyledRect {
                         implicitHeight: 26
                         implicitWidth: 160
                         radius: Tokens.rounding.full
-                        color: "#3b3437"
+                        color: Colours.palette.m3surfaceContainerHighest
                         border.width: 1.5
-                        border.color: "#ffca1b"
+                        border.color: Colours.palette.m3tertiary
 
                         RowLayout {
                             anchors.fill: parent
@@ -529,9 +529,9 @@ StyledRect {
                                 id: newGroupTitleInput
                                 Layout.fillWidth: true
                                 font: Tokens.font.label.medium
-                                color: "#ede6df"
-                                selectionColor: Qt.alpha("#ffca1b", 0.4)
-                                selectedTextColor: "#ffffff"
+                                color: Colours.palette.m3onSurface
+                                selectionColor: Qt.alpha(Colours.palette.m3tertiary, 0.4)
+                                selectedTextColor: Colours.palette.m3onSurface
                                 verticalAlignment: TextInput.AlignVCenter
                                 clip: true
 
@@ -540,7 +540,7 @@ StyledRect {
                                     visible: !newGroupTitleInput.text && !newGroupTitleInput.activeFocus
                                     text: qsTr("Note name...")
                                     font: newGroupTitleInput.font
-                                    color: Qt.alpha("#ede6df", 0.45)
+                                    color: Qt.alpha(Colours.palette.m3onSurface, 0.45)
                                     verticalAlignment: Text.AlignVCenter
                                 }
 
@@ -625,7 +625,7 @@ StyledRect {
                     MaterialIcon {
                         text: deleteNoteBtn.isConfirming ? "delete_forever" : "delete_outline"
                         fontStyle: Tokens.font.icon.small
-                        color: deleteNoteBtn.isConfirming ? Colours.palette.m3error : Qt.alpha("#ede6df", 0.55)
+                        color: deleteNoteBtn.isConfirming ? Colours.palette.m3error : Qt.alpha(Colours.palette.m3onSurface, 0.55)
                     }
 
                     StyledText {
@@ -657,7 +657,7 @@ StyledRect {
                     anchors.centerIn: parent
                     text: "keyboard_arrow_down"
                     fontStyle: Tokens.font.icon.small
-                    color: chevronHover.hovered ? "#ffca1b" : Qt.alpha("#ede6df", 0.6)
+                    color: chevronHover.hovered ? Colours.palette.m3tertiary : Qt.alpha(Colours.palette.m3onSurface, 0.6)
                     rotation: root.isExpanded ? 180 : 0
 
                     Behavior on rotation {
@@ -683,7 +683,7 @@ StyledRect {
             id: sep
             Layout.fillWidth: true
             implicitHeight: 1
-            color: "#ffca1b"
+            color: Colours.palette.m3tertiary
             opacity: root.isExpanded ? 0.2 : 0
             visible: root.isExpanded
 
@@ -711,10 +711,10 @@ StyledRect {
             TextEdit {
                 id: scratchpadInput
                 width: flick.width
-                color: "#ede6df"
+                color: Colours.palette.m3onSurface
                 font: Tokens.font.body.small
-                selectionColor: Qt.alpha("#ffca1b", 0.35)
-                selectedTextColor: "#ffffff"
+                selectionColor: Qt.alpha(Colours.palette.m3tertiary, 0.35)
+                selectedTextColor: Colours.palette.m3onSurface
                 wrapMode: TextEdit.Wrap
                 selectByMouse: true
                 renderType: TextEdit.NativeRendering
@@ -728,7 +728,7 @@ StyledRect {
                     visible: !scratchpadInput.text && !scratchpadInput.activeFocus
                     text: qsTr("• Write notes for %1 here...").arg(root.currentGroup ? root.currentGroup.title : "this note")
                     font: scratchpadInput.font
-                    color: Qt.alpha("#ede6df", 0.45)
+                    color: Qt.alpha(Colours.palette.m3onSurface, 0.45)
                     opacity: 0.6
                 }
 

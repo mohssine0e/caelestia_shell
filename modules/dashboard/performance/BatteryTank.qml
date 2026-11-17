@@ -13,7 +13,7 @@ ClipRect {
 
     property real animPerc: UPower.displayDevice.percentage
 
-    color: Colours.palette.m3secondaryContainer
+    color: Colours.palette.m3surfaceContainerHigh
     radius: Tokens.rounding.large
 
     implicitWidth: Config.dashboard.performance.showCpu || (Config.dashboard.performance.showGpu && Gpu.type !== GpuType.None) || Config.dashboard.performance.showStorage || Config.dashboard.performance.showMemory ? Tokens.sizes.dashboard.perfBattWidth : Tokens.sizes.dashboard.perfBattWidthSingle
@@ -40,7 +40,7 @@ ClipRect {
         anchors.bottom: parent.bottom
         implicitHeight: parent.height * root.animPerc
 
-        color: Colours.palette.m3secondary
+        color: Colours.palette.m3secondaryContainer
         radius: Tokens.rounding.extraSmall
         clip: true
 
@@ -51,9 +51,9 @@ ClipRect {
             anchors.margins: layout.anchors.margins
             height: layout.height
 
-            accentColour: Colours.palette.m3primaryContainer
-            textColour: Colours.palette.m3onSecondary
-            subTextColour: Colours.palette.m3secondaryContainer
+            accentColour: Colours.palette.m3primary
+            textColour: Colours.palette.m3onSecondaryContainer
+            subTextColour: Colours.palette.m3onSurfaceVariant
         }
     }
 
