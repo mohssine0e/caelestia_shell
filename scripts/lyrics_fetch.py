@@ -1,1 +1,0 @@
-/home/mohssine/.config/quickshell/caelestia/scripts/ai_lyrics.py

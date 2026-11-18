@@ -15,20 +15,13 @@ import qs.services
 Item {
     id: root
 
-    // Funny binding hack to make lyrics update
-    readonly property var _: {
-        const p = Players.active;
-        if (p) {
-            Lyrics.setTrack(p.trackArtist, p.trackTitle, p.trackAlbum, p.length);
-            BetterLyrics.setTrack(p.trackArtist, p.trackTitle, p.trackAlbum, p.length);
-        } else {
-            Lyrics.clearTrack();
-            BetterLyrics.clearTrack();
-        }
-    }
-
+    // Lines come from LyricsSource, the same source as the desktop overlay, which also keeps the
+    // providers in step with the active player. Plain (unsynced) lyrics are listed without a
+    // highlight and cannot be clicked to seek, because they have no timing.
     readonly property real fadeAmount: 0.1
-    property var lyricList: BetterLyrics.hasLyrics ? BetterLyrics.texts : Lyrics.lyrics
+    readonly property bool synced: LyricsSource.status === "synced"
+    readonly property bool plain: LyricsSource.status === "plain"
+    property var lyricList: root.synced ? LyricsSource.texts : (root.plain ? LyricsSource.plainText.split(/\r?\n/) : [])
 
     layer.enabled: true
     layer.effect: Mask {
@@ -66,9 +59,9 @@ Item {
     }
 
     state: {
-        if (Lyrics.hasLyrics)
+        if (root.synced || root.plain)
             return "hasLyrics";
-        if (Lyrics.loading)
+        if (LyricsSource.status === "loading")
             return "loading";
         return "noLyrics";
     }
@@ -208,13 +201,13 @@ Item {
 
             MaterialIcon {
                 Layout.alignment: Qt.AlignHCenter
-                text: "sentiment_sad"
+                text: LyricsSource.status === "instrumental" ? "music_note" : "sentiment_sad"
                 fontStyle: Tokens.font.icon.builders.large.scale(2).build()
                 color: Colours.palette.m3outline
             }
 
             StyledText {
-                text: Tr.tr("No lyrics found")
+                text: LyricsSource.status === "instrumental" ? Tr.tr("Instrumental track") : Tr.tr("No lyrics found")
                 color: Colours.palette.m3outline
                 font: Tokens.font.title.medium
             }
@@ -235,8 +228,11 @@ Item {
         Component.onCompleted: {
             currentIndex = Qt.binding(() => {
                 model; // Force update when lyrics change
+                LyricsSource.offset;
+                if (!root.synced)
+                    return -1;
                 const pos = Players.active ? Players.active.position : 0;
-                return BetterLyrics.hasLyrics ? BetterLyrics.indexForTime(pos) : Lyrics.indexForTime(pos);
+                return LyricsSource.indexForTime(pos);
             });
             positionViewAtIndex(currentIndex, ListView.Center);
         }
@@ -262,13 +258,15 @@ Item {
             anchors.left: lyrics.contentItem.left
             anchors.right: lyrics.contentItem.right
 
+            // Only whole-line markers are gaps, so lines such as "Don't break my heart" stay text.
             text: {
-                const s = (lyric.modelData || "").trim().toLowerCase();
-                if (s === "♪" || s === "♪ ♪" || s.includes("instrumental") || s.includes("intro") || s.includes("solo") || s.includes("interlude"))
+                if (!root.synced)
+                    return lyric.modelData || "";
+                if (LyricsSource.isInstrumentalMarker(lyric.modelData))
                     return "♪  ♫  ♩  ♬  ♪";
-                return lyric.modelData || ". . .";
+                return lyric.modelData;
             }
-            color: ListView.isCurrentItem ? Colours.palette.m3primary : mouse.containsMouse ? Colours.palette.m3onSurface : Colours.palette.m3outline
+            color: ListView.isCurrentItem ? Colours.palette.m3primary : root.synced && mouse.containsMouse ? Colours.palette.m3onSurface : Colours.palette.m3outline
             font: Tokens.font.body.medium
             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
 
@@ -291,13 +289,11 @@ Item {
                 id: mouse
 
                 anchors.fill: parent
+                enabled: root.synced
                 cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
-                onClicked: {
-                    const p = Players.active;
-                    if (p)
-                        p.position = Lyrics.timeForIndex(lyric.index);
-                }
+                // Seeks with the times of the lyrics on screen (Better Lyrics or the shell's).
+                onClicked: LyricsSource.seekToLine(lyric.index)
             }
         }
 

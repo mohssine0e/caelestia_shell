@@ -6,6 +6,7 @@ import Caelestia.Config
 import Caelestia.I18n
 import Caelestia.Services
 import qs.components
+import qs.components.controls
 import qs.services
 
 Item {
@@ -96,7 +97,7 @@ Item {
             anchors.fill: parent
             clip: true
             opacity: 0
-            state: Lyrics.loading || !Lyrics.hasLyrics ? "" : "hasLyrics"
+            state: LyricsSource.status === "synced" || LyricsSource.status === "plain" ? "hasLyrics" : ""
 
             states: State {
                 name: "hasLyrics"
@@ -149,14 +150,25 @@ Item {
                 spacing: Tokens.spacing.extraSmall
                 opacity: 0
 
+                // The source actually on screen (the same one the desktop overlay uses).
                 StyledText {
-                    // TRANSLATORS: %1 = lyrics backend name, e.g. LRCLIB
-                    text: Tr.tr("Backend: %1").arg(CUtils.enumToString(Lyrics, "backend"))
+                    // TRANSLATORS: %1 = lyrics source name, e.g. LRCLIB
+                    text: LyricsSource.provider === "shell" ? Tr.tr("Backend: %1").arg(CUtils.enumToString(Lyrics, "backend")) : Tr.tr("Source: %1").arg(LyricsSource.sourceLabel)
                     color: Colours.palette.m3onSurfaceVariant
                     animate: true
                 }
 
                 StyledText {
+                    visible: LyricsSource.status === "plain" || LyricsSource.approximate
+                    Layout.maximumWidth: Tokens.sizes.dashboard.mediaTabWidth / 2
+                    text: LyricsSource.status === "plain" ? Tr.tr("Not synced: no timed lyrics match this recording") : Tr.tr("Approximate match: the recording length differs, adjust the offset if needed")
+                    color: Colours.palette.m3onSurfaceVariant
+                    wrapMode: Text.WordWrap
+                    animate: true
+                }
+
+                StyledText {
+                    visible: LyricsSource.provider === "shell"
                     Layout.maximumWidth: Tokens.sizes.dashboard.mediaTabWidth / 2
                     // TRANSLATORS: %1/%2/%3 = matched track title, artist and album
                     text: Tr.tr("Selected candidate: %1 | %2 | %3").arg(Lyrics.selectedCandidate.title).arg(Lyrics.selectedCandidate.artist).arg(Lyrics.selectedCandidate.album)
@@ -165,11 +177,37 @@ Item {
                     animate: true
                 }
 
-                StyledText {
-                    // TRANSLATORS: %1 = lyric timing offset; ms is the millisecond unit, leave untranslated
-                    text: Tr.tr("Offset: %1 ms").arg(Lyrics.offset)
-                    color: Colours.palette.m3onSurfaceVariant
-                    animate: true
+                // Lyrics.offset is in seconds (it was shown as "0.5 ms" before). Saved per track.
+                RowLayout {
+                    visible: LyricsSource.status === "synced"
+                    spacing: Tokens.spacing.extraSmall
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        // TRANSLATORS: %1 = lyric timing offset, signed; ms is the millisecond unit, leave untranslated. Positive = later.
+                        text: Tr.tr("Offset: %1 ms").arg((LyricsSource.offset > 0 ? "+" : "") + Math.round(LyricsSource.offset * 1000))
+                        color: Colours.palette.m3onSurfaceVariant
+                        animate: true
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "remove"
+                        onClicked: LyricsSource.nudgeOffset(-LyricsSource.offsetStep)
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "restart_alt"
+                        disabled: LyricsSource.offset === 0
+                        onClicked: LyricsSource.resetOffset()
+                    }
+
+                    IconButton {
+                        type: IconButton.Text
+                        icon: "add"
+                        onClicked: LyricsSource.nudgeOffset(LyricsSource.offsetStep)
+                    }
                 }
             }
 
@@ -183,7 +221,7 @@ Item {
                 StyledText {
                     id: placeholderText
 
-                    text: Lyrics.loading ? Tr.tr("Loading...") : Tr.tr("No lyrics found")
+                    text: LyricsSource.status === "loading" ? Tr.tr("Loading...") : Tr.tr("No lyrics found")
                     color: Colours.palette.m3onSurfaceVariant
                     font: Tokens.font.body.medium
                     animate: true

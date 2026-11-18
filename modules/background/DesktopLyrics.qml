@@ -1,32 +1,31 @@
+pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
-import QtQuick.Layouts
 import Quickshell
 import Caelestia
 import Caelestia.Config
-import Caelestia.Services
 import Caelestia.State
 import qs.components
-import qs.components.controls
-import qs.components.effects
 import qs.services
 
+// Desktop lyrics overlay: previous, current and next line under the visualiser.
+//
+// Lines, timing and the per-track offset come from LyricsSource, the same source as the
+// dashboard media tab. Visibility follows playback like the visualiser: hidden at once on stop,
+// faded out 1.5 s after a pause (a quick pause does not flicker), cleared when the player closes.
+// The decision itself is LyricsSource.overlayState(), covered by tests/lyrics_logic.test.js.
 Item {
     id: root
 
     required property ShellScreen screen
 
-    readonly property var player: Players.active
-    readonly property bool betterEnabled: true
-    readonly property bool fallbackEnabled: true
-    readonly property bool useBetter: root.betterEnabled && BetterLyrics.hasLyrics
-    readonly property bool useShell: !root.useBetter && !BetterLyrics.loading && root.fallbackEnabled && Lyrics.hasLyrics
-    readonly property bool activeHasLyrics: root.useBetter || root.useShell
-    readonly property var activeTexts: root.useBetter ? BetterLyrics.texts : (root.useShell ? Lyrics.lyrics : [])
-    readonly property bool activeLoading: !root.activeHasLyrics && (BetterLyrics.loading || (root.fallbackEnabled && Lyrics.loading))
+    readonly property var player: LyricsSource.player
+    readonly property string playback: LyricsSource.playback
+    readonly property string status: LyricsSource.status
 
-    readonly property bool shouldHide: {
+    // Same rule as before: a tiled or fullscreen window on this monitor covers the desktop.
+    readonly property bool covered: {
         const mon = root.screen ? Hypr.monitorFor(root.screen) : null;
         if (!mon || !mon.activeWorkspace || !mon.activeWorkspace.toplevels)
             return false;
@@ -39,158 +38,159 @@ Item {
         });
     }
 
+    // Horizontal shift that centres the lyrics on the visualiser bars, which start after the bar's
+    // exclusive zone (see Visualiser.qml) instead of at the screen edge.
+    // Visualiser.qml: margins of Config.border.thickness, left margin = bar zone + spacing.
+    readonly property real visualiserCentreOffset: ((ShellState.componentsFor(root.screen)?.bar?.exclusiveZone ?? 0) + Tokens.spacing.small * Config.background.visualiser.spacing - Config.border.thickness) / 2
+
+    property bool pauseGrace: false
+    property bool loadingDelayPassed: false
+    property bool noticeActive: false
+    property string noticeKey: ""
     property int currentIndex: -1
-    property string displayedLyric: ""
-    property string previousLyricText: ""
-    property string nextLyricText: ""
-    property real userOffset: 0.0
 
-    function isArabic(text: string): bool {
-        return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text || "");
+    readonly property var overlay: LyricsSource.overlayState({
+        "hasPlayer": !!root.player,
+        "covered": root.covered,
+        "playback": root.playback,
+        "pauseGrace": root.pauseGrace,
+        "status": root.status,
+        "loadingDelayPassed": root.loadingDelayPassed,
+        "noticeActive": root.noticeActive,
+        "lines": LyricsSource.lines,
+        "index": root.currentIndex
+    })
+    readonly property bool shown: root.overlay.visible
+    readonly property string mode: root.overlay.mode
+
+    readonly property var rows: LyricsSource.rowsForIndex(root.currentIndex)
+    readonly property string currentText: {
+        if (root.mode === "loading")
+            return qsTr("Loading lyrics…");
+        if (root.mode === "notice")
+            return root.status === "plain" ? qsTr("Lyrics for this track are not synced") : qsTr("No lyrics found for this track");
+        if (root.mode === "lyrics")
+            return root.currentIndex < 0 ? "" : root.rows.current;
+        return "";
     }
+    readonly property string previousText: root.mode === "lyrics" || root.mode === "notes" ? root.rows.previous : ""
+    readonly property string nextText: root.mode === "lyrics" || root.mode === "notes" ? root.rows.next : ""
 
-    function isInstrumental(str: string): bool {
-        if (!str) return false;
-        const s = str.trim().toLowerCase();
-        if (s === "♪" || s === "♪ ♪" || s === "♪ ♪ ♪" || s === "♫" || s === "..." || s === ". . .")
-            return true;
-        return s.includes("instrumental") || s.includes("intro") || s.includes("solo") ||
-               s.includes("interlude") || s.includes("outro") || s.includes("break");
-    }
-
-    function formatLine(str: string): string {
-        if (!str) return "";
-        if (root.isInstrumental(str))
-            return "♪  ♫  ♪";
-        return str;
-    }
-
-    readonly property bool isCurrentInstrumental: !root.activeLoading && (root.isInstrumental(root.displayedLyric) || (root.activeHasLyrics && root.displayedLyric.length === 0))
-    readonly property bool hasText: root.displayedLyric.trim() !== "" || root.previousLyricText.trim() !== "" || root.nextLyricText.trim() !== "" || root.activeHasLyrics
-    readonly property bool shown: !!root.player && !root.shouldHide && ((root.activeHasLyrics && root.hasText) || root.activeLoading)
+    // Font sizes are chosen once per track, so a single Arabic line does not resize the block.
+    readonly property bool arabic: LyricsSource.arabic
+    readonly property string fontFamily: "Rubik, Noto Kufi Arabic, sans-serif"
+    readonly property int sidePixelSize: root.arabic ? 20 : 16
+    readonly property int mainPixelSize: root.arabic ? 30 : 25
+    readonly property real mainLineHeight: root.arabic ? 1.4 : 1.2
 
     implicitWidth: Math.min(650, root.screen.width * 0.7)
-    implicitHeight: 120
+    implicitHeight: column.implicitHeight + Tokens.padding.extraSmall * 2
 
-    function syncTrack(): void {
-        root.userOffset = 0.0;
-        const active = root.player;
-        if (active && (active.trackTitle ?? "").length > 0) {
-            const artist = active.trackArtist ?? "";
-            const title = active.trackTitle ?? "";
-            const album = active.trackAlbum ?? "";
-            const duration = active.length ?? 0;
-            if (root.betterEnabled)
-                BetterLyrics.setTrack(artist, title, album, duration);
-            if (root.fallbackEnabled)
-                Lyrics.setTrack(artist, title, album, duration);
-        } else if (!active) {
-            BetterLyrics.clearTrack();
+    function updateIndex(): void {
+        const p = root.player;
+        root.currentIndex = p && LyricsSource.status === "synced" ? LyricsSource.indexForTime(p.position) : -1;
+    }
+
+    // Wakes up right when the next line is due (at most every 250 ms, so a seek is caught quickly)
+    // instead of polling every 200 ms and switching up to 200 ms late.
+    function scheduleTick(): void {
+        if (root.playback !== "playing" || root.status !== "synced" || !root.player) {
+            ticker.stop();
+            return;
+        }
+        const ms = LyricsSource.msUntilNextLine(root.player.position);
+        ticker.interval = ms < 0 ? 250 : Math.max(16, Math.min(250, Math.ceil(ms) + 5));
+        ticker.restart();
+    }
+
+    function refresh(): void {
+        root.updateIndex();
+        root.scheduleTick();
+    }
+
+    Timer {
+        id: ticker
+
+        repeat: false
+        onTriggered: root.refresh()
+    }
+
+    Timer {
+        id: pauseGraceTimer
+
+        interval: 1500
+        onTriggered: root.pauseGrace = false
+    }
+
+    Timer {
+        id: loadingDelay
+
+        interval: 400
+        onTriggered: root.loadingDelayPassed = true
+    }
+
+    Timer {
+        id: noticeTimer
+
+        interval: 3000
+        onTriggered: root.noticeActive = false
+    }
+
+    onPlaybackChanged: {
+        if (root.playback === "paused") {
+            root.pauseGrace = true;
+            pauseGraceTimer.restart();
+        } else {
+            pauseGraceTimer.stop();
+            root.pauseGrace = false;
+        }
+        root.refresh();
+    }
+
+    onStatusChanged: {
+        if (root.status === "loading") {
+            root.loadingDelayPassed = false;
+            loadingDelay.restart();
+        } else {
+            loadingDelay.stop();
+            root.loadingDelayPassed = false;
+        }
+
+        // Say once per track that there is nothing to sync, then get out of the way.
+        if ((root.status === "plain" || root.status === "none") && LyricsSource.syncedKey !== root.noticeKey) {
+            root.noticeKey = LyricsSource.syncedKey;
+            root.noticeActive = true;
+            noticeTimer.restart();
+        } else if (root.status !== "plain" && root.status !== "none") {
+            noticeTimer.stop();
+            root.noticeActive = false;
+        }
+        root.refresh();
+    }
+
+    Connections {
+        target: LyricsSource
+
+        function onLinesChanged() {
+            root.refresh();
+        }
+        function onOffsetChanged() {
+            root.refresh();
         }
     }
 
-    onPlayerChanged: root.syncTrack()
-
+    // Seeks do not notify; the dashboard calls positionChanged() on its own timers, which lands here.
     Connections {
         target: root.player
         ignoreUnknownSignals: true
 
-        function onTrackTitleChanged() {
-            root.syncTrack();
-        }
-        function onTrackArtistChanged() {
-            root.syncTrack();
-        }
-        function onTrackAlbumChanged() {
-            root.syncTrack();
-        }
-        function onLengthChanged() {
-            root.syncTrack();
+        function onPositionChanged() {
+            if (!ticker.running)
+                root.refresh();
         }
     }
 
-    function refreshLyrics(): void {
-        const texts = root.activeTexts;
-        if (!root.activeHasLyrics || !texts || texts.length === 0) {
-            root.displayedLyric = "";
-            root.previousLyricText = "";
-            root.nextLyricText = "";
-            return;
-        }
-
-        if (root.currentIndex >= 0) {
-            root.displayedLyric = String(texts[root.currentIndex] ?? "").replace(/\u00A0/g, " ");
-            root.previousLyricText = root.currentIndex > 0 ? String(texts[root.currentIndex - 1] ?? "").replace(/\u00A0/g, " ") : "";
-            root.nextLyricText = root.currentIndex < texts.length - 1 ? String(texts[root.currentIndex + 1] ?? "").replace(/\u00A0/g, " ") : "";
-        } else {
-            root.displayedLyric = "";
-            root.previousLyricText = "";
-            root.nextLyricText = String(texts[0] ?? "").replace(/\u00A0/g, " ");
-        }
-    }
-
-    function activeIndexForTime(time: real): int {
-        const t = time - root.userOffset;
-        if (root.useBetter)
-            return BetterLyrics.indexForTime(t);
-        if (root.useShell)
-            return Lyrics.indexForTime(t);
-        return -1;
-    }
-
-    function forceUpdate(): void {
-        const pos = root.player ? root.player.position : 0;
-        const nextIndex = root.activeHasLyrics ? root.activeIndexForTime(pos) : -1;
-        if (nextIndex === root.currentIndex) {
-            root.refreshLyrics();
-            return;
-        }
-        root.currentIndex = nextIndex;
-    }
-
-    onCurrentIndexChanged: {
-        root.refreshLyrics();
-    }
-
-    Component.onCompleted: {
-        root.syncTrack();
-        root.forceUpdate();
-    }
-
-    onShownChanged: {
-        if (root.shown) {
-            root.syncTrack();
-            root.forceUpdate();
-        }
-    }
-
-    Timer {
-        running: root.shown && (root.player ? root.player.isPlaying : false)
-        interval: 200
-        triggeredOnStart: true
-        repeat: true
-        onTriggered: root.forceUpdate()
-    }
-
-    Connections {
-        target: BetterLyrics
-        function onLinesChanged() {
-            root.forceUpdate();
-        }
-        function onHasLyricsChanged() {
-            root.forceUpdate();
-        }
-    }
-
-    Connections {
-        target: Lyrics
-        function onLyricsChanged() {
-            root.forceUpdate();
-        }
-        function onHasLyricsChanged() {
-            root.forceUpdate();
-        }
-    }
+    Component.onCompleted: root.refresh()
 
     opacity: root.shown ? 1 : 0
     visible: opacity > 0
@@ -201,12 +201,52 @@ Item {
         }
     }
 
+    FontMetrics {
+        id: sideMetrics
+
+        font.family: root.fontFamily
+        font.pixelSize: root.sidePixelSize
+        font.weight: Font.Medium
+    }
+
+    FontMetrics {
+        id: mainMetrics
+
+        font.family: root.fontFamily
+        font.pixelSize: root.mainPixelSize
+        font.weight: Font.Bold
+    }
+
+    component SideRow: Item {
+        id: sideRow
+
+        property alias text: sideLabel.text
+
+        width: parent.width
+        height: Math.ceil(sideMetrics.lineSpacing)
+        opacity: 0.55
+
+        StyledText {
+            id: sideLabel
+
+            anchors.fill: parent
+            animate: true
+            font.family: root.fontFamily
+            font.pixelSize: root.sidePixelSize
+            font.weight: Font.Medium
+            color: Colours.palette.m3onSurfaceVariant
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            maximumLineCount: 1
+            elide: Text.ElideRight
+        }
+    }
+
     Item {
         id: lyricsWrapper
 
         anchors.fill: parent
         anchors.margins: Tokens.padding.extraSmall
-        clip: false
 
         layer.enabled: true
         layer.effect: MultiEffect {
@@ -217,84 +257,59 @@ Item {
             shadowVerticalOffset: 1
         }
 
-        ColumnLayout {
-            id: lyricsCol
-            anchors.centerIn: parent
-            width: parent.width
+        // Fixed rows, anchored at the bottom: the block keeps its place on the first and last
+        // line, on wrapping lines and in instrumental gaps.
+        Column {
+            id: column
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             spacing: Tokens.spacing.extraSmall
 
-            // Previous Lyric Line
-            StyledText {
-                Layout.fillWidth: true
-                text: root.formatLine(root.previousLyricText)
-                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
-                font.pixelSize: root.isArabic(text) ? 20 : 16
-                font.weight: Font.Medium
-                color: Colours.palette.m3onSurfaceVariant
-                opacity: 0.55
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                maximumLineCount: 1
-                elide: Text.ElideRight
-                visible: text.length > 0
-
-                Behavior on opacity {
-                    Anim { type: Anim.FastEffects }
-                }
+            SideRow {
+                text: root.previousText
             }
 
-            // Dancing Notes when Instrumental / Intro / Solo
+            // Current line: room for two lines at the current font, Arabic included.
             Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 38
-                visible: root.isCurrentInstrumental
+                width: parent.width
+                height: Math.ceil(mainMetrics.lineSpacing * root.mainLineHeight * 2)
+
+                StyledText {
+                    anchors.fill: parent
+                    animate: true
+                    text: root.currentText
+                    font.family: root.fontFamily
+                    font.pixelSize: root.mainPixelSize
+                    font.weight: Font.Bold
+                    lineHeight: root.mainLineHeight
+                    color: root.mode === "notice" || root.mode === "loading" ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                }
 
                 DancingNotes {
                     anchors.centerIn: parent
-                    running: root.isCurrentInstrumental && root.shown
+                    opacity: root.mode === "notes" ? 1 : 0
+                    visible: opacity > 0
+                    running: root.mode === "notes" && root.shown && root.playback === "playing"
                     noteColor: Colours.palette.m3primary
                     noteSize: 26
+
+                    Behavior on opacity {
+                        Anim {
+                            type: Anim.DefaultEffects
+                        }
+                    }
                 }
             }
 
-            // Active Lyric Line (Highlighted Vocal Text)
-            StyledText {
-                Layout.fillWidth: true
-                visible: !root.isCurrentInstrumental
-                text: root.activeLoading ? qsTr("Loading lyrics...") : root.displayedLyric
-                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
-                font.pixelSize: root.isArabic(text) ? 30 : 25
-                font.weight: Font.Bold
-                lineHeight: root.isArabic(text) ? 1.4 : 1.2
-                color: Colours.palette.m3primary
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                maximumLineCount: 2
-                elide: Text.ElideRight
-
-                Behavior on color {
-                    CAnim { duration: Tokens.anim.durations.expressiveFastEffects }
-                }
-            }
-
-            // Next Lyric Line
-            StyledText {
-                Layout.fillWidth: true
-                text: root.formatLine(root.nextLyricText)
-                font.family: "Rubik, Noto Kufi Arabic, sans-serif"
-                font.pixelSize: root.isArabic(text) ? 20 : 16
-                font.weight: Font.Medium
-                color: Colours.palette.m3onSurfaceVariant
-                opacity: 0.55
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                maximumLineCount: 1
-                elide: Text.ElideRight
-                visible: text.length > 0
-
-                Behavior on opacity {
-                    Anim { type: Anim.FastEffects }
-                }
+            SideRow {
+                text: root.nextText
             }
         }
     }
