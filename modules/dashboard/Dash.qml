@@ -20,7 +20,8 @@ GridLayout {
         Layout.preferredWidth: Math.max(Tokens.sizes.dashboard.weatherWidth, 350)
         Layout.preferredHeight: weather.implicitHeight
 
-        radius: Tokens.rounding.extraLarge * 1.5
+        // Same corner radius as the profile and calendar cards beside it.
+        radius: Tokens.rounding.extraLarge
 
         SmallWeather {
             id: weather
