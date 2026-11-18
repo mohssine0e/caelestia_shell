@@ -1,11 +1,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Effects
 import Quickshell
 import Caelestia
-import Caelestia.Config
-import Caelestia.State
 import qs.components
 import qs.services
 
@@ -38,11 +35,6 @@ Item {
         });
     }
 
-    // Horizontal shift that centres the lyrics on the visualiser bars, which start after the bar's
-    // exclusive zone (see Visualiser.qml) instead of at the screen edge.
-    // Visualiser.qml: margins of Config.border.thickness, left margin = bar zone + spacing.
-    readonly property real visualiserCentreOffset: ((ShellState.componentsFor(root.screen)?.bar?.exclusiveZone ?? 0) + Tokens.spacing.small * Config.background.visualiser.spacing - Config.border.thickness) / 2
-
     property bool pauseGrace: false
     property bool loadingDelayPassed: false
     property int currentIndex: -1
@@ -73,13 +65,13 @@ Item {
 
     // Font sizes are chosen once per track, so a single Arabic line does not resize the block.
     readonly property bool arabic: LyricsSource.arabic
-    readonly property string fontFamily: "Rubik, Noto Kufi Arabic, sans-serif"
-    readonly property int sidePixelSize: root.arabic ? 20 : 16
-    readonly property int mainPixelSize: root.arabic ? 30 : 25
-    readonly property real mainLineHeight: root.arabic ? 1.4 : 1.2
+    readonly property string fontFamily: root.arabic ? "Noto Kufi Arabic" : "Adwaita Sans"
+    readonly property int sidePixelSize: 13
+    readonly property int mainPixelSize: 19
+    readonly property real mainLineHeight: root.arabic ? 1.35 : 1.18
 
     implicitWidth: Math.min(650, root.screen.width * 0.7)
-    implicitHeight: column.implicitHeight + Tokens.padding.extraSmall * 2
+    implicitHeight: column.implicitHeight
 
     function updateIndex(): void {
         const p = root.player;
@@ -185,7 +177,7 @@ Item {
 
         font.family: root.fontFamily
         font.pixelSize: root.sidePixelSize
-        font.weight: Font.Medium
+        font.weight: Font.Normal
     }
 
     FontMetrics {
@@ -193,7 +185,7 @@ Item {
 
         font.family: root.fontFamily
         font.pixelSize: root.mainPixelSize
-        font.weight: Font.Bold
+        font.weight: Font.Medium
     }
 
     component SideRow: Item {
@@ -212,7 +204,7 @@ Item {
             animate: true
             font.family: root.fontFamily
             font.pixelSize: root.sidePixelSize
-            font.weight: Font.Medium
+            font.weight: Font.Normal
             color: Colours.palette.m3onSurfaceVariant
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -225,16 +217,6 @@ Item {
         id: lyricsWrapper
 
         anchors.fill: parent
-        anchors.margins: Tokens.padding.extraSmall
-
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: Qt.alpha("black", 0.8)
-            shadowOpacity: 0.85
-            shadowBlur: 0.45
-            shadowVerticalOffset: 1
-        }
 
         // Fixed rows, anchored at the bottom: the block keeps its place on the first and last
         // line, on wrapping lines and in instrumental gaps.
@@ -244,24 +226,27 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            spacing: Tokens.spacing.extraSmall
+            spacing: 3
 
             SideRow {
                 text: root.previousText
             }
 
-            // Current line: room for two lines at the current font, Arabic included.
+            // Let the active line use only the height it needs, up to two lines.
             Item {
                 width: parent.width
-                height: Math.ceil(mainMetrics.lineSpacing * root.mainLineHeight * 2)
+                height: Math.max(Math.ceil(mainMetrics.lineSpacing * root.mainLineHeight), mainLabel.implicitHeight)
 
                 StyledText {
-                    anchors.fill: parent
+                    id: mainLabel
+
+                    anchors.centerIn: parent
+                    width: parent.width
                     animate: true
                     text: root.currentText
                     font.family: root.fontFamily
                     font.pixelSize: root.mainPixelSize
-                    font.weight: Font.Bold
+                    font.weight: Font.Medium
                     lineHeight: root.mainLineHeight
                     color: root.mode === "loading" ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
                     horizontalAlignment: Text.AlignHCenter
@@ -277,7 +262,7 @@ Item {
                     visible: opacity > 0
                     running: root.mode === "notes" && root.shown && root.playback === "playing"
                     noteColor: Colours.palette.m3primary
-                    noteSize: 26
+                    noteSize: 22
 
                     Behavior on opacity {
                         Anim {

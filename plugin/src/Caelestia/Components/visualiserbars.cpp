@@ -52,14 +52,6 @@ void VisualiserBars::paint(QPainter* painter) {
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setPen(Qt::NoPen);
 
-    const qreal h = height();
-    const qreal maxBarHeight = h * 0.4;
-
-    QLinearGradient gradient(0, h - maxBarHeight, 0, h);
-    gradient.setColorAt(0, m_primaryColor);
-    gradient.setColorAt(1, m_secondaryColor);
-    painter->setBrush(gradient);
-
     drawSide(painter, false);
     drawSide(painter, true);
 }
@@ -72,19 +64,28 @@ void VisualiserBars::drawSide(QPainter* painter, bool rightSide) {
     if (count == 0)
         return;
 
-    const qreal sideWidth = w * 0.4;
-    const qreal slotWidth = sideWidth / static_cast<qreal>(count);
-    const qreal barWidth = slotWidth - m_spacing;
+    // Keep the lyric gap clear while extending bars to both screen edges.
+    const qreal centreGap = std::min<qreal>(680.0, w * 0.7);
+    const qreal sideWidth = (w - centreGap) / 2.0;
+    const qreal barWidth = std::min<qreal>(3.0, sideWidth);
+    const qreal barSpacing = std::max<qreal>(0.0, m_spacing);
 
     if (barWidth <= 0)
         return;
 
-    const qreal sideOffset = rightSide ? w * 0.6 : 0;
+    const qsizetype barCount = std::max<qsizetype>(1, static_cast<qsizetype>(std::floor((sideWidth + barSpacing) / (barWidth + barSpacing))));
+    const qreal slotWidth = barCount > 1 ? (sideWidth - barWidth) / static_cast<qreal>(barCount - 1) : 0;
+    const qreal sideOffset = rightSide ? w - sideWidth : 0;
     const qreal maxBarHeight = h * 0.4;
 
-    for (qsizetype i = 0; i < count; ++i) {
-        const qsizetype valueIndex = rightSide ? i : (count - i - 1);
-        const qreal value = std::clamp(m_displayValues[valueIndex], 0.0, 1.0);
+    for (qsizetype i = 0; i < barCount; ++i) {
+        // Interpolate the Cava samples instead of stretching a small set of bars apart.
+        const qreal fraction = barCount > 1 ? static_cast<qreal>(i) / static_cast<qreal>(barCount - 1) : 0;
+        const qreal sample = (rightSide ? fraction : 1.0 - fraction) * static_cast<qreal>(count - 1);
+        const auto first = static_cast<qsizetype>(std::floor(sample));
+        const auto second = std::min(first + 1, count - 1);
+        const qreal blend = sample - static_cast<qreal>(first);
+        const qreal value = std::clamp(m_displayValues[first] * (1.0 - blend) + m_displayValues[second] * blend, 0.0, 1.0);
         const qreal barHeight = value * maxBarHeight;
 
         if (barHeight <= 0)
@@ -93,6 +94,11 @@ void VisualiserBars::drawSide(QPainter* painter, bool rightSide) {
         const qreal x = static_cast<qreal>(i) * slotWidth + sideOffset;
         const qreal y = h - barHeight;
         const qreal r = std::min({ m_rounding, barWidth / 2.0, barHeight });
+
+        QLinearGradient gradient(0, y, 0, h);
+        gradient.setColorAt(0, m_primaryColor);
+        gradient.setColorAt(1, m_secondaryColor);
+        painter->setBrush(gradient);
 
         QPainterPath path;
         path.moveTo(x, h);

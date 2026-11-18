@@ -172,9 +172,8 @@ Variants {
 
             screen: win.modelData
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.horizontalCenterOffset: desktopLyrics.visualiserCentreOffset
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Tokens.padding.large * 2
+            anchors.bottomMargin: 10
         }
     }
 }
