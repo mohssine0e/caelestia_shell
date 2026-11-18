@@ -78,7 +78,7 @@ Scope {
                 minimumSize.width: Math.min(560, Math.round(loader.modelData.width * 0.94))
                 minimumSize.height: hudCard.minimumHudHeight
                 maximumSize.width: Math.max(minimumSize.width, Math.round(loader.modelData.width * 0.94))
-                maximumSize.height: Math.max(minimumSize.height, Math.round(loader.modelData.height * 0.9))
+                maximumSize.height: Math.max(minimumSize.height, Math.round(loader.modelData.height * 0.94))
 
                 contentItem.Config.screen: loader.modelData.name
                 contentItem.Tokens.screen: loader.modelData.name

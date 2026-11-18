@@ -17,7 +17,7 @@ FocusScope {
 
     property var windowRef: null
     property real maximumHudWidth: 1200
-    property real maximumHudHeight: 900
+    property real maximumHudHeight: 980
     property string currentView: "assistant"
 
     Connections {
@@ -209,6 +209,9 @@ FocusScope {
             if (!Assistant.selectedText || Assistant.selectedText.trim().length === 0) {
                 root.askBoundToSelection = false
             }
+            if (textSnippet.text !== Assistant.selectedText) {
+                textSnippet.text = Assistant.selectedText;
+            }
         }
     }
 
@@ -246,20 +249,20 @@ FocusScope {
         + 2
         + (inlineErrorPanel.visible ? inlineErrorPanel.implicitHeight : 0)
     readonly property real maxResponseViewportHeight: Math.max(0, root.maximumHudHeight - root.assistantChromeHeight)
-    readonly property real minimumResponseViewportHeight: Math.min(220, root.maxResponseViewportHeight)
+    readonly property real minimumResponseViewportHeight: Math.min(320, root.maxResponseViewportHeight)
     readonly property real preferredResponseViewportHeight: {
-        if (Assistant.isLoading && Assistant.messages.length === 0) return 320
-        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 280
-        if (Assistant.messages.length === 0) return 280
-        if (Assistant.isGenerating) return 240
-        return Math.max(280, chatList.contentHeight + Tokens.padding.medium * 2)
+        if (Assistant.isLoading && Assistant.messages.length === 0) return 420
+        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 380
+        if (Assistant.messages.length === 0) return 380
+        if (Assistant.isGenerating) return 340
+        return Math.max(380, chatList.contentHeight + Tokens.padding.medium * 2)
     }
     readonly property real preferredAssistantHeight: Math.min(root.maximumHudHeight,
         root.assistantChromeHeight + Math.min(root.maxResponseViewportHeight, root.preferredResponseViewportHeight))
     readonly property real minimumHudHeight: Math.min(root.maximumHudHeight,
         root.currentView === "assistant"
             ? root.assistantChromeHeight + root.minimumResponseViewportHeight
-            : Math.max(480, Math.min(540, root.maximumHudHeight)))
+            : Math.max(560, Math.min(640, root.maximumHudHeight)))
 
     Behavior on implicitHeight {
         enabled: root.currentView === "assistant"
@@ -806,34 +809,46 @@ FocusScope {
                             id: snippetFlick
                             anchors.fill: parent
                             anchors.margins: Tokens.padding.small
-                            contentHeight: textSnippet.implicitHeight
+                            contentHeight: Math.max(snippetFlick.height, textSnippet.implicitHeight)
                             clip: true
 
                             StyledScrollBar.vertical: StyledScrollBar {
                                 flickable: snippetFlick
                             }
 
-                            StyledText {
+                            TextEdit {
                                 id: textSnippet
                                 width: snippetFlick.width - Tokens.padding.small
-                                text: Assistant.selectedText.length > 0
-                                    ? Assistant.selectedText
-                                    : (Assistant.listenClipboard
-                                        ? qsTr("No text captured. Highlight text anywhere and press Super+H.")
-                                        : qsTr("Clipboard listening paused. Click clipboard icon to resume."))
+                                text: Assistant.selectedText
+                                selectByMouse: true
+                                cursorVisible: activeFocus
+                                renderType: TextEdit.NativeRendering
+                                selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                                selectedTextColor: Colours.palette.m3onSurface
+                                wrapMode: TextEdit.Wrap
+                                color: Colours.palette.m3onSurface
                                 font: {
-                                    const words = Assistant.selectedText.trim().split(/\s+/).length;
-                                    if (words === 1 && Assistant.selectedText.trim().length > 0)
+                                    const words = textSnippet.text.trim().split(/\s+/).length;
+                                    if (words === 1 && textSnippet.text.trim().length > 0)
                                         return Tokens.font.title.small;
                                     if (snippetCard.isCodeSnippet)
                                         return Tokens.font.mono.builders.small.size(11).build();
                                     return Tokens.font.body.builders.small.size(11.5).build();
                                 }
-                                color: Assistant.selectedText.length > 0
-                                    ? Colours.palette.m3onSurface
-                                    : Colours.palette.m3outline
-                                wrapMode: Text.Wrap
-                                elide: Text.ElideNone
+                                onTextChanged: {
+                                    if (text !== Assistant.selectedText) {
+                                        Assistant.selectedText = text;
+                                    }
+                                }
+
+                                StyledText {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    visible: !textSnippet.text && !textSnippet.activeFocus
+                                    text: qsTr("Type or paste context text here...")
+                                    color: Colours.palette.m3outline
+                                    font: Tokens.font.body.builders.small.size(11.5).build()
+                                }
                             }
                         }
                     }

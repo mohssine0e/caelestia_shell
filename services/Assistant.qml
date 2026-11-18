@@ -227,7 +227,7 @@ Singleton {
 
     // ── Clipboard polling & update ──────────────────────────────
     property bool isWatching: false
-    property bool listenClipboard: true
+    property bool listenClipboard: false
     property string lastSeenClipboard: ""
 
     onListenClipboardChanged: {
@@ -487,7 +487,6 @@ Singleton {
         root._activeRequest = null
         root.errorMessage = ""
         root.errorType = ""
-        root.clearThread()
     }
 
     function checkClipboard(force = false) {
