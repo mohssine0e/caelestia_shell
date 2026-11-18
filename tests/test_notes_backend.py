@@ -558,6 +558,112 @@ class NotesBackendTest(unittest.TestCase):
         self.assertTrue(git_res["success"])
         self.assertIn("commits", git_res["explanation"].lower())
 
+    def test_infer_subconcept_rules_java_and_k8s(self):
+        self.assertEqual(notes.infer_subconcept("Java", "Pattern matching for instanceof", "", "instanceof User other"), "Modern Language Features")
+        self.assertEqual(notes.infer_subconcept("Java", "Virtual threads in Loom", "", "Thread.ofVirtual()"), "Modern Language Features")
+        self.assertEqual(notes.infer_subconcept("Java", "CompletableFuture async execution", "", "ExecutorService"), "Concurrency")
+        self.assertEqual(notes.infer_subconcept("Java", "Stream filter and collect", "", "Collectors.toList()"), "Stream API & Lambdas")
+        self.assertEqual(notes.infer_subconcept("Java", "Try with resources", "", "BufferedReader reader"), "Exception Handling")
+        self.assertEqual(notes.infer_subconcept("Java", "Spring Transactional Service", "", "@RestController @Service"), "Spring & Framework")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "Deploy pod replicas", "", "deployment spec"), "Workloads & Traffic")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "ConfigMap and secrets", "", "volumeMounts"), "Config & Storage")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "kubectl rollout restart", "", "kubectl drain"), "CLI & Operations")
+
+    def test_smart_upsert_developer_note_with_snippets_and_mechanics(self):
+        raw = (
+            "The syntax instanceof User other is a feature called pattern matching for instanceof, which was introduced in Java 16.\n"
+            "Checks if object is User and automatically casts it to variable other.\n"
+            "Legacy:\nif (!(obj instanceof User)) { return false; }\nUser other = (User) obj;\n"
+            "Modern:\nif (obj instanceof User other) { return true; }"
+        )
+        llm_reply = json.dumps({
+            "action": "create",
+            "domain": "Java",
+            "subconcept": "Modern Language Features",
+            "title": "Pattern Matching for instanceof",
+            "technology": "Java 16+",
+            "technical_type": "code",
+            "summary": "Simplifies type checks and safe casting into a single atomic expression.",
+            "mechanics": [
+                "Tests if object matches target type and casts simultaneously",
+                "Scoped variable is only available when predicate succeeds"
+            ],
+            "snippets": [
+                {
+                    "label": "Modern (Java 16+)",
+                    "language": "java",
+                    "code": "if (obj instanceof User other) {\n    return true;\n}",
+                    "role": "after"
+                },
+                {
+                    "label": "Legacy (Java < 16)",
+                    "language": "java",
+                    "code": "if (!(obj instanceof User)) {\n    return false;\n}\nUser other = (User) obj;",
+                    "role": "before"
+                }
+            ],
+            "suggested_tags": ["#java", "#pattern-matching"]
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(llm_reply, "gemini")):
+            res = notes.smart_upsert({"raw_content": raw})
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["domain"], "Java")
+        self.assertEqual(res["subconcept"], "Modern Language Features")
+        note = res["note"]
+        self.assertEqual(note["title"], "Pattern Matching for instanceof")
+        self.assertEqual(note["technology"], "Java 16+")
+        self.assertEqual(note["technical_type"], "code")
+        self.assertEqual(note["raw_content"], raw)
+        self.assertEqual(len(note["exact_excerpts"]), 2)
+        self.assertEqual(note["exact_excerpts"][0]["label"], "Modern (Java 16+)")
+        self.assertEqual(note["exact_excerpts"][1]["label"], "Legacy (Java < 16)")
+        self.assertIn("Tests if object matches target type", note["essentials"][0])
+        self.assertIn("if (obj instanceof User other)", note["formatted_content"])
+        self.assertIn("if (!(obj instanceof User))", note["formatted_content"])
+
+    def test_detect_code_snippets_heuristic(self):
+        raw = "Check this code:\nif (!(obj instanceof User)) {\n    return false;\n}\nUser other = (User) obj;\nDone."
+        detected = notes._detect_code_snippets(raw, default_lang="java")
+        self.assertTrue(len(detected) >= 1)
+        self.assertIn("if (!(obj instanceof User))", detected[0]["content"])
+        self.assertEqual(detected[0]["language"], "java")
+
+    def test_clean_exact_excerpts_drops_hallucinated_code(self):
+        raw = "Using git rebase -i HEAD~3 to squash commits interactively."
+        # AI returns an excerpt that never existed in raw
+        hallucinated = [{"language": "python", "content": "import os\ndef malicious(): pass"}]
+        cleaned = notes._clean_exact_excerpts(hallucinated, raw)
+        self.assertEqual(cleaned, [])
+
+        # Real excerpt in raw
+        real = [{"language": "bash", "content": "git rebase -i HEAD~3"}]
+        cleaned_real = notes._clean_exact_excerpts(real, raw)
+        self.assertEqual(len(cleaned_real), 1)
+        self.assertEqual(cleaned_real[0]["content"], "git rebase -i HEAD~3")
+
+    def test_triage_parses_and_persists_topic_section(self):
+        note = notes.create_note({"raw_content": "kubectl get pods -A"})["note"]
+        reply = json.dumps({
+            "keep": True,
+            "category": "technical",
+            "technical_type": "command",
+            "topic_section": "commands",
+            "canonical_topic": "Kubernetes",
+            "title": "List all pods",
+            "technology": "Kubernetes",
+            "suggested_tags": ["#k8s"],
+            "essential_bullets": ["List all pods across all namespaces."],
+            "completion_bullets": [],
+            "exact_excerpts": [{"language": "bash", "content": "kubectl get pods -A"}]
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(reply, "gemini")):
+            res = notes.triage_note({"id": note["id"]})
+        self.assertTrue(res["success"])
+        stored = notes.get_note({"id": note["id"]})["note"]
+        self.assertEqual(stored["topic_section"], "commands")
+        self.assertEqual(stored["technical_type"], "command")
+
 
 if __name__ == "__main__":
     unittest.main()

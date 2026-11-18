@@ -55,6 +55,8 @@ Singleton {
     signal saveFailed(string message)
     signal noteChanged(var note)
     signal noteDeleted(string noteId)
+    signal topicDeleted(string topic, int count)
+    signal topicRestored(string topic, int count)
     signal organizationFinished(string noteId, bool success, string message)
     signal topicGenerated(string topic, int count, string action, string message)
     signal topicGenerateFailed(string message)
@@ -387,6 +389,10 @@ Singleton {
             if (root._mutationAction === "delete") {
                 root.noteDeleted(result.id || root._mutationInput.id)
                 Toaster.toast(qsTr("Note moved to trash"), qsTr("The note can be restored from storage."), "delete")
+            } else if (root._mutationAction === "delete-topic") {
+                root.topicDeleted(result.topic || root._mutationInput.topic, result.deleted_count || 0)
+            } else if (root._mutationAction === "restore-topic") {
+                root.topicRestored(result.topic || root._mutationInput.topic, result.restored_count || 0)
             } else if (result.note) {
                 root.noteChanged(result.note)
             }

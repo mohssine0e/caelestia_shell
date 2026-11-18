@@ -33,8 +33,9 @@ Return one strict JSON object and no other text:
   "keep": true,
   "category": "technical|reference|personal|idea|noise",
   "technical_type": "command|code|concept|error_fix|configuration|tool|reference|general",
+  "topic_section": "overview|notes|commands|configuration|errors|references|code",
   "canonical_topic": "Docker",
-  "title": "short searchable title",
+  "title": "short searchable title",a
   "technology": "language, CLI, framework, or tool; empty when unknown",
   "suggested_tags": ["#docker"],
   "essential_bullets": ["..."],
@@ -45,21 +46,21 @@ Return one strict JSON object and no other text:
 Rules:
 - Identify the technical type precisely. Use reference for documentation links,
   citations, and material primarily saved for later lookup.
+- topic_section must match the technical_type: 'code' -> 'code', 'command' -> 'commands', 'error_fix' -> 'errors', 'configuration' -> 'configuration', otherwise 'notes'.
 - Choose one stable canonical topic such as Docker, Git, Python, QML, Linux,
   Kubernetes, or OCI Networking. Use the technology or concept, not the note title.
 - Create a concrete title under 70 characters. Do not title a note "Note",
   "Technical note", or another generic phrase.
 - Preserve every command, code snippet, error message, configuration key, path,
-  flag, and identifier exactly. Put exact source excerpts in exact_excerpts;
-  never correct or rewrite them there. Use an empty list when none exist.
+  flag, and identifier exactly. Put all code snippets, syntax examples, and before/after
+  contrasts in exact_excerpts with appropriate language and descriptive label.
+- For language features, algorithms, or concepts, provide essential_bullets explaining
+  the core mechanics, runtime semantics, scope, and purpose. Never discard code in favor of generic summaries.
+- For commands and CLI tools, make each essential bullet a direct description of what the command does.
 - Suggest at most five specific lowercase tags. Never include private values.
 - Personal observations, feelings, preferences, plans, and ideas belong in
   personal or idea. Preserve them verbatim: return empty bullet and excerpt
   arrays. A software product idea may be an idea rather than a technical fact.
-- Technical or reference notes may become at most six short, factual essential
-  bullets. Explain what the saved material does without repeating it.
-- For commands and code, make each essential bullet a direct description of at
-  most 12 words so it fits beside the exact command in a compact table.
 - If a technical note is incomplete, add at most three completion bullets only
   when the missing fact is well established and directly implied. Never invent
   project-specific details, personal facts, credentials, paths, or intent.
@@ -84,6 +85,9 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 TECHNICAL_TYPES = {
     "command", "code", "concept", "error_fix", "configuration", "tool", "reference", "general"
+}
+TOPIC_SECTIONS = {
+    "overview", "notes", "commands", "configuration", "errors", "references", "code"
 }
 
 TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -341,6 +345,32 @@ def infer_subconcept(topic: str, title: str = "", section: str = "", content: st
         if _has_word("vcn|vnic|subnet|route table|gateway", combined):
             return "Networking"
         return "Core OCI"
+
+    if "java" in t or _has_word("java", combined):
+        if _has_word(r"pattern matching|instanceof|records?|sealed|switch pattern|virtual threads?|loom|var\b", combined):
+            return "Modern Language Features"
+        if _has_word(r"package|packages|module|modules|module-info|jpms", combined):
+            return "Modules & Architecture"
+        if _has_word(r"concurrency|thread|threads|executor|completablefuture|synchronized|atomic|deadlock", combined):
+            return "Concurrency"
+        if _has_word(r"stream|streams|filter|map|collect|collectors|lambda|lambdas|optional", combined):
+            return "Stream API & Lambdas"
+        if _has_word(r"exception|exceptions|throw|throws|try|catch|autocloseable", combined):
+            return "Exception Handling"
+        if _has_word(r"spring|bean|autowired|transactional|repository|service|restcontroller|springboot|boot", combined):
+            return "Spring & Framework"
+        if _has_word(r"jvm|gc|garbage|heap|metaspace|memory|profiling|jcmd|jps", combined):
+            return "JVM & Memory"
+        return "Core Java"
+
+    if "kubernetes" in t or "k8s" in t or _has_word("kubernetes|k8s|kubectl", combined):
+        if _has_word(r"pod|pods|deployment|deployments|statefulset|daemonset|service|services|ingress", combined):
+            return "Workloads & Traffic"
+        if _has_word(r"configmap|configmaps|secret|secrets|volume|volumes|pvc|pv|storageclass", combined):
+            return "Config & Storage"
+        if _has_word(r"kubectl|helm|apply|rollout|drain|cordon|scale|logs?|exec", combined):
+            return "CLI & Operations"
+        return "Core Kubernetes"
 
     clean_sec = (section or "").strip()
     if clean_sec and clean_sec.lower() not in ("none", "bullet", "notes", "note", "overview", "general"):
@@ -901,16 +931,34 @@ def _clean_exact_excerpts(value: Any, raw: str) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
     excerpts: list[dict[str, str]] = []
+    norm_raw = re.sub(r"\s+", " ", raw).strip().lower()
     for item in value:
         if not isinstance(item, dict):
             continue
-        content = str(item.get("content", "")).strip()
-        if not content or content not in raw:
+        content = str(item.get("content", "") or item.get("code", "")).strip()
+        if not content:
+            continue
+        norm_content = re.sub(r"\s+", " ", content).strip().lower()
+        words = norm_content.split()
+        first_10_words = " ".join(words[:10]) if words else ""
+        is_match = (
+            norm_content in norm_raw
+            or SequenceMatcher(None, norm_content, norm_raw).ratio() > 0.75
+            or (bool(first_10_words) and first_10_words in norm_raw)
+        )
+        if not is_match:
             continue
         language = re.sub(r"[^A-Za-z0-9_+.-]", "", str(item.get("language", "")))[:24]
+        label = str(item.get("label", "")).strip()[:50]
+        role = str(item.get("role", "")).strip()[:20]
         if not any(existing["content"] == content for existing in excerpts):
-            excerpts.append({"language": language, "content": content[:10_000]})
-        if len(excerpts) >= 6:
+            entry: dict[str, str] = {"language": language, "content": content[:10_000]}
+            if label:
+                entry["label"] = label
+            if role:
+                entry["role"] = role
+            excerpts.append(entry)
+        if len(excerpts) >= 8:
             break
     return excerpts
 
@@ -934,6 +982,9 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
     technical_type = str(result.get("technical_type", "general")).strip().lower()
     if technical_type not in TECHNICAL_TYPES:
         technical_type = "general"
+    topic_section = str(result.get("topic_section", "notes")).strip().lower()
+    if topic_section not in TOPIC_SECTIONS:
+        topic_section = "notes"
     title = _clean_text(result.get("title"), 70)
     technology = _clean_text(result.get("technology"), 40)
     topic = _clean_text(result.get("canonical_topic"), 50) or technology or _infer_local_topic(raw)
@@ -947,6 +998,7 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
         exact_excerpts = []
         title = ""
         technical_type = ""
+        topic_section = ""
         technology = ""
         topic = ""
         suggested_tags = []
@@ -954,6 +1006,7 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
         "keep": keep,
         "category": category,
         "technical_type": technical_type,
+        "topic_section": topic_section,
         "title": title,
         "technology": technology,
         "topic": topic,
@@ -1014,7 +1067,11 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
     completions = triage["completion_bullets"]
     markdown_parts = ["\n".join(f"- {item}" for item in essentials)] if essentials else []
     for excerpt in triage["exact_excerpts"]:
-        markdown_parts.append(f"```{excerpt['language']}\n{excerpt['content']}\n```")
+        lbl = excerpt.get("label")
+        if lbl:
+            markdown_parts.append(f"### {lbl}\n```{excerpt['language']}\n{excerpt['content']}\n```")
+        else:
+            markdown_parts.append(f"```{excerpt['language']}\n{excerpt['content']}\n```")
     if completions:
         markdown_parts.append("**AI-added context**\n" + "\n".join(f"- {item}" for item in completions))
     formatted = "\n\n".join(markdown_parts)
@@ -1023,6 +1080,7 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
     category = "reference" if explicit_capture and triage["category"] == "noise" else triage["category"]
     t_topic = triage.get("topic") or _infer_local_topic(raw) or "General"
     subc = infer_subconcept(t_topic, triage.get("title") or "", "", formatted or raw, triage.get("technology") or "")
+    topic_section = triage.get("topic_section") or "notes"
     with database() as db:
         duplicate_of = _find_duplicate(db, note_id, raw)
         cursor = db.execute(
@@ -1030,18 +1088,20 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
                category = CASE WHEN topic_locked THEN 'technical' ELSE ? END,
                keep_decision = CASE WHEN topic_locked THEN 'keep' ELSE ? END, triage_error = NULL,
                triage_token = NULL, provider = ?, title = ?, technical_type = ?,
-               technology = ?, topic = CASE WHEN topic_locked THEN topic ELSE ? END, ai_tags_json = ?, essentials_json = ?,
-               completions_json = ?, excerpts_json = ?, local_only = 0,
-               sensitive_reason = NULL, duplicate_of = ?, subconcept = ?, updated_at = ?, schema_version = ?
+               topic_section = ?, technology = ?, topic = CASE WHEN topic_locked THEN topic ELSE ? END,
+               ai_tags_json = ?, essentials_json = ?, completions_json = ?, excerpts_json = ?,
+               local_only = 0, sensitive_reason = NULL, duplicate_of = ?, subconcept = ?,
+               updated_at = ?, schema_version = ?
                WHERE id = ? AND triage_token = ? AND deleted_at IS NULL""",
             (formatted or None, category, decision, provider,
-             triage["title"], triage["technical_type"], triage["technology"], triage["topic"],
+             triage["title"], triage["technical_type"], topic_section, triage["technology"], triage["topic"],
              json.dumps(triage["suggested_tags"], ensure_ascii=False),
              json.dumps(essentials, ensure_ascii=False),
              json.dumps(completions, ensure_ascii=False),
              json.dumps(triage["exact_excerpts"], ensure_ascii=False), duplicate_of or None,
              subc, utc_now(), SCHEMA_VERSION, note_id, token),
         )
+        sync_notes_json(db)
         sync_notes_json(db)
     if cursor.rowcount != 1:
         return {"success": False, "stale": True, "id": note_id}
@@ -1124,7 +1184,7 @@ def _topic_context(topic: str) -> list[dict[str, str]]:
     return context
 
 
-TOPIC_SECTIONS = {"overview", "notes", "commands", "configuration", "errors", "references"}
+TOPIC_SECTIONS = {"overview", "notes", "commands", "configuration", "errors", "references", "code"}
 
 
 def _clean_section_name(value: Any) -> str:
@@ -1601,6 +1661,66 @@ def generate_topic(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _detect_code_snippets(raw_text: str, default_lang: str = "") -> list[dict[str, str]]:
+    snippets: list[dict[str, str]] = []
+    # 1. Look for markdown fenced blocks ```lang\ncode\n```
+    fences = list(re.finditer(r"```([A-Za-z0-9_-]*)\n?(.*?)```", raw_text, re.DOTALL))
+    for match in fences:
+        lang = match.group(1).strip() or default_lang or "text"
+        code = match.group(2).strip()
+        if code:
+            snippets.append({"language": lang, "content": code, "label": "Snippet", "role": "primary"})
+    if snippets:
+        return snippets
+
+    # 2. Look for CLI commands
+    cli_lines = []
+    for line in raw_text.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith(("$", "docker ", "git ", "kubectl ", "pacman ", "systemctl ", "cargo ", "npm ", "mvn ", "gradle ", "curl ")):
+            clean = re.sub(r"^\$\s*", "", trimmed)
+            cli_lines.append(clean)
+    if cli_lines and len(cli_lines) == len([l for l in raw_text.splitlines() if l.strip()]):
+        return [{"language": "bash", "content": "\n".join(cli_lines), "label": "Command", "role": "primary"}]
+
+    # 3. Look for code chunks with braces, assignments, control flow
+    lines = raw_text.splitlines()
+    chunks: list[list[str]] = []
+    current_chunk: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        is_code = bool(re.search(
+            r"^(?:if\s*\(|while\s*\(|for\s*\(|return\b|throw\b|User\b|String\b|List\b|Map\b|\w+\s+\w+\s*=|\}\s*(?:else|catch|finally)|\{|\}|[a-zA-Z0-9_.]+\([^\)]*\);?$)",
+            stripped
+        )) or stripped.endswith((";", "{", "}"))
+        if any(stripped.endswith(p) for p in (".", "?", "!")) and not stripped.endswith(";"):
+            is_code = False
+        if len(stripped.split()) > 7 and not any(ch in stripped for ch in ("{", "}", "(", ")", ";", "=")):
+            is_code = False
+
+        if is_code and stripped:
+            current_chunk.append(line)
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    for chunk in chunks:
+        joined = "\n".join(chunk).strip()
+        if len(joined) > 10 and any(ch in joined for ch in ("{", "}", ";", "=")):
+            snippets.append({
+                "language": default_lang or "java",
+                "content": joined,
+                "label": "Code Snippet",
+                "role": "primary"
+            })
+
+    return snippets
+
+
 def _heuristic_upsert(raw_text: str, existing_summary: list[dict[str, Any]]) -> dict[str, Any]:
     norm_raw = _normalise_similarity_text(raw_text)
     # 1. Ignore if duplicate
@@ -1664,18 +1784,34 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
     ) or "- Docker: Containers & CLI, Images & Build, Volumes, Compose\n- Git: Core Git, Branching & Workflows, GitHub Actions, History & Inspection, State & Stash, Configuration"
 
     prompt = (
-        "You are a technical knowledge manager. The user is submitting a new note.\n"
-        f"Here are their existing notes: {json.dumps(existing_summary, ensure_ascii=False)}.\n\n"
-        f"Current knowledge domains and their active subconcepts:\n{subconcepts_text}\n\n"
-        f"New note: {raw_text}.\n\n"
-        "You must decide how to process this and categorize it:\n\n"
-        "CREATE: If this is a new concept. You MUST assign a concise domain (e.g. Docker, Git, RabbitMQ, Rust) "
-        "and choose an appropriate subconcept (matching one of the domain's known subconcepts listed above if applicable, "
-        "or a clean new subconcept if it represents a distinct category). "
-        "Return: {\"action\": \"create\", \"domain\": \"Docker\", \"subconcept\": \"Compose\", \"formatted_content\": \"markdown text\"}.\n\n"
-        "MERGE: If this belongs inside an existing note, merge the info. "
-        "Return: {\"action\": \"merge\", \"existing_id\": \"1\", \"updated_subconcept\": \"Compose\", \"updated_content\": \"full rewritten markdown\"}.\n\n"
-        "IGNORE: If it's a duplicate. Return: {\"action\": \"ignore\"}."
+        "You are an expert developer knowledge organizer for a senior backend / DevOps engineer.\n"
+        "The engineer is saving a technical note.\n"
+        f"Existing notes context: {json.dumps(existing_summary, ensure_ascii=False)}.\n"
+        f"Current domains and active subconcepts:\n{subconcepts_text}\n\n"
+        f"Input note:\n{raw_text}\n\n"
+        "Analyze the note and respond with one strict JSON object:\n"
+        "{\n"
+        '  "action": "create" | "merge" | "ignore",\n'
+        '  "domain": "Java" | "Docker" | "Kubernetes" | ..., (the high-level technology or domain)\n'
+        '  "subconcept": "Modern Language Features" | "Compose" | ..., (specific subconcept)\n'
+        '  "title": "Pattern Matching for instanceof", (concise searchable title under 70 chars)\n'
+        '  "technical_type": "code" | "command" | "concept" | "configuration" | "error_fix" | "reference",\n'
+        '  "technology": "Java 16+",\n'
+        '  "summary": "1-2 sentence core definition of the concept or tool",\n'
+        '  "mechanics": ["Mechanic 1: runtime/compiler behavior", "Mechanic 2: scope or usage rule"],\n'
+        '  "snippets": [\n'
+        '    {"label": "Modern (Java 16+)", "language": "java", "code": "...", "role": "after"},\n'
+        '    {"label": "Legacy (Java < 16)", "language": "java", "code": "...", "role": "before"}\n'
+        '  ],\n'
+        '  "suggested_tags": ["#java", "#pattern-matching"],\n'
+        '  "formatted_content": "Markdown text combining title, summary, code blocks with language fences, and mechanics bullets"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- NEVER discard code snippets, commands, flags, or technical syntax from the note.\n"
+        "- If the note contrasts before/after or old vs new (e.g. Java 8 vs 16, imperative vs declarative), extract both into snippets with labels.\n"
+        "- If the note is a single command or snippet, extract it into snippets and describe what each flag/argument does.\n"
+        "- For MERGE: Return {\"action\": \"merge\", \"existing_id\": \"...\", \"updated_subconcept\": \"...\", \"updated_content\": \"...\"}\n"
+        "- For IGNORE: Return {\"action\": \"ignore\"} only if exactly duplicate."
     )
 
     parsed = None
@@ -1740,22 +1876,76 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         subconcept = str(parsed.get("subconcept") or "").strip()
         if not subconcept:
             subconcept = infer_subconcept(domain, raw_text, "", raw_text)
-        formatted_content = str(parsed.get("formatted_content") or raw_text).strip()
-        note_id = str(uuid.uuid4())
 
-        is_cmd = raw_text.strip().startswith(("$", "docker ", "git ", "kubectl ", "pacman ", "systemctl ", "cargo ", "npm "))
-        tech_type = "command" if is_cmd else "concept"
-        sec = "commands" if is_cmd else "notes"
-        excerpts = [{"language": "bash", "content": raw_text.strip().lstrip("$ ").strip()}] if is_cmd else []
-        essentials = [formatted_content]
+        title = _clean_text(parsed.get("title") or "", 70)
+        technology = _clean_text(parsed.get("technology") or domain, 40)
+        summary = str(parsed.get("summary") or "").strip()
+        mechanics = _clean_bullets(parsed.get("mechanics") or parsed.get("essential_bullets") or [], 6)
+
+        # Snippets extraction
+        raw_snippets = parsed.get("snippets") or parsed.get("exact_excerpts") or []
+        excerpts: list[dict[str, str]] = []
+        if isinstance(raw_snippets, list):
+            for s in raw_snippets:
+                if isinstance(s, dict):
+                    code = str(s.get("code") or s.get("content") or "").strip()
+                    if code:
+                        lang = re.sub(r"[^A-Za-z0-9_+.-]", "", str(s.get("language") or technology or "java")).lower()[:24]
+                        lbl = str(s.get("label") or "").strip()[:50]
+                        role = str(s.get("role") or "primary").strip()[:20]
+                        entry: dict[str, str] = {"language": lang, "content": code}
+                        if lbl:
+                            entry["label"] = lbl
+                        if role:
+                            entry["role"] = role
+                        excerpts.append(entry)
+
+        if not excerpts:
+            excerpts = _detect_code_snippets(raw_text, default_lang=domain.lower())
+
+        is_cmd = (
+            raw_text.strip().startswith(("$", "docker ", "git ", "kubectl ", "pacman ", "systemctl ", "cargo ", "npm ", "mvn "))
+            or str(parsed.get("technical_type", "")).lower() == "command"
+        )
+        tech_type = str(parsed.get("technical_type") or ("command" if is_cmd else ("code" if excerpts else "concept"))).lower()
+        if tech_type not in TECHNICAL_TYPES:
+            tech_type = "command" if is_cmd else ("code" if excerpts else "concept")
+
+        sec = "commands" if is_cmd else ("code" if excerpts else "notes")
+
+        essentials = mechanics if mechanics else ([summary] if summary else ([parsed.get("formatted_content")] if parsed.get("formatted_content") else [raw_text[:200]]))
+        essentials = [e for e in essentials if e and isinstance(e, str)]
+
+        tags = _normalise_tags(parsed.get("suggested_tags") or extract_tags(raw_text))
+
+        formatted_content = str(parsed.get("formatted_content") or "").strip()
+        if not formatted_content or formatted_content == raw_text:
+            md_lines = []
+            if title:
+                md_lines.append(f"## {title}")
+            if summary:
+                md_lines.append(summary)
+            for ex in excerpts:
+                lbl = ex.get("label")
+                if lbl:
+                    md_lines.append(f"### {lbl}\n```{ex.get('language', '')}\n{ex.get('content', '')}\n```")
+                else:
+                    md_lines.append(f"```{ex.get('language', '')}\n{ex.get('content', '')}\n```")
+            if mechanics:
+                md_lines.append("**Key Mechanics:**\n" + "\n".join(f"- {m}" for m in mechanics))
+            formatted_content = "\n\n".join(md_lines) or raw_text
+
+        note_id = str(uuid.uuid4())
 
         db.execute(
             """INSERT INTO notes
                (id, created_at, updated_at, raw_content, formatted_content, topic, subconcept,
-                status, category, keep_decision, technical_type, topic_section, essentials_json, excerpts_json, schema_version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'formatted', 'technical', 'keep', ?, ?, ?, ?, ?)""",
+                title, technology, status, category, keep_decision, technical_type, topic_section,
+                ai_tags_json, essentials_json, excerpts_json, schema_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'formatted', 'technical', 'keep', ?, ?, ?, ?, ?, ?)""",
             (note_id, now, now, raw_text, formatted_content, domain, subconcept,
-             tech_type, sec, json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), SCHEMA_VERSION),
+             title, technology, tech_type, sec, json.dumps(tags, ensure_ascii=False),
+             json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), SCHEMA_VERSION),
         )
         sync_notes_json(db)
         new_row = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
