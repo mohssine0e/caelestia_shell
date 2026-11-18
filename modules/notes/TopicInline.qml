@@ -8,6 +8,7 @@ Item {
     id: root
 
     property string topic: ""
+    property string subconcept: ""
     property var suggestions: []
     property string errorMessage: ""
     property string notice: ""
@@ -21,7 +22,7 @@ Item {
         if (busy || !topic) return false
         errorMessage = ""
         notice = ""
-        pending = Object.assign({ topic: topic, action: action }, fields)
+        pending = Object.assign({ topic: topic, action: action, subconcept: subconcept }, fields)
         output = ""
         worker.command = ["python3", Notes.backendPath, action]
         worker.running = true
@@ -54,6 +55,12 @@ Item {
         notice = ""
         if (topic && !busy) request("learning-list")
     }
+    onSubconceptChanged: {
+        suggestions = []
+        errorMessage = ""
+        notice = ""
+        if (topic && !busy) request("learning-list")
+    }
 
     Timer {
         id: noticeTimer
@@ -72,7 +79,7 @@ Item {
             const result = Notes.parseResult(root.output)
             const request = root.pending
             if (result.note) Notes.refresh()
-            if (request.topic !== root.topic) {
+            if (request.topic !== root.topic || request.subconcept !== root.subconcept) {
                 if (root.topic) Qt.callLater(() => root.request("learning-list"))
                 return
             }

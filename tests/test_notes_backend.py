@@ -351,6 +351,34 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(saved_by_section["JVM Options"]["technical_type"], "command")
         self.assertEqual(saved_by_section["JVM Options"]["exact_excerpts"][0]["content"], "-Xmx2g")
 
+    def test_fill_topic_scopes_selected_subconcept_and_accept_all(self):
+        lifecycle = notes.create_note({"raw_content": "docker run starts a container", "subconcept": "Lifecycle"})["note"]
+        compose = notes.create_note({"raw_content": "docker compose defines multi-container apps", "subconcept": "Compose"})["note"]
+        response = json.dumps([
+            {"subconcept": "Lifecycle", "section": "Overview", "content": "A container is a running instance of an image."},
+            {"subconcept": "Compose", "section": "Overview", "content": "Compose applies a declarative application model."},
+        ])
+        scoped_response = json.dumps([{"subconcept": "Lifecycle", "section": "Overview",
+                                       "content": "A container is a running instance of an image."}])
+        with mock.patch.object(notes, "_run_provider", return_value=(scoped_response, "gemini")) as provider:
+            scoped = notes.fill_topic({"topic": "Docker", "subconcept": "Lifecycle"})
+        context = json.loads(provider.call_args.args[1])
+        self.assertEqual({item["subconcept"] for item in context["notes"]}, {"Lifecycle"})
+        self.assertEqual([item["subconcept"] for item in scoped["suggestions"]], ["Lifecycle"])
+
+        # All explicitly reviews both subsections and keeps each result attached to its source area.
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "gemini")) as provider:
+            all_result = notes.fill_topic({"topic": "Docker", "subconcept": "All"})
+        all_context = json.loads(provider.call_args.args[1])
+        self.assertEqual(set(all_context["target_subconcepts"]), {"Lifecycle", "Compose"})
+        self.assertEqual({item["subconcept"] for item in all_result["suggestions"]}, {"Lifecycle", "Compose"})
+
+        notes.accept_all_topic_lines({"topic": "Docker", "subconcept": "Lifecycle"})
+        remaining = notes.learning_list({"topic": "Docker", "subconcept": "All"})["suggestions"]
+        states = {item["subconcept"]: item["state"] for item in remaining}
+        self.assertEqual(states["Lifecycle"], "saved")
+        self.assertEqual(states["Compose"], "suggested")
+
     def test_generate_topic_creates_structured_notes(self):
         response = json.dumps([
             {"section": "Overview", "kind": "bullet", "content": "Git workflow describes branching and integration strategies."},

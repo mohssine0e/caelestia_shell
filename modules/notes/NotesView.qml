@@ -58,7 +58,7 @@ Item {
         const list = ["All"]
         const seen = new Set()
         for (const note of win.selectedGroup?.notes || []) {
-            const sc = String(note.subconcept || "").trim()
+            const sc = String(note.subconcept || "").trim() || ("Core " + (win.selectedGroup?.title || "Topic"))
             if (sc && !seen.has(sc.toLowerCase())) {
                 seen.add(sc.toLowerCase())
                 list.push(sc)
@@ -71,7 +71,8 @@ Item {
         const notes = win.selectedGroup?.notes || []
         if (!win.activeSubconcept || win.activeSubconcept === "All")
             return notes
-        return notes.filter(n => String(n.subconcept || "").trim().toLowerCase() === win.activeSubconcept.toLowerCase())
+        return notes.filter(n => (String(n.subconcept || "").trim() || ("Core " + (win.selectedGroup?.title || "Topic")))
+            .toLowerCase() === win.activeSubconcept.toLowerCase())
     }
 
     readonly property var filteredGroup: {
@@ -152,7 +153,7 @@ Item {
     readonly property var pillItems: {
         const items = []
         function groupHasRecent(g) {
-            return (g?.notes || []).some(n => win.isRecent(n.created_at))
+            return (g?.notes || []).some(n => win.isRecent(n.updated_at || n.created_at))
         }
         if (win.selectedGroup)
             items.push({ key: "group:" + win.selectedGroup.key, label: win.selectedGroup.title,
@@ -604,7 +605,7 @@ Item {
                 contentScroll.contentY = 0
             }
         }
-        pills.ensureVisible(index)
+        headerConcepts.ensureVisible(index)
     }
     function cyclePill(delta): void {
         if (!win.pillItems.length) return
@@ -823,6 +824,7 @@ Item {
     TopicInline {
         id: topicOps
         topic: win.selectedGroup?.key?.startsWith("topic:") ? win.selectedGroup.title : ""
+        subconcept: win.activeSubconcept === "All" ? "" : win.activeSubconcept
     }
 
     Rectangle {
@@ -846,23 +848,72 @@ Item {
             }
             GridLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 32
-                anchors.rightMargin: 32
+                anchors.leftMargin: 10
+                anchors.rightMargin: 54
                 anchors.topMargin: topBar.compact ? 6 : 0
                 anchors.bottomMargin: topBar.compact ? 6 : 0
                 columns: topBar.compact ? 2 : 4
                 columnSpacing: 12
                 rowSpacing: 4
-                StyledText {
+                Flickable {
+                    id: headerConcepts
                     Layout.row: 0
                     Layout.column: 0
                     Layout.fillWidth: true
                     Layout.minimumWidth: 80
-                    text: qsTr("Quick Notes")
-                    color: Colours.palette.m3onSurface
-                    font: Qt.font({ family: Tokens.font.title.small.family, pixelSize: 18,
-                        weight: Font.DemiBold })
-                    elide: Text.ElideRight
+                    implicitHeight: 32
+                    clip: true
+                    function ensureVisible(index): void {
+                        const item = headerConceptRepeater.itemAt(index)
+                        if (!item) return
+                        if (item.x < contentX) contentX = item.x
+                        else if (item.x + item.width > contentX + width) contentX = item.x + item.width - width
+                    }
+                    contentWidth: headerConceptRow.implicitWidth
+                    contentHeight: height
+                    boundsBehavior: Flickable.StopAtBounds
+                    Row {
+                        id: headerConceptRow
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 7
+                        Repeater {
+                            id: headerConceptRepeater
+                            model: win.pillItems
+                            delegate: Rectangle {
+                                id: headerConceptPill
+                                required property var modelData
+                                required property int index
+                                readonly property bool active: modelData.value === win.selectedGroupKey
+                                implicitWidth: headerConceptLabel.implicitWidth + 22
+                                implicitHeight: 26
+                                radius: 7
+                                color: active ? Colours.palette.m3secondaryContainer : Colours.palette.m3surfaceContainerHigh
+                                StyledText {
+                                    id: headerConceptLabel
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: 9
+                                    anchors.rightMargin: 9
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: headerConceptPill.modelData.label
+                                    color: headerConceptPill.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                                    font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
+                                        weight: Tokens.font.label.small.weight })
+                                }
+                                Rectangle {
+                                    visible: !!headerConceptPill.modelData.hasRecent
+                                    width: 5; height: 5; radius: 2.5
+                                    color: Colours.palette.m3primary
+                                    anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 3
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: win.activatePill(headerConceptPill.index)
+                                }
+                            }
+                        }
+                    }
                 }
                 Rectangle {
                     visible: win.generationFeedback.length > 0
@@ -1050,87 +1101,15 @@ Item {
                     }
                 }
             }
-        }
-
-        Item {
-            id: topicBanner
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: topBar.bottom
-            height: 44
-            Flickable {
-                id: pills
-                function ensureVisible(index): void {
-                    const item = pillRepeater.itemAt(index)
-                    if (!item) return
-                    if (item.x < contentX) contentX = item.x
-                    else if (item.x + item.width > contentX + width) contentX = item.x + item.width - width
-                }
-                anchors.left: parent.left
+            IconButton {
                 anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 32
-                anchors.rightMargin: 32
+                anchors.rightMargin: 14
+                y: topBar.compact ? 8 : (topBar.height - height) / 2
+                width: 32
                 height: 32
-                contentWidth: pillRow.implicitWidth
-                contentHeight: height
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                Row {
-                    id: pillRow
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 7
-                    Repeater {
-                        id: pillRepeater
-                        model: win.pillItems
-                        delegate: Rectangle {
-                            id: pill
-                            required property var modelData
-                            required property int index
-                            readonly property bool active: modelData.kind === "group"
-                                ? modelData.value === win.selectedGroupKey : modelData.value === win.activeTag
-                            implicitWidth: pillLabel.implicitWidth + 18
-                            implicitHeight: 26
-                            radius: 7
-                            color: modelData.kind === "group"
-                                ? (active ? Colours.palette.m3secondaryContainer
-                                    : Colours.palette.m3surfaceContainerHigh)
-                                : (active ? Qt.alpha(Colours.palette.m3secondaryContainer, 0.72)
-                                    : Qt.alpha(Colours.palette.m3surfaceContainerLow, 0.72))
-                            StyledText {
-                                id: pillLabel
-                                anchors.centerIn: parent
-                                text: pill.modelData.label
-                                color: pill.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
-                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
-                                    weight: Tokens.font.label.small.weight })
-                            }
-                            Rectangle {
-                                id: pillDot
-                                visible: !!pill.modelData.hasRecent
-                                width: 5
-                                height: 5
-                                radius: 2.5
-                                color: Colours.palette.m3primary
-                                anchors.top: parent.top
-                                anchors.right: parent.right
-                                anchors.margins: 3
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: win.activatePill(pill.index)
-                            }
-                        }
-                    }
-                }
-            }
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: Colours.palette.m3outlineVariant
+                type: IconButton.Text
+                icon: "close"
+                onClicked: win.closeRequested()
             }
         }
 
@@ -1138,7 +1117,7 @@ Item {
             id: subconceptBanner
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: topicBanner.bottom
+            anchors.top: topBar.bottom
             height: visible ? 40 : 0
             visible: !!win.selectedGroup && !win.noSearchResults
             clip: true
@@ -1148,8 +1127,8 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 32
-                anchors.rightMargin: 32
+                anchors.leftMargin: 20
+                anchors.rightMargin: 20
                 height: 28
                 contentWidth: subconceptRow.implicitWidth
                 contentHeight: height
@@ -1169,7 +1148,12 @@ Item {
                             required property int index
 
                             readonly property bool active: win.activeSubconcept.toLowerCase() === String(modelData).toLowerCase()
-                            implicitWidth: scLabel.implicitWidth + 18
+                            readonly property bool hasRecent: (win.selectedGroup?.notes || []).some(note => {
+                                const sc = String(note.subconcept || "").trim() || ("Core " + (win.selectedGroup?.title || "Topic"))
+                                return sc.toLowerCase() === String(modelData).toLowerCase()
+                                    && win.isRecent(note.updated_at || note.created_at)
+                            })
+                            implicitWidth: scLabel.implicitWidth + (hasRecent ? 24 : 18)
                             implicitHeight: 24
                             radius: 6
                             color: active
@@ -1182,7 +1166,11 @@ Item {
 
                             StyledText {
                                 id: scLabel
-                                anchors.centerIn: parent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: scPill.hasRecent ? 10 : 8
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: scPill.modelData
                                 color: scPill.active
                                     ? Colours.palette.m3onPrimary
@@ -1192,6 +1180,16 @@ Item {
                                     pixelSize: 11,
                                     weight: scPill.active ? Font.DemiBold : Tokens.font.label.small.weight
                                 })
+                            }
+                            Rectangle {
+                                visible: scPill.hasRecent
+                                width: 5
+                                height: 5
+                                radius: 2.5
+                                color: Colours.palette.m3primary
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 2
                             }
 
                             MouseArea {
@@ -1219,8 +1217,8 @@ Item {
             anchors.right: parent.right
             anchors.top: subconceptBanner.bottom
             anchors.bottom: parent.bottom
-            anchors.leftMargin: 32
-            anchors.rightMargin: 32
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
             anchors.topMargin: 16
             anchors.bottomMargin: 22
             contentWidth: width
@@ -1273,9 +1271,11 @@ Item {
                             width: implicitWidth
                             height: 28
                             spacing: topicHeader.compact ? 10 : 18
-                            HeaderAction {
-                                actionIcon: "lightbulb"
-                                label: topicOps.busyAction === "fill-topic" ? qsTr("Filling…") : qsTr("Fill gaps")
+                    HeaderAction {
+                        actionIcon: "lightbulb"
+                        label: topicOps.busyAction === "fill-topic"
+                            ? (win.activeSubconcept === "All" ? qsTr("Checking all…") : qsTr("Filling…"))
+                            : (win.activeSubconcept === "All" ? qsTr("Fill all gaps") : qsTr("Fill gaps"))
                                 running: topicOps.busyAction === "fill-topic"
                                 enabled: !!topicOps.topic && !topicOps.busy && Notes.providerConfigured
                                 onTriggered: topicOps.generate()
