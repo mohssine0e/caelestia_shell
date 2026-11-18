@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Look up real lyrics for the playing track on LRCLIB.
 
-Used by services/BetterLyrics.qml after the Better Lyrics API has nothing. It never asks an
-AI model for lyrics or timing: it returns LRCLIB's own timed lyrics, LRCLIB's plain lyrics
-(shown unsynced), or nothing.
+Used by services/BetterLyrics.qml after the Better Lyrics API has nothing. It returns only
+LRCLIB's timed or plain lyrics. A separate metadata helper can suggest artist/title pairs
+after catalog searches miss; it never supplies lyrics or timing.
 
 Prints one JSON object:
   {"status": "synced" | "plain" | "instrumental" | "none",
@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 # New directory on purpose: the old ~/.cache/caelestia/ai_lyrics holds Gemini-generated
 # results that must not be shown again.
 CACHE_DIR = os.path.expanduser("~/.cache/caelestia/lrclib_lyrics")
@@ -53,6 +53,7 @@ NOISE_WORDS = [
     "official visualizer", "lyric video", "lyrics video", "music video", "visualizer",
     "visualiser", "official", "video", "audio", "lyrics", "lyric", "clip", "hd", "hq", "4k",
     "mv", "exclusive", "remastered", "remaster", "with lyrics", "paroles",
+    "color coded", "colour coded", "color coded lyrics", "colour coded lyrics",
     "\u062d\u0635\u0631\u064a\u0627\u064b", "\u062d\u0635\u0631\u064a\u0627",  # exclusive
     "\u0641\u064a\u062f\u064a\u0648 \u0643\u0644\u064a\u0628", "\u0641\u064a\u062f\u064a\u0648",  # video clip, video
     "\u0643\u0644\u064a\u0628", "\u0643\u0644\u0645\u0627\u062a",  # clip, lyrics
@@ -391,26 +392,51 @@ def search_queries(track: Track):
 
 
 _UPLOAD_LYRICS_SUFFIX = re.compile(r"\s*(?:\((?:official\s+)?lyrics?\)|\[(?:official\s+)?lyrics?\]|(?:official\s+)?lyrics?)\s*$", re.IGNORECASE)
+_TOPIC_CHANNEL = re.compile(r"\s+[-\u2013\u2014]\s+Topic\s*$", re.IGNORECASE)
+
+
+def upload_title(title: str) -> str:
+    """Remove upload labels without removing version words such as Live or Remix."""
+    cleaned = clean_title(title)
+    cleaned = _UPLOAD_LYRICS_SUFFIX.sub("", cleaned)
+    return cleaned.strip(" \t\r\n-:_|\"'\u201c\u201d\u2018\u2019")
 
 
 def upload_track_candidates(track: Track):
-    """Try both orders of a 'Song - Artist Lyrics' video title.
+    """Extract likely artist/song pairs from common video title shapes.
 
     Video players often report the uploader as the artist. The candidates are only hints;
     lookup() accepts one only when LRCLIB confirms both the song and artist.
     """
-    if not _UPLOAD_LYRICS_SUFFIX.search(track.title):
-        return []
-    title = _UPLOAD_LYRICS_SUFFIX.sub("", track.title).strip()
+    title = upload_title(track.title)
+    pairs = []
+    topic_artist = _TOPIC_CHANNEL.sub("", track.artist).strip()
+    if topic_artist and topic_artist != track.artist:
+        pairs.append((topic_artist, title))
+
     parts = re.split(r"\s+[-\u2013\u2014]\s+", title)
-    if len(parts) != 2 or not all(len(part.strip()) >= 2 for part in parts):
-        return []
-    left, right = (part.strip() for part in parts)
-    pairs = [(right, left), (left, right)]
-    # If the reported artist is one side, try that orientation first.
-    if normalize(track.artist) == normalize(left):
-        pairs.reverse()
-    return [Track(artist, song, track.album, track.duration) for artist, song in pairs]
+    if len(parts) == 2 and all(len(part.strip()) >= 2 for part in parts):
+        left, right = (part.strip() for part in parts)
+        orientations = [(right, left), (left, right)]
+        if normalize(track.artist) == normalize(left):
+            orientations.reverse()
+        pairs.extend(orientations)
+
+    # Also handle titles such as: JENNIE(제니) "Like Jennie' Lyrics (Color Coded).
+    quoted = re.match(r'^\s*(.+?)\s*["\u201c\u2018]\s*(.+)$', title)
+    if quoted:
+        artist = BRACKET_RE.sub(" ", quoted.group(1)).strip(" \t-:_|\"'\u201c\u201d\u2018\u2019")
+        song = quoted.group(2).strip(" \t-:_|\"'\u201c\u201d\u2018\u2019")
+        pairs.append((artist, song))
+
+    seen, out = set(), []
+    for artist, song in pairs:
+        key = (normalize(artist), normalize(song))
+        if min(map(len, key)) < 2 or key in seen:
+            continue
+        seen.add(key)
+        out.append(Track(artist, song, track.album, track.duration))
+    return out[:4]
 
 
 def _lookup_one(track: Track, get_json=http_get_json):
@@ -456,9 +482,22 @@ def _lookup_one(track: Track, get_json=http_get_json):
     return build_result(track, None, reason)
 
 
-def lookup(track: Track, get_json=http_get_json):
-    # An explicit Lyrics upload title is stronger evidence than its uploader field. Try exact
-    # catalog lookups for both title orders before the broader search on the original metadata.
+def _supported_by_title(track: Track, candidate: Track) -> bool:
+    """An AI guess needs song evidence in the upload text before a catalog lookup."""
+    raw = normalize(track.title + " " + track.artist)
+    song = normalize(base_title(candidate.title))
+    if len(song) >= 5 and song in raw:
+        return True
+    words = {word for word in song.split() if len(word) >= 3}
+    shared = words & set(raw.split())
+    artist_words = {word for word in normalize(candidate.artist).split() if len(word) >= 3}
+    return len(words) >= 2 and len(shared) >= max(2, (len(words) + 1) // 2) \
+        and bool(artist_words & set(raw.split()))
+
+
+def lookup(track: Track, get_json=http_get_json, metadata_fn=None):
+    # Video titles often carry stronger song evidence than the uploader field. Try exact
+    # catalog lookups for extracted pairs before the broader search on the original metadata.
     candidates = upload_track_candidates(track)
     for candidate in candidates:
         if candidate.labels != track.labels:
@@ -492,6 +531,36 @@ def lookup(track: Track, get_json=http_get_json):
         if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
                 and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
             return build_result(candidate, chosen, "upload title")
+    if metadata_fn is None or original.get("reason") == "network error":
+        return original
+    try:
+        guesses = metadata_fn(track.artist, track.title, track.album, track.duration)
+    except Exception:
+        return original
+    for guess in (guesses or [])[:3]:
+        if not isinstance(guess, dict):
+            continue
+        candidate = Track(str(guess.get("artist") or ""), str(guess.get("title") or ""),
+                          track.album, track.duration)
+        if not candidate.artist or not candidate.title or candidate.labels != track.labels:
+            continue
+        if not _supported_by_title(track, candidate):
+            continue
+        for path, params in (
+            ("get", {"track_name": candidate.title, "artist_name": candidate.artist,
+                     "album_name": candidate.album or None,
+                     "duration": int(round(candidate.duration)) if candidate.duration > 0 else None}),
+            ("search", {"track_name": candidate.title, "artist_name": candidate.artist}),
+        ):
+            try:
+                items = get_json(path, params)
+            except Exception:
+                continue
+            items = [items] if isinstance(items, dict) else (items if isinstance(items, list) else [])
+            chosen = choose_best(candidate, items)
+            if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
+                    and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
+                return build_result(candidate, chosen, "verified AI metadata")
     return original
 
 
@@ -535,6 +604,7 @@ def main(argv=None) -> int:
     parser.add_argument("--album", default="")
     parser.add_argument("--duration", type=float, default=0.0, help="Track length in seconds (0 if unknown)")
     parser.add_argument("--force", action="store_true", help="Ignore the cache")
+    parser.add_argument("--no-ai", action="store_true", help="Search catalogs without the AI metadata fallback")
     args = parser.parse_args(argv)
 
     track = Track(args.artist, args.title, args.album, args.duration)
@@ -543,7 +613,11 @@ def main(argv=None) -> int:
     else:
         result = None if args.force else read_cache(track)
         if result is None:
-            result = lookup(track)
+            if args.no_ai:
+                result = lookup(track)
+            else:
+                from lyrics_metadata import guess_candidates
+                result = lookup(track, metadata_fn=guess_candidates)
             write_cache(track, result)
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
     sys.stdout.flush()

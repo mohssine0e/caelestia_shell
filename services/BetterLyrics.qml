@@ -8,7 +8,8 @@ import "../utils/scripts/lyrics.js" as Logic
 // Real-lyrics provider for the desktop overlay and the dashboard media tab (through LyricsSource).
 //
 // Order: Better Lyrics TTML, Better Lyrics QQ (QRC), then LRCLIB through scripts/lrclib_lyrics.py.
-// No step asks an AI model for lyrics or timing. When only plain lyrics exist they are exposed as
+// An AI metadata helper may suggest an artist/title when catalog searches miss; it never supplies
+// lyrics or timing. When only plain lyrics exist they are exposed as
 // plain text (status "plain") and never given invented timestamps; when nothing matches, status is
 // "none".
 //
@@ -47,10 +48,12 @@ Singleton {
 
     property int requestSerial: 0
     property var activeXhr: null
+    property bool betterLyricsAuthDenied: false
 
     readonly property bool loading: status === "loading"
     readonly property bool hasLyrics: status === "synced" && lines.length > 0
     readonly property string effectiveApiKey: apiKey.length > 0 ? apiKey : (Quickshell.env("BETTER_LYRICS_API_KEY") || "")
+    onEffectiveApiKeyChanged: betterLyricsAuthDenied = false
 
     // Results are kept for the session so skipping back to a track does not refetch it. Only real
     // answers are cached; misses and network errors are retried on the next play.
@@ -114,8 +117,12 @@ Singleton {
             "approximate": false,
             "match": null
         });
-        if (t.length > 0)
-            root.fetchTtml(root.requestSerial, a, t, al, d);
+        if (t.length > 0) {
+            if (root.betterLyricsAuthDenied)
+                root.startLrclib(root.requestSerial);
+            else
+                root.fetchTtml(root.requestSerial, a, t, al, d);
+        }
     }
 
     function clearTrack(): void {
@@ -229,6 +236,11 @@ Singleton {
         root.getJson(url, serial, function (err, text) {
             if (serial !== root.requestSerial)
                 return;
+            if (err === "HTTP 401" || err === "HTTP 403") {
+                root.betterLyricsAuthDenied = true;
+                root.startLrclib(serial);
+                return;
+            }
             if (!err) {
                 try {
                     const obj = JSON.parse(text);
@@ -248,6 +260,8 @@ Singleton {
         root.getJson(url, serial, function (err, text) {
             if (serial !== root.requestSerial)
                 return;
+            if (err === "HTTP 401" || err === "HTTP 403")
+                root.betterLyricsAuthDenied = true;
             if (!err) {
                 try {
                     const obj = JSON.parse(text);

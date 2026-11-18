@@ -46,7 +46,19 @@ class TitleCleaningTest(unittest.TestCase):
         track = lrclib.Track("MandemFill", "Screwface Capital - Dave Lyrics", "", 253.581)
         self.assertEqual((lrclib.upload_track_candidates(track)[0].artist,
                           lrclib.upload_track_candidates(track)[0].title), ("Dave", "Screwface Capital"))
-        self.assertEqual(lrclib.upload_track_candidates(lrclib.Track("Channel", "Screwface Capital - Dave", "", 253)), [])
+        self.assertEqual([(item.artist, item.title) for item in lrclib.upload_track_candidates(
+            lrclib.Track("Channel", "Screwface Capital - Dave", "", 253))],
+            [("Dave", "Screwface Capital"), ("Screwface Capital", "Dave")])
+
+    def test_mixed_script_quoted_upload_extracts_artist_and_song(self):
+        track = lrclib.Track("Idol_Vibes", 'JENNIE(제니) "Like Jennie\' Lyrics (Color Coded)', "", 123.621)
+        self.assertEqual([(item.artist, item.title) for item in lrclib.upload_track_candidates(track)],
+                         [("JENNIE", "Like Jennie")])
+
+    def test_topic_channel_is_not_treated_as_the_artist(self):
+        track = lrclib.Track("Siti Thania - Topic", "Ma Qoul Insak", "", 200)
+        self.assertEqual((lrclib.upload_track_candidates(track)[0].artist,
+                          lrclib.upload_track_candidates(track)[0].title), ("Siti Thania", "Ma Qoul Insak"))
 
 
 class SkipTest(unittest.TestCase):
@@ -176,6 +188,17 @@ class ResultTest(unittest.TestCase):
         self.assertEqual(result["match"]["artistName"], "Dave")
         self.assertEqual(len(calls), 1)
 
+    def test_lookup_recovers_mixed_script_quoted_upload(self):
+        def fake(path, params):
+            if path == "get" and params["track_name"] == "Like Jennie" and params["artist_name"] == "JENNIE":
+                return record("like JENNIE", "JENNIE", 124)
+            return None if path == "get" else []
+
+        track = lrclib.Track("Idol_Vibes", 'JENNIE(제니) "Like Jennie\' Lyrics (Color Coded)', "", 123.621)
+        result = lrclib.lookup(track, get_json=fake)
+        self.assertEqual(result["status"], "synced")
+        self.assertEqual(result["match"]["artistName"], "JENNIE")
+
     def test_upload_hint_needs_catalog_artist_confirmation(self):
         def fake(path, params):
             if path == "get":
@@ -196,6 +219,46 @@ class ResultTest(unittest.TestCase):
         self.assertEqual(result["status"], "synced")
         self.assertTrue(result["approximate"])
         self.assertEqual(result["reason"], "upload title")
+
+    def test_ai_hint_is_used_only_after_catalog_checks_and_verified(self):
+        calls = []
+
+        def fake(path, params):
+            calls.append((path, params))
+            if path == "get" and params["artist_name"] == "JENNIE" and params["track_name"] == "like JENNIE":
+                return record("like JENNIE", "JENNIE", 124)
+            return None if path == "get" else []
+
+        track = lrclib.Track("Idol_Vibes", "JENNIE performing Like Jennie, color coded", "", 123.621)
+        result = lrclib.lookup(track, get_json=fake,
+                               metadata_fn=lambda *args: [{"artist": "JENNIE", "title": "like JENNIE"}])
+        self.assertEqual(result["status"], "synced")
+        self.assertEqual(result["reason"], "verified AI metadata")
+        self.assertEqual(calls[-1][1]["artist_name"], "JENNIE")
+
+    def test_ai_hint_without_title_evidence_is_rejected(self):
+        calls = []
+
+        def fake(path, params):
+            calls.append(params)
+            return None if path == "get" else []
+
+        track = lrclib.Track("Channel", "Some unrelated upload", "", 200)
+        result = lrclib.lookup(track, get_json=fake,
+                               metadata_fn=lambda *args: [{"artist": "Adele", "title": "Hello"}])
+        self.assertEqual(result["status"], "none")
+        self.assertFalse(any(params.get("artist_name") == "Adele" for params in calls))
+
+    def test_catalog_network_failure_does_not_spend_an_ai_call(self):
+        requested = []
+
+        def offline(path, params):
+            raise OSError("offline")
+
+        result = lrclib.lookup(lrclib.Track("Channel", "Song title", "", 200), get_json=offline,
+                               metadata_fn=lambda *args: requested.append(args))
+        self.assertEqual(result["reason"], "network error")
+        self.assertEqual(requested, [])
 
 
 if __name__ == "__main__":

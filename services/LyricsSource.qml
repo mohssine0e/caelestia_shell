@@ -9,11 +9,12 @@ import "../utils/scripts/lyrics.js" as Logic
 // One lyrics source for the desktop overlay and the dashboard media tab, so both show the same
 // lines at the same moment.
 //
-// It keeps BetterLyrics (Better Lyrics TTML/QQ, then LRCLIB, never AI) and the shell's C++
+// It keeps BetterLyrics (Better Lyrics TTML/QQ, then LRCLIB with an optional AI metadata hint)
+// and the shell's C++
 // Lyrics service in step with the active player, then picks one provider:
 //   1. BetterLyrics when it has timed lyrics for this recording;
 //   2. otherwise the C++ Lyrics service's timed lyrics (its own backends and the candidate picker
-//      in the media tab), once BetterLyrics has finished;
+//      in the media tab), as soon as they are ready for this track;
 //   3. otherwise plain lyrics (shown unsynced), an instrumental track, or nothing.
 //
 // The timing offset is the C++ service's per-track offset (Lyrics.offset, saved per
@@ -37,10 +38,17 @@ Singleton {
     }
 
     readonly property bool betterDone: BetterLyrics.status !== "loading" && BetterLyrics.status !== "idle"
+    readonly property bool betterMatchesTrack: root.player
+        && BetterLyrics.trackKey === BetterLyrics.makeKey(
+            String(root.player.trackArtist ?? ""), String(root.player.trackTitle ?? ""),
+            String(root.player.trackAlbum ?? ""), Number(root.player.length ?? 0))
+    readonly property bool shellMatchesTrack: root.player
+        && Lyrics.trackArtist === String(root.player.trackArtist ?? "")
+        && Lyrics.trackTitle === String(root.player.trackTitle ?? "")
     readonly property string provider: {
-        if (BetterLyrics.hasLyrics)
+        if (root.betterMatchesTrack && BetterLyrics.hasLyrics)
             return "better";
-        if (root.betterDone && Lyrics.hasLyrics)
+        if (root.shellMatchesTrack && Lyrics.hasLyrics)
             return "shell";
         return "";
     }
@@ -51,7 +59,7 @@ Singleton {
             return "idle";
         if (root.provider.length > 0)
             return "synced";
-        if (!root.betterDone || Lyrics.loading)
+        if (!root.betterMatchesTrack || !root.betterDone || Lyrics.loading)
             return "loading";
         if (BetterLyrics.status === "plain")
             return "plain";
@@ -82,6 +90,7 @@ Singleton {
     readonly property var texts: root.lines.map(l => l.text)
     readonly property string plainText: root.status === "plain" ? BetterLyrics.plainText : ""
     readonly property bool approximate: root.provider === "better" && BetterLyrics.approximate
+    readonly property var matchInfo: root.provider === "better" ? BetterLyrics.matchInfo : null
     readonly property string sourceLabel: root.provider === "better" ? BetterLyrics.source : (root.provider === "shell" ? "Shell lyrics" : (root.status === "plain" ? BetterLyrics.source : ""))
     readonly property bool arabic: Logic.isMostlyArabic(root.lines.length > 0 ? root.lines : root.plainText.split("\n"))
 
@@ -155,6 +164,9 @@ Singleton {
             return;
         root.syncedKey = key;
         BetterLyrics.setTrack(artist, title, album, duration);
+        // The C++ service debounces loading; clear its old lines now so a new track cannot
+        // briefly display the previous song while its metadata already says the new title.
+        Lyrics.clearTrack();
         Lyrics.setTrack(artist, title, album, duration);
     }
 

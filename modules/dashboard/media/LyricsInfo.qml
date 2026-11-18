@@ -159,6 +159,19 @@ Item {
                 }
 
                 StyledText {
+                    readonly property var match: LyricsSource.matchInfo
+                    readonly property var player: LyricsSource.player
+                    visible: match && player && (String(match.artistName).toLowerCase() !== String(player.trackArtist).toLowerCase()
+                        || String(match.trackName).toLowerCase() !== String(player.trackTitle).toLowerCase())
+                    Layout.maximumWidth: Tokens.sizes.dashboard.mediaTabWidth / 2
+                    // TRANSLATORS: %1/%2 = artist and song identified by the lyrics catalog
+                    text: match ? Tr.tr("Matched: %1 — %2").arg(match.artistName).arg(match.trackName) : ""
+                    color: Colours.palette.m3onSurfaceVariant
+                    wrapMode: Text.WordWrap
+                    animate: true
+                }
+
+                StyledText {
                     visible: LyricsSource.status === "plain" || LyricsSource.approximate
                     Layout.maximumWidth: Tokens.sizes.dashboard.mediaTabWidth / 2
                     text: LyricsSource.status === "plain" ? Tr.tr("Not synced: no timed lyrics match this recording") : Tr.tr("Approximate match: the recording length differs, adjust the offset if needed")
