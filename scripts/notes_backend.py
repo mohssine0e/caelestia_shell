@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 TAG_PATTERN = re.compile(r"(?<![\w#])#([\w-]+)", re.UNICODE)
 ORGANIZER_PROMPT = (
     "You are a technical note formatter. Format the supplied raw developer note as "
@@ -35,9 +35,10 @@ Return one strict JSON object and no other text:
   "technical_type": "command|code|concept|error_fix|configuration|tool|reference|general",
   "topic_section": "overview|notes|commands|configuration|errors|references|code",
   "canonical_topic": "Docker",
-  "title": "short searchable title",a
+  "title": "short searchable title",
   "technology": "language, CLI, framework, or tool; empty when unknown",
   "suggested_tags": ["#docker"],
+  "related_note_ids": ["id1", "id2"],
   "essential_bullets": ["..."],
   "completion_bullets": ["..."],
   "exact_excerpts": [{"language": "bash", "content": "docker ps"}]
@@ -58,6 +59,9 @@ Rules:
   the core mechanics, runtime semantics, scope, and purpose. Never discard code in favor of generic summaries.
 - For commands and CLI tools, make each essential bullet a direct description of what the command does.
 - Suggest at most five specific lowercase tags. Never include private values.
+- Analyze the new note. If it directly relates to, contradicts, or expands upon an
+  existing note, return the exact IDs of those notes in related_note_ids. Return an
+  empty array if there are no strong connections.
 - Personal observations, feelings, preferences, plans, and ideas belong in
   personal or idea. Preserve them verbatim: return empty bullet and excerpt
   arrays. A software product idea may be an idea rather than a technical fact.
@@ -184,6 +188,7 @@ def connect() -> sqlite3.Connection:
         "display_edits_json": "ALTER TABLE notes ADD COLUMN display_edits_json TEXT NOT NULL DEFAULT '{}'",
         "topic_section": "ALTER TABLE notes ADD COLUMN topic_section TEXT NOT NULL DEFAULT ''",
         "subconcept": "ALTER TABLE notes ADD COLUMN subconcept TEXT NOT NULL DEFAULT ''",
+        "related_note_ids": "ALTER TABLE notes ADD COLUMN related_note_ids TEXT NOT NULL DEFAULT '[]'",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -401,6 +406,7 @@ def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
         except (TypeError, ValueError):
             note[target] = []
             note.pop(column, None)
+    note["related_note_ids"] = _clean_related_ids(note.get("related_note_ids", "[]"))
     note["formatted_content"] = note.get("formatted_content") or ""
     note["format_error"] = note.get("format_error") or ""
     note["triage_error"] = note.get("triage_error") or ""
@@ -426,6 +432,66 @@ def _row_to_note(row: sqlite3.Row) -> dict[str, Any]:
     note.pop("format_token", None)
     note.pop("triage_token", None)
     return note
+
+
+def _clean_related_ids(value: Any) -> list[str]:
+    """Normalize relation IDs read from model responses or SQLite."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, (str, int)):
+            continue
+        note_id = str(item).strip()
+        if note_id and len(note_id) <= 128 and note_id not in seen:
+            seen.add(note_id)
+            result.append(note_id)
+        if len(result) >= 50:
+            break
+    return result
+
+
+def _save_related_links(db: sqlite3.Connection, current_id: str, proposed_ids: Any) -> None:
+    """Persist validated links and backlinks inside the active DB transaction."""
+    current = db.execute(
+        "SELECT related_note_ids FROM notes WHERE id = ? AND deleted_at IS NULL",
+        (current_id,),
+    ).fetchone()
+    if current is None:
+        return
+    valid = {
+        str(row[0]) for row in db.execute(
+            "SELECT id FROM notes WHERE deleted_at IS NULL AND id != ? "
+            "AND local_only = 0 AND keep_decision != 'skip' "
+            "AND category IN ('technical', 'reference')",
+            (current_id,),
+        )
+    }
+    # Keep established links during re-analysis, while dropping stale or invalid IDs.
+    related = list(dict.fromkeys(
+        rid for rid in (_clean_related_ids(current["related_note_ids"])
+                        + _clean_related_ids(proposed_ids)) if rid in valid
+    ))
+    db.execute("UPDATE notes SET related_note_ids = ? WHERE id = ?",
+               (json.dumps(related), current_id))
+    for target_id in related:
+        row = db.execute(
+            "SELECT related_note_ids FROM notes WHERE id = ? AND deleted_at IS NULL",
+            (target_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        backlinks = _clean_related_ids(row["related_note_ids"])
+        if current_id not in backlinks:
+            backlinks.append(current_id)
+            db.execute("UPDATE notes SET related_note_ids = ? WHERE id = ?",
+                       (json.dumps(backlinks), target_id))
 
 
 def sync_notes_json(db: sqlite3.Connection) -> None:
@@ -992,6 +1058,7 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
     essentials = _clean_bullets(result.get("essential_bullets"), 6)
     completions = _clean_bullets(result.get("completion_bullets"), 3)
     exact_excerpts = _clean_exact_excerpts(result.get("exact_excerpts"), raw)
+    related_note_ids = _clean_related_ids(result.get("related_note_ids", []))
     if category in {"personal", "idea", "noise"}:
         essentials = []
         completions = []
@@ -1002,6 +1069,7 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
         technology = ""
         topic = ""
         suggested_tags = []
+        related_note_ids = []
     return {
         "keep": keep,
         "category": category,
@@ -1014,6 +1082,7 @@ def _parse_triage_response(text: str, raw: str = "") -> dict[str, Any]:
         "essential_bullets": essentials,
         "completion_bullets": completions,
         "exact_excerpts": exact_excerpts,
+        "related_note_ids": related_note_ids,
     }
 
 
@@ -1025,6 +1094,16 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
         if row is None:
             raise ValueError("Note not found.")
         raw = row["raw_content"]
+        existing_notes = [
+            {"id": str(n["id"]), "title": str(n["title"]).strip()}
+            for n in db.execute(
+                "SELECT id, title FROM notes WHERE deleted_at IS NULL AND id != ? "
+                "AND local_only = 0 AND keep_decision != 'skip' "
+                "AND category IN ('technical', 'reference') AND title != '' "
+                "ORDER BY updated_at DESC LIMIT 40",
+                (note_id,),
+            )
+        ]
         sensitive_reason = _detect_sensitive_content(raw)
         if sensitive_reason:
             duplicate_of = _find_duplicate(db, note_id, raw)
@@ -1049,7 +1128,11 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     try:
-        response, provider = _run_provider(TRIAGE_PROMPT, raw)
+        context = json.dumps(existing_notes, ensure_ascii=False)
+        response, provider = _run_provider(
+            TRIAGE_PROMPT + "\n\nExisting note IDs and titles (use IDs exactly):\n" + context,
+            raw,
+        )
         triage = _parse_triage_response(response, raw)
     except Exception as exc:
         message = str(exc).strip() or "Note analysis failed."
@@ -1101,6 +1184,8 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
              json.dumps(triage["exact_excerpts"], ensure_ascii=False), duplicate_of or None,
              subc, utc_now(), SCHEMA_VERSION, note_id, token),
         )
+        if cursor.rowcount == 1:
+            _save_related_links(db, note_id, triage["related_note_ids"])
         sync_notes_json(db)
         sync_notes_json(db)
     if cursor.rowcount != 1:
@@ -1760,16 +1845,23 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
 
     with database() as db:
         rows = db.execute(
-            "SELECT id, topic, subconcept, title, raw_content FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, topic, subconcept, title, raw_content FROM notes "
+            "WHERE deleted_at IS NULL AND local_only = 0 AND keep_decision != 'skip' "
+            "AND category IN ('technical', 'reference') AND title != '' "
+            "ORDER BY updated_at DESC LIMIT 50"
         ).fetchall()
         existing_summary = [
             {
                 "id": str(r["id"]),
                 "domain": str(r["topic"] or "general").lower(),
                 "subconcept": str(r["subconcept"] or "Core"),
-                "title": str(r["title"] or r["raw_content"][:50]).strip(),
+                "title": str(r["title"]).strip(),
             }
             for r in rows
+        ]
+        existing_identity = [
+            {"id": item["id"], "title": item["title"]}
+            for item in existing_summary
         ]
         domain_subconcepts: dict[str, set[str]] = {}
         for r in rows:
@@ -1787,6 +1879,7 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "You are an expert developer knowledge organizer for a senior backend / DevOps engineer.\n"
         "The engineer is saving a technical note.\n"
         f"Existing notes context: {json.dumps(existing_summary, ensure_ascii=False)}.\n"
+        f"Existing note IDs and titles: {json.dumps(existing_identity, ensure_ascii=False)}. Use only those exact IDs for links.\n"
         f"Current domains and active subconcepts:\n{subconcepts_text}\n\n"
         f"Input note:\n{raw_text}\n\n"
         "Analyze the note and respond with one strict JSON object:\n"
@@ -1804,14 +1897,16 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         '    {"label": "Legacy (Java < 16)", "language": "java", "code": "...", "role": "before"}\n'
         '  ],\n'
         '  "suggested_tags": ["#java", "#pattern-matching"],\n'
+        '  "related_note_ids": ["id1", "id2"],\n'
         '  "formatted_content": "Markdown text combining title, summary, code blocks with language fences, and mechanics bullets"\n'
         "}\n\n"
         "Rules:\n"
         "- NEVER discard code snippets, commands, flags, or technical syntax from the note.\n"
         "- If the note contrasts before/after or old vs new (e.g. Java 8 vs 16, imperative vs declarative), extract both into snippets with labels.\n"
         "- If the note is a single command or snippet, extract it into snippets and describe what each flag/argument does.\n"
-        "- For MERGE: Return {\"action\": \"merge\", \"existing_id\": \"...\", \"updated_subconcept\": \"...\", \"updated_content\": \"...\"}\n"
+        "- For MERGE: Return {\"action\": \"merge\", \"existing_id\": \"...\", \"updated_subconcept\": \"...\", \"updated_content\": \"...\", \"related_note_ids\": []}\n"
         "- For IGNORE: Return {\"action\": \"ignore\"} only if exactly duplicate."
+        "\n- Analyze the new note. If it directly relates to, contradicts, or expands upon an existing note, return the exact IDs of those notes in related_note_ids. Return an empty array if there are no strong connections."
     )
 
     parsed = None
@@ -1825,6 +1920,8 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         if fence:
             cleaned = fence.group(1).strip()
         parsed = json.loads(cleaned)
+        if not isinstance(parsed, dict):
+            raise ValueError("Expected a JSON object")
     except Exception:
         parsed = _heuristic_upsert(raw_text, existing_summary)
 
@@ -1861,6 +1958,7 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
                        WHERE id = ?""",
                     (updated_content, subc, now, nid),
                 )
+                _save_related_links(db, nid, parsed.get("related_note_ids", []))
                 sync_notes_json(db)
                 updated_row = db.execute("SELECT * FROM notes WHERE id = ?", (nid,)).fetchone()
                 return {
@@ -1947,6 +2045,7 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
              title, technology, tech_type, sec, json.dumps(tags, ensure_ascii=False),
              json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), SCHEMA_VERSION),
         )
+        _save_related_links(db, note_id, parsed.get("related_note_ids", []))
         sync_notes_json(db)
         new_row = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
         return {

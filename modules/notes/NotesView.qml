@@ -166,6 +166,14 @@ Item {
     }
     readonly property var subconceptBlocks: win.buildSubconceptBlocks(win.selectedGroup)
     readonly property var knowledge: win.buildKnowledge(win.filteredGroup)
+    readonly property var relatedNoteItems: {
+        const items = []
+        for (const id of win.knowledge.related_note_ids || []) {
+            const note = (Notes.notes || []).find(n => String(n.id) === String(id))
+            if (note) items.push({ id: String(note.id), title: win.displayTitle(note) })
+        }
+        return items
+    }
     readonly property var activeDynamicSections: {
         const map = new Map()
         for (const sec of (win.knowledge?.dynamicSections || [])) {
@@ -371,7 +379,7 @@ Item {
         const result = {
             overview: [], notes: [], commands: [], code: [],
             configuration: [], errors: [], references: [],
-            dynamicSections: []
+            dynamicSections: [], related_note_ids: []
         }
         if (!group) return result
         const seenText = new Set()
@@ -432,6 +440,17 @@ Item {
         }
 
         for (const note of group.notes || []) {
+            let relatedIds = note.related_note_ids || []
+            if (typeof relatedIds === "string") {
+                try { relatedIds = JSON.parse(relatedIds) } catch (e) { relatedIds = [] }
+            }
+            if (Array.isArray(relatedIds)) {
+                for (const id of relatedIds) {
+                    const cleanId = String(id || "").trim()
+                    if (cleanId && cleanId !== String(note.id) && !result.related_note_ids.includes(cleanId))
+                        result.related_note_ids.push(cleanId)
+                }
+            }
             const targetSection = String(note.topic_section || "").trim()
             const essentials = note.essentials || []
             const excerpts = note.exact_excerpts || []
@@ -542,6 +561,21 @@ Item {
         win.selectedGroupKey = key
         win.selectedId = win.selectedGroup?.notes?.[0]?.id || ""
         contentScroll.contentY = 0
+    }
+    function navigateToNote(id): void {
+        const targetId = String(id || "")
+        if (!targetId) return
+        for (const group of win.allGroups) {
+            const note = group.notes.find(n => String(n.id) === targetId)
+            if (!note) continue
+            win.query = ""
+            win.activeTag = ""
+            win.selectedGroupKey = group.key
+            win.selectedId = targetId
+            win.activeSubconcept = String(note.subconcept || "All").trim() || "All"
+            contentScroll.contentY = 0
+            return
+        }
     }
     function deleteCurrentTopic(): void {
         const topicName = win.selectedGroup?.title || ""
@@ -1281,6 +1315,35 @@ Item {
                                 label: qsTr("Sources (%1)").arg(win.filteredNotes.length)
                                 enabled: !!win.selectedGroup
                                 onTriggered: win.sourcesOpen = true
+                            }
+                        }
+                    }
+                }
+                Flow {
+                    width: parent.width
+                    visible: win.relatedNoteItems.length > 0
+                    spacing: 8
+                    Repeater {
+                        model: win.relatedNoteItems
+                        delegate: Rectangle {
+                            id: relatedPill
+                            required property var modelData
+                            implicitWidth: relatedLabel.implicitWidth + 24
+                            implicitHeight: 30
+                            radius: Tokens.rounding.full
+                            color: Colours.palette.m3secondaryContainer
+                            StyledText {
+                                id: relatedLabel
+                                anchors.centerIn: parent
+                                text: "🔗 Related: " + relatedPill.modelData.title
+                                color: Colours.palette.m3onSecondaryContainer
+                                font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
+                                    weight: Font.Medium })
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.navigateToNote(relatedPill.modelData.id)
                             }
                         }
                     }

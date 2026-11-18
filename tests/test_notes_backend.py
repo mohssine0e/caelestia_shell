@@ -664,6 +664,53 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(stored["topic_section"], "commands")
         self.assertEqual(stored["technical_type"], "command")
 
+    def test_smart_upsert_relations_are_validated_and_bidirectional(self):
+        response_a = json.dumps({
+            "action": "create", "domain": "Docker", "subconcept": "Images",
+            "title": "Docker images", "technology": "Docker",
+            "summary": "Images package application layers.", "mechanics": [],
+            "snippets": [], "suggested_tags": ["#docker"], "related_note_ids": [],
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(response_a, "test")):
+            a = notes.smart_upsert({"raw_content": "Docker images package application layers."})["note"]
+
+        response_b = json.dumps({
+            "action": "create", "domain": "Docker", "subconcept": "Containers",
+            "title": "Docker containers", "technology": "Docker",
+            "summary": "Containers run images.", "mechanics": [], "snippets": [],
+            "suggested_tags": ["#docker"],
+            "related_note_ids": [a["id"], "hallucinated-id"],
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(response_b, "test")) as provider:
+            b = notes.smart_upsert({"raw_content": "Docker containers run Docker images."})["note"]
+        prompt = provider.call_args.args[1]
+        self.assertIn(a["id"], prompt)
+        self.assertIn(a["title"], prompt)
+        self.assertEqual(b["related_note_ids"], [a["id"]])
+        stored_a = notes.get_note({"id": a["id"]})["note"]
+        self.assertIn(b["id"], stored_a["related_note_ids"])
+        self.assertNotIn("hallucinated-id", stored_a["related_note_ids"])
+
+    def test_triage_relations_are_bidirectional_and_receive_context(self):
+        existing = notes.create_note({"raw_content": "A Redis cache can reduce database reads."})["note"]
+        with notes.database() as db:
+            db.execute("UPDATE notes SET category = 'technical', title = 'Redis cache overview' WHERE id = ?",
+                       (existing["id"],))
+        pending = notes.create_note({"raw_content": "Redis cache invalidation strategies."})["note"]
+        response = json.dumps({
+            "keep": True, "category": "technical", "technical_type": "concept",
+            "topic_section": "notes", "canonical_topic": "Redis",
+            "title": "Cache invalidation", "technology": "Redis",
+            "suggested_tags": ["#redis"], "essential_bullets": ["Invalidation keeps cached data fresh."],
+            "completion_bullets": [], "exact_excerpts": [],
+            "related_note_ids": [existing["id"], "unknown-id"],
+        })
+        with mock.patch.object(notes, "_run_provider", return_value=(response, "test")) as provider:
+            result = notes.triage_note({"id": pending["id"]})
+        self.assertIn(existing["id"], provider.call_args.args[0])
+        self.assertEqual(result["note"]["related_note_ids"], [existing["id"]])
+        self.assertIn(pending["id"], notes.get_note({"id": existing["id"]})["note"]["related_note_ids"])
+
 
 if __name__ == "__main__":
     unittest.main()
