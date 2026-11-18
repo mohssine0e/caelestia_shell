@@ -527,6 +527,8 @@ def create_note(payload: dict[str, Any]) -> dict[str, Any]:
     if len(raw) > 200_000:
         raise ValueError("The note is too large (maximum 200,000 characters).")
     note_id = str(uuid.uuid4())
+    origin = "assistant_selection" if payload.get("origin") == "assistant_selection" else "user"
+    keep_decision = "keep" if origin == "assistant_selection" else "pending"
     now = utc_now()
     tags = _normalise_tags(payload.get("tags"), raw)
     subconcept = str(payload.get("subconcept", "")).strip()
@@ -539,9 +541,10 @@ def create_note(payload: dict[str, Any]) -> dict[str, Any]:
         db.execute(
             """INSERT INTO notes
                (id, created_at, updated_at, raw_content, tags_json, status,
-                category, keep_decision, subconcept, topic, schema_version)
-               VALUES (?, ?, ?, ?, ?, 'inbox', 'unclassified', 'pending', ?, ?, ?)""",
-            (note_id, now, now, raw, json.dumps(tags, ensure_ascii=False), subconcept, topic, SCHEMA_VERSION),
+                category, keep_decision, subconcept, topic, origin, schema_version)
+               VALUES (?, ?, ?, ?, ?, 'inbox', 'unclassified', ?, ?, ?, ?, ?)""",
+            (note_id, now, now, raw, json.dumps(tags, ensure_ascii=False), keep_decision,
+             subconcept, topic, origin, SCHEMA_VERSION),
         )
         sync_notes_json(db)
         row = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
@@ -1015,7 +1018,9 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
     if completions:
         markdown_parts.append("**AI-added context**\n" + "\n".join(f"- {item}" for item in completions))
     formatted = "\n\n".join(markdown_parts)
-    decision = "keep" if triage["keep"] else "skip"
+    explicit_capture = row["origin"] == "assistant_selection"
+    decision = "keep" if explicit_capture or triage["keep"] else "skip"
+    category = "reference" if explicit_capture and triage["category"] == "noise" else triage["category"]
     t_topic = triage.get("topic") or _infer_local_topic(raw) or "General"
     subc = infer_subconcept(t_topic, triage.get("title") or "", "", formatted or raw, triage.get("technology") or "")
     with database() as db:
@@ -1029,7 +1034,7 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
                completions_json = ?, excerpts_json = ?, local_only = 0,
                sensitive_reason = NULL, duplicate_of = ?, subconcept = ?, updated_at = ?, schema_version = ?
                WHERE id = ? AND triage_token = ? AND deleted_at IS NULL""",
-            (formatted or None, triage["category"], decision, provider,
+            (formatted or None, category, decision, provider,
              triage["title"], triage["technical_type"], triage["technology"], triage["topic"],
              json.dumps(triage["suggested_tags"], ensure_ascii=False),
              json.dumps(essentials, ensure_ascii=False),

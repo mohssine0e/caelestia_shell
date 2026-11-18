@@ -45,6 +45,9 @@ Singleton {
     readonly property bool generatingTopic: generateTopicProc.running
     property var _generateTopicInput: ({})
     property string _generateTopicOutput: ""
+    property var _selectionQueue: []
+    property var _activeSelection: ({})
+    property string _selectionOutput: ""
 
     signal noteCreated(var note, bool formattingQueued)
     signal draftSaved(var note, string clientToken)
@@ -55,6 +58,8 @@ Singleton {
     signal organizationFinished(string noteId, bool success, string message)
     signal topicGenerated(string topic, int count, string action, string message)
     signal topicGenerateFailed(string message)
+    signal assistantSelectionSaved(var note, string clientToken)
+    signal assistantSelectionSaveFailed(string message, string clientToken)
 
     function parseResult(text): var {
         try {
@@ -129,6 +134,25 @@ Singleton {
             root._startDraftSave(request)
         }
         return true
+    }
+
+    function saveAssistantSelection(rawContent, clientToken): bool {
+        const content = String(rawContent || "").replace(/\u2029/g, "\n").trim()
+        if (!content) return false
+        const queue = root._selectionQueue.slice()
+        queue.push({ raw_content: content, origin: "assistant_selection", client_token: String(clientToken || "") })
+        root._selectionQueue = queue
+        root._startNextSelectionSave()
+        return true
+    }
+
+    function _startNextSelectionSave(): void {
+        if (selectionSaveProc.running || root._selectionQueue.length === 0) return
+        const queue = root._selectionQueue.slice()
+        root._activeSelection = queue.shift()
+        root._selectionQueue = queue
+        root._selectionOutput = ""
+        selectionSaveProc.running = true
     }
 
     function _startDraftSave(request): void {
@@ -313,6 +337,33 @@ Singleton {
                 }
                 root._startDraftSave(queued)
             }
+        }
+    }
+
+    Process {
+        id: selectionSaveProc
+
+        command: ["python3", root.backendPath, "create"]
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._activeSelection) + "\n")
+        stdout: SplitParser {
+            onRead: data => root._selectionOutput += data
+        }
+        onExited: exitCode => {
+            const request = root._activeSelection
+            const result = root.parseResult(root._selectionOutput)
+            root._selectionOutput = ""
+            if (exitCode === 0 && result.success && result.note) {
+                root.assistantSelectionSaved(result.note, request.client_token || "")
+                root.refresh()
+                root.queueOrganization(result.note.id)
+                Toaster.toast(qsTr("Saved to Notes"), qsTr("Selection captured; organizing in the background."), "note_add")
+            } else {
+                const message = result.error || qsTr("The selection could not be saved.")
+                root.assistantSelectionSaveFailed(message, request.client_token || "")
+                Toaster.toast(qsTr("Notes"), message, "error")
+            }
+            Qt.callLater(() => root._startNextSelectionSave())
         }
     }
 

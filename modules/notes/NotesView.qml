@@ -1598,6 +1598,12 @@ Item {
                                         font: Tokens.font.label.builders.medium.weight(Font.DemiBold).build()
                                         elide: Text.ElideRight
                                     }
+                                    StyledText {
+                                        visible: sourceCard.modelData.origin === "assistant_selection"
+                                        text: qsTr("Assistant")
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        font: Tokens.font.label.small
+                                    }
                                     StyledRect {
                                         visible: !!sourceCard.modelData.subconcept
                                         radius: Tokens.rounding.full

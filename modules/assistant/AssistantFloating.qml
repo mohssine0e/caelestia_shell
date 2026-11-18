@@ -56,6 +56,7 @@ Scope {
                 }
                 onVisibleChanged: {
                     if (!visible) {
+                        hudCard.closeSelectionPopup()
                         if (win.st && win.st.assistant)
                             win.st.assistant = false
                         Assistant.cancelCurrentRequest()

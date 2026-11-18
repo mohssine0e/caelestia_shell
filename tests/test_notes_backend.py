@@ -37,6 +37,23 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.db_path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.db_path.parent.stat().st_mode), 0o700)
 
+    def test_assistant_selection_preserves_exact_capture_and_origin(self):
+        selected = "git rebase --interactive HEAD~3\nKeep this command exact."
+        note = notes.create_note({"raw_content": selected, "origin": "assistant_selection"})["note"]
+        self.assertEqual(note["raw_content"], selected)
+        self.assertEqual(note["origin"], "assistant_selection")
+        self.assertEqual(note["keep_decision"], "keep")
+        self.assertEqual(note["status"], "inbox")
+        with mock.patch.object(notes, "_run_provider", return_value=(
+                json.dumps({"keep": False, "category": "noise", "technical_type": "general",
+                            "canonical_topic": "", "title": "", "technology": "",
+                            "suggested_tags": [], "essential_bullets": [],
+                            "completion_bullets": [], "exact_excerpts": []}), "gemini")):
+            stored = notes.triage_note({"id": note["id"]})["note"]
+        self.assertEqual(stored["raw_content"], selected)
+        self.assertEqual(stored["keep_decision"], "keep")
+        self.assertEqual(stored["category"], "reference")
+
     def test_search_update_delete_and_restore(self):
         first = notes.create_note({"raw_content": "podman ps #containers"})["note"]
         notes.create_note({"raw_content": "git rebase #git"})

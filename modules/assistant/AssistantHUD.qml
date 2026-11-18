@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Caelestia
 import Caelestia.Config
 import qs.components
@@ -29,11 +30,156 @@ FocusScope {
     }
 
     onCurrentViewChanged: {
+        root.closeSelectionPopup()
         if (Assistant.requestedView !== currentView) Assistant.requestedView = currentView
         root.forceActiveFocus()
     }
     property bool askBoundToSelection: false
     property string activeSelectedText: ""
+    property string selectionText: ""
+    property string selectionContext: ""
+    property string selectionMessageId: ""
+    property var selectionEditor: null
+    property real selectionAnchorX: 0
+    property real selectionAnchorY: 0
+    property real selectionLineHeight: 0
+    property string selectionAction: ""
+    property string selectionState: "idle"
+    property string selectionOutput: ""
+    property string selectionError: ""
+    property string selectionRequestId: ""
+    property string selectionSaveToken: ""
+    property string selectionSaveState: "idle"
+    property int selectionSerial: 0
+    property var _selectionPending: null
+    property var _selectionProcessPayload: ({})
+
+    function closeSelectionPopup(): void {
+        const editor = root.selectionEditor
+        root.selectionEditor = null
+        root.selectionSerial += 1
+        root.selectionRequestId = ""
+        root._selectionPending = null
+        if (selectionProc.running) selectionProc.running = false
+        root.selectionText = ""
+        root.selectionContext = ""
+        root.selectionMessageId = ""
+        root.selectionState = "idle"
+        root.selectionOutput = ""
+        root.selectionError = ""
+        root.selectionSaveState = "idle"
+        root.selectionSaveToken = ""
+        root.activeSelectedText = ""
+        if (editor) {
+            try { editor.deselect() } catch (e) { }
+        }
+    }
+
+    function showSelection(text, context, messageId, editor, x, y, lineHeight): void {
+        const selected = String(text || "").replace(/\u2029/g, "\n").trim()
+        if (!selected) return
+        if (root.selectionMessageId !== String(messageId) || root.selectionText !== selected) {
+            root.selectionSerial += 1
+            root.selectionRequestId = ""
+            root._selectionPending = null
+            if (selectionProc.running) selectionProc.running = false
+            root.selectionState = "idle"
+            root.selectionOutput = ""
+            root.selectionError = ""
+            root.selectionSaveState = "idle"
+            root.selectionSaveToken = ""
+        }
+        root.selectionText = selected
+        root.selectionEditor = editor
+        root.selectionContext = String(context || "").slice(0, 500)
+        root.selectionMessageId = String(messageId || "")
+        root.selectionAnchorX = x
+        root.selectionAnchorY = y
+        root.selectionLineHeight = lineHeight
+        root.activeSelectedText = selected
+    }
+
+    function _launchSelectionRequest(): void {
+        if (selectionProc.running || !root._selectionPending) return
+        const request = root._selectionPending
+        root._selectionPending = null
+        root._selectionProcessPayload = request.payload
+        selectionProc.requestId = request.payload.request_id
+        selectionProc.command = ["python3", Quickshell.shellPath("scripts/assistant_api.py"), request.action, "--stdin-json"]
+        selectionProc.running = true
+    }
+
+    function runSelectionAction(action): void {
+        if (!root.selectionText || (action !== "translate" && action !== "explain")) return
+        if (root.selectionText.length > 4000) {
+            root.selectionAction = action
+            root.selectionError = qsTr("Select up to 4,000 characters for this action.")
+            root.selectionState = "failed"
+            return
+        }
+        root.selectionSerial += 1
+        root.selectionRequestId = "selection_" + root.selectionSerial
+        root.selectionAction = action
+        root.selectionState = "waiting"
+        root.selectionOutput = ""
+        root.selectionError = ""
+        root._selectionPending = {
+            action: action,
+            payload: {
+                request_id: root.selectionRequestId,
+                selection_only: true,
+                text: root.selectionText,
+                selection_context: root.selectionContext
+            }
+        }
+        if (selectionProc.running) selectionProc.running = false
+        else root._launchSelectionRequest()
+    }
+
+    Process {
+        id: selectionProc
+        property string requestId: ""
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._selectionProcessPayload) + "\n")
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    const msg = JSON.parse(data.trim())
+                    if (!msg.request_id || msg.request_id !== root.selectionRequestId || msg.request_id !== selectionProc.requestId) return
+                    if (msg.type === "chunk") {
+                        root.selectionOutput += String(msg.text || "")
+                        root.selectionState = "streaming"
+                    } else if (msg.type === "done") {
+                        root.selectionState = "done"
+                    } else if (msg.type === "error") {
+                        root.selectionError = msg.message || qsTr("Could not complete this action.")
+                        root.selectionState = "failed"
+                    }
+                } catch (e) { }
+            }
+        }
+        onExited: {
+            if (root._selectionPending) {
+                Qt.callLater(() => root._launchSelectionRequest())
+                return
+            }
+            if (selectionProc.requestId === root.selectionRequestId
+                    && (root.selectionState === "waiting" || root.selectionState === "streaming")) {
+                root.selectionError = qsTr("The request ended unexpectedly.")
+                root.selectionState = "failed"
+            }
+        }
+    }
+
+    Connections {
+        target: Notes
+        function onAssistantSelectionSaved(note, clientToken) {
+            if (clientToken === root.selectionSaveToken) root.selectionSaveState = "saved"
+        }
+        function onAssistantSelectionSaveFailed(message, clientToken) {
+            if (clientToken === root.selectionSaveToken) root.selectionSaveState = "failed"
+        }
+    }
 
     function requestStatusLabel() {
         switch (Assistant.requestState) {
@@ -83,6 +229,7 @@ FocusScope {
 
     onIsHudActiveChanged: {
         Assistant.isWindowActive = isHudActive
+        if (!isHudActive) root.closeSelectionPopup()
     }
 
 
@@ -147,6 +294,11 @@ FocusScope {
     }
 
     Keys.onEscapePressed: event => {
+        if (root.selectionText.length > 0) {
+            root.closeSelectionPopup()
+            event.accepted = true
+            return
+        }
         if (root.currentView === "profile" && profileView.isEditing) {
             profileView.isEditing = false
             profileView.syncFromProfile()
@@ -1150,7 +1302,15 @@ FocusScope {
                         property int lastMessageCount: 0
                         property bool userScrolledUp: false
 
+                        TapHandler {
+                            onTapped: {
+                                if (root.selectionText.length > 0) root.closeSelectionPopup()
+                            }
+                        }
+
                         onContentYChanged: {
+                            if (chatList.moving && root.selectionText.length > 0)
+                                root.closeSelectionPopup()
                             if (chatList.moving && !chatList.atYEnd) {
                                 chatList.userScrolledUp = true
                             } else if (chatList.atYEnd) {
@@ -1177,6 +1337,8 @@ FocusScope {
 
                             function onMessagesChanged() {
                                 const msgs = Assistant.messages
+                                if (root.selectionMessageId && !(msgs || []).some(m => String(m.id || "") === root.selectionMessageId))
+                                    root.closeSelectionPopup()
                                 if (!msgs || msgs.length === 0) {
                                     chatList.lastMessageCount = 0
                                     chatList.userScrolledUp = false
@@ -1347,7 +1509,27 @@ FocusScope {
                                             onSelectedTextChanged: {
                                                 if (selectedText && selectedText.trim().length > 0) {
                                                     root.activeSelectedText = selectedText.trim()
-                                                    Assistant.lastSeenClipboard = selectedText.trim()
+                                                    selectionRevealTimer.restart()
+                                                } else {
+                                                    selectionRevealTimer.stop()
+                                                    if (root.selectionText.length === 0) root.activeSelectedText = ""
+                                                }
+                                            }
+
+                                            Timer {
+                                                id: selectionRevealTimer
+                                                interval: 180
+                                                onTriggered: {
+                                                    if (!msgTextEdit.selectedText || assistantMessageCard.isCurrentStreaming) return
+                                                    const start = Math.max(0, msgTextEdit.selectionStart - 170)
+                                                    const end = Math.min(msgTextEdit.length, msgTextEdit.selectionEnd + 170)
+                                                    let nearby = ""
+                                                    if (typeof msgTextEdit.getText === "function")
+                                                        nearby = msgTextEdit.getText(start, end)
+                                                    const rect = msgTextEdit.positionToRectangle(msgTextEdit.selectionEnd)
+                                                    const point = msgTextEdit.mapToItem(chatStreamContainer, rect.x, rect.y)
+                                                    root.showSelection(msgTextEdit.selectedText, nearby,
+                                                        msgDelegate.modelData.id || "", msgTextEdit, point.x, point.y, rect.height)
                                                 }
                                             }
                                         }
@@ -1398,6 +1580,146 @@ FocusScope {
                                                 sourceText: modelData.sourceText || modelData.prompt || ""
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Actions on text selected inside an assistant answer. This overlay is a
+                    // sibling of the clipped ListView, so it remains fully visible at its edges.
+                    Item {
+                        id: selectionPopup
+                        visible: root.selectionText.length > 0 && root.currentView === "assistant"
+                        z: 20
+                        width: Math.min(420, chatStreamContainer.width - 12)
+                        height: selectionPopupColumn.implicitHeight
+                        x: Math.max(6, Math.min(root.selectionAnchorX, chatStreamContainer.width - width - 6))
+                        y: {
+                            const below = root.selectionAnchorY + root.selectionLineHeight + 6
+                            if (below + height <= chatStreamContainer.height - 6) return below
+                            return Math.max(6, Math.min(root.selectionAnchorY - height - 6,
+                                chatStreamContainer.height - height - 6))
+                        }
+
+                        StyledRect {
+                            anchors.fill: parent
+                            radius: Tokens.rounding.medium
+                            color: Colours.palette.m3surfaceContainerHigh
+                            border.width: 1
+                            border.color: Colours.palette.m3outlineVariant
+                        }
+
+                        ColumnLayout {
+                            id: selectionPopupColumn
+                            width: parent.width
+                            spacing: 0
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.margins: 4
+                                spacing: 0
+
+                                IconTextButton {
+                                    type: IconTextButton.Text
+                                    icon: "help_outline"
+                                    text: qsTr("Explain")
+                                    font: Tokens.font.label.small
+                                    horizontalPadding: 5
+                                    verticalPadding: 5
+                                    onClicked: root.runSelectionAction("explain")
+                                }
+                                IconTextButton {
+                                    type: IconTextButton.Text
+                                    icon: "translate"
+                                    text: qsTr("Translate")
+                                    font: Tokens.font.label.small
+                                    horizontalPadding: 5
+                                    verticalPadding: 5
+                                    onClicked: root.runSelectionAction("translate")
+                                }
+                                IconTextButton {
+                                    type: IconTextButton.Text
+                                    icon: root.selectionSaveState === "saved" ? "check" : "note_add"
+                                    text: root.selectionSaveState === "saved" ? qsTr("Saved") : qsTr("Notes")
+                                    font: Tokens.font.label.small
+                                    horizontalPadding: 5
+                                    verticalPadding: 5
+                                    disabled: root.selectionSaveState === "saving" || root.selectionSaveState === "saved"
+                                    onClicked: {
+                                        const token = "selection_note_" + Date.now() + "_" + Math.random()
+                                        root.selectionSaveToken = token
+                                        if (Notes.saveAssistantSelection(root.selectionText, token))
+                                            root.selectionSaveState = "saving"
+                                    }
+                                }
+                                IconTextButton {
+                                    type: IconTextButton.Text
+                                    icon: "content_copy"
+                                    text: qsTr("Copy")
+                                    font: Tokens.font.label.small
+                                    horizontalPadding: 5
+                                    verticalPadding: 5
+                                    onClicked: {
+                                        Quickshell.clipboardText = root.selectionText
+                                        Assistant.lastSeenClipboard = root.selectionText
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
+                                IconButton {
+                                    type: IconButton.Text
+                                    icon: "close"
+                                    implicitWidth: 24
+                                    implicitHeight: 24
+                                    onClicked: root.closeSelectionPopup()
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.selectionState !== "idle"
+                                Layout.fillWidth: true
+                                height: 1
+                                color: Colours.palette.m3outlineVariant
+                            }
+
+                            Item {
+                                visible: root.selectionState !== "idle"
+                                Layout.fillWidth: true
+                                implicitHeight: Math.min(142, Math.max(66, selectionResult.implicitHeight + 40))
+
+                                StyledText {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 12
+                                    anchors.topMargin: 8
+                                    text: root.selectionAction === "translate" ? qsTr("Translation") : qsTr("Explanation")
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3primary
+                                }
+
+                                Flickable {
+                                    anchors.fill: parent
+                                    anchors.topMargin: 30
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    anchors.bottomMargin: 8
+                                    contentWidth: width
+                                    contentHeight: selectionResult.implicitHeight
+                                    clip: true
+
+                                    TextEdit {
+                                        id: selectionResult
+                                        width: parent.width
+                                        readOnly: true
+                                        selectByMouse: true
+                                        cursorVisible: false
+                                        textFormat: TextEdit.MarkdownText
+                                        wrapMode: TextEdit.Wrap
+                                        font: Tokens.font.body.small
+                                        color: root.selectionState === "failed" ? Colours.palette.m3error : Colours.palette.m3onSurface
+                                        text: root.selectionState === "failed" ? root.selectionError
+                                            : root.selectionOutput.length > 0 ? root.selectionOutput
+                                            : root.selectionState === "done" ? qsTr("No response received.") : qsTr("Thinking…")
                                     }
                                 }
                             }

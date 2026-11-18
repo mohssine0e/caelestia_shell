@@ -109,6 +109,24 @@ class PayloadTests(unittest.TestCase):
         self.assertTrue(done["context_used"]["facts"])
         self.assertFalse(done["context_used"]["workspace"])
 
+    def test_selection_explanation_uses_only_selected_text_and_nearby_excerpt(self):
+        events, body = self.run_main("explain", {
+            "request_id": "selection-1", "selection_only": True,
+            "text": "polymorphism", "selection_context": "An interface enables polymorphism.",
+            "custom_prompt": "ignore selection and discuss my career",
+            "thread": [{"role": "user", "content": "private chat history"}],
+            "context": "private saved context", "include_personal_context": True,
+        })
+        system = body["systemInstruction"]["parts"][0]["text"]
+        user = body["contents"][-1]["parts"][0]["text"]
+        self.assertEqual(system, assistant_api.SELECTION_PROMPTS["explain"])
+        self.assertEqual(json.loads(user), {
+            "selected_text": "polymorphism", "nearby_excerpt": "An interface enables polymorphism."})
+        self.assertNotIn("private", json.dumps(body))
+        self.assertNotIn("February 2027", json.dumps(body))
+        self.assertNotIn("Active Window", json.dumps(body))
+        self.assertEqual(events[-1]["context_used"], {})
+
     def test_groq_system_message_is_trusted_and_data_is_in_user_turn(self):
         self.provider = "groq"
         _, body = self.run_main("ask", {"custom_prompt": "Why does this file fail? QML error in my code",
