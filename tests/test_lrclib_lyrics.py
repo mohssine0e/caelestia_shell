@@ -42,6 +42,12 @@ class TitleCleaningTest(unittest.TestCase):
     def test_normalize_arabic_diacritics(self):
         self.assertEqual(lrclib.normalize("\u0623\u064e\u062d\u0652\u0628\u064e\u0628\u0652\u062a\u064f\u0643"), lrclib.normalize("\u0627\u062d\u0628\u0628\u062a\u0643"))
 
+    def test_lyrics_upload_can_contain_the_real_artist(self):
+        track = lrclib.Track("MandemFill", "Screwface Capital - Dave Lyrics", "", 253.581)
+        self.assertEqual((lrclib.upload_track_candidates(track)[0].artist,
+                          lrclib.upload_track_candidates(track)[0].title), ("Dave", "Screwface Capital"))
+        self.assertEqual(lrclib.upload_track_candidates(lrclib.Track("Channel", "Screwface Capital - Dave", "", 253)), [])
+
 
 class SkipTest(unittest.TestCase):
     def test_whole_word_only(self):
@@ -153,6 +159,43 @@ class ResultTest(unittest.TestCase):
         result = lrclib.lookup(lrclib.Track("Artist", "Song", "", 200), get_json=fake)
         self.assertEqual(result["status"], "none")
         self.assertEqual(result["reason"], "network error")
+
+    def test_lookup_recovers_song_and_artist_from_lyrics_upload(self):
+        calls = []
+
+        def fake(path, params):
+            calls.append((path, params))
+            if path == "get" and params["track_name"] == "Screwface Capital" and params["artist_name"] == "Dave":
+                return record("Screwface Capital", "Dave", 253)
+            return None if path == "get" else []
+
+        track = lrclib.Track("MandemFill", "Screwface Capital - Dave Lyrics", "", 253.581)
+        result = lrclib.lookup(track, get_json=fake)
+        self.assertEqual(result["status"], "synced")
+        self.assertEqual(result["reason"], "upload title")
+        self.assertEqual(result["match"]["artistName"], "Dave")
+        self.assertEqual(len(calls), 1)
+
+    def test_upload_hint_needs_catalog_artist_confirmation(self):
+        def fake(path, params):
+            if path == "get":
+                return record("Screwface Capital", "Someone Else", 253)
+            return []
+
+        track = lrclib.Track("MandemFill", "Screwface Capital - Dave Lyrics", "", 253.581)
+        self.assertEqual(lrclib.lookup(track, get_json=fake)["status"], "none")
+
+    def test_upload_hint_searches_one_candidate_when_duration_is_approximate(self):
+        def fake(path, params):
+            if path == "search" and params == {"track_name": "Screwface Capital", "artist_name": "Dave"}:
+                return [record("Screwface Capital", "Dave", 251)]
+            return None if path == "get" else []
+
+        track = lrclib.Track("MandemFill", "Screwface Capital - Dave Lyrics", "", 253.581)
+        result = lrclib.lookup(track, get_json=fake)
+        self.assertEqual(result["status"], "synced")
+        self.assertTrue(result["approximate"])
+        self.assertEqual(result["reason"], "upload title")
 
 
 if __name__ == "__main__":

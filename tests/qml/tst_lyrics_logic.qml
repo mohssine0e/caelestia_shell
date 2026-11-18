@@ -74,6 +74,9 @@ TestCase {
             playback: "paused",
             pauseGrace: true
         })).mode, "hidden");
+        compare(Logic.overlayState(Object.assign({}, base, {
+            status: "none"
+        })).mode, "notes");
     }
 
     function test_arabic() {

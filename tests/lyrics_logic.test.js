@@ -193,11 +193,10 @@ test("overlay: gap line shows notes; intro shows notes only when long", () => {
     assert.strictEqual(mode({ lines: g, index: -1 }), "notes");
     assert.strictEqual(mode({ lines: [{ time: 1, text: "a" }], index: -1 }), "lyrics");
 });
-test("overlay: plain or missing lyrics give a short notice, never notes", () => {
-    assert.strictEqual(mode({ status: "plain", noticeActive: true }), "notice");
-    assert.strictEqual(mode({ status: "plain", noticeActive: false }), "hidden");
-    assert.strictEqual(mode({ status: "none", noticeActive: true }), "notice");
-    assert.strictEqual(mode({ status: "none", noticeActive: true, playback: "paused", pauseGrace: true }), "hidden");
+test("overlay: plain or missing lyrics show notes without a message", () => {
+    assert.strictEqual(mode({ status: "plain" }), "notes");
+    assert.strictEqual(mode({ status: "none" }), "notes");
+    assert.strictEqual(mode({ status: "none", playback: "paused", pauseGrace: true }), "notes");
 });
 test("overlay: explicit instrumental track shows notes", () => assert.strictEqual(mode({ status: "instrumental" }), "notes"));
 test("overlay: idle hides", () => assert.strictEqual(mode({ status: "idle" }), "hidden"));

@@ -45,8 +45,6 @@ Item {
 
     property bool pauseGrace: false
     property bool loadingDelayPassed: false
-    property bool noticeActive: false
-    property string noticeKey: ""
     property int currentIndex: -1
 
     readonly property var overlay: LyricsSource.overlayState({
@@ -56,7 +54,6 @@ Item {
         "pauseGrace": root.pauseGrace,
         "status": root.status,
         "loadingDelayPassed": root.loadingDelayPassed,
-        "noticeActive": root.noticeActive,
         "lines": LyricsSource.lines,
         "index": root.currentIndex
     })
@@ -67,8 +64,6 @@ Item {
     readonly property string currentText: {
         if (root.mode === "loading")
             return qsTr("Loading lyrics…");
-        if (root.mode === "notice")
-            return root.status === "plain" ? qsTr("Lyrics for this track are not synced") : qsTr("No lyrics found for this track");
         if (root.mode === "lyrics")
             return root.currentIndex < 0 ? "" : root.rows.current;
         return "";
@@ -129,13 +124,6 @@ Item {
         onTriggered: root.loadingDelayPassed = true
     }
 
-    Timer {
-        id: noticeTimer
-
-        interval: 3000
-        onTriggered: root.noticeActive = false
-    }
-
     onPlaybackChanged: {
         if (root.playback === "paused") {
             root.pauseGrace = true;
@@ -156,15 +144,6 @@ Item {
             root.loadingDelayPassed = false;
         }
 
-        // Say once per track that there is nothing to sync, then get out of the way.
-        if ((root.status === "plain" || root.status === "none") && LyricsSource.syncedKey !== root.noticeKey) {
-            root.noticeKey = LyricsSource.syncedKey;
-            root.noticeActive = true;
-            noticeTimer.restart();
-        } else if (root.status !== "plain" && root.status !== "none") {
-            noticeTimer.stop();
-            root.noticeActive = false;
-        }
         root.refresh();
     }
 
@@ -284,7 +263,7 @@ Item {
                     font.pixelSize: root.mainPixelSize
                     font.weight: Font.Bold
                     lineHeight: root.mainLineHeight
-                    color: root.mode === "notice" || root.mode === "loading" ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
+                    color: root.mode === "loading" ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     wrapMode: Text.Wrap

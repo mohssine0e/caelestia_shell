@@ -292,7 +292,7 @@ def assess(track: Track, item: dict):
 
     if track.duration > 0 and cand_duration > 0:
         delta = abs(cand_duration - track.duration)
-        if delta <= EXACT_DURATION_DELTA and (title_ok or artist_ok):
+        if delta <= EXACT_DURATION_DELTA and title_ok and artist_ok:
             score = 100 - delta * 5 + (10 if title_ok else 0) + (10 if artist_ok else 0)
             return True, False, round(delta, 2), score
         if delta <= APPROX_DURATION_DELTA and title_ok and artist_ok:
@@ -390,7 +390,30 @@ def search_queries(track: Track):
     return unique[:MAX_SEARCHES]
 
 
-def lookup(track: Track, get_json=http_get_json):
+_UPLOAD_LYRICS_SUFFIX = re.compile(r"\s*(?:\((?:official\s+)?lyrics?\)|\[(?:official\s+)?lyrics?\]|(?:official\s+)?lyrics?)\s*$", re.IGNORECASE)
+
+
+def upload_track_candidates(track: Track):
+    """Try both orders of a 'Song - Artist Lyrics' video title.
+
+    Video players often report the uploader as the artist. The candidates are only hints;
+    lookup() accepts one only when LRCLIB confirms both the song and artist.
+    """
+    if not _UPLOAD_LYRICS_SUFFIX.search(track.title):
+        return []
+    title = _UPLOAD_LYRICS_SUFFIX.sub("", track.title).strip()
+    parts = re.split(r"\s+[-\u2013\u2014]\s+", title)
+    if len(parts) != 2 or not all(len(part.strip()) >= 2 for part in parts):
+        return []
+    left, right = (part.strip() for part in parts)
+    pairs = [(right, left), (left, right)]
+    # If the reported artist is one side, try that orientation first.
+    if normalize(track.artist) == normalize(left):
+        pairs.reverse()
+    return [Track(artist, song, track.album, track.duration) for artist, song in pairs]
+
+
+def _lookup_one(track: Track, get_json=http_get_json):
     errors = 0
     # 1. Exact lookups: the player's own metadata, then the cleaned title (version labels kept).
     gets = [(track.title, track.artist)]
@@ -431,6 +454,45 @@ def lookup(track: Track, get_json=http_get_json):
         return build_result(track, chosen, "search")
     reason = "network error" if errors and not pool else "no matching recording"
     return build_result(track, None, reason)
+
+
+def lookup(track: Track, get_json=http_get_json):
+    # An explicit Lyrics upload title is stronger evidence than its uploader field. Try exact
+    # catalog lookups for both title orders before the broader search on the original metadata.
+    candidates = upload_track_candidates(track)
+    for candidate in candidates:
+        if candidate.labels != track.labels:
+            continue
+        params = {"track_name": candidate.title, "artist_name": candidate.artist,
+                  "album_name": candidate.album or None}
+        if candidate.duration > 0:
+            params["duration"] = int(round(candidate.duration))
+        try:
+            item = get_json("get", params)
+        except Exception:
+            continue
+        chosen = choose_best(candidate, [item] if isinstance(item, dict) else [])
+        if chosen and _title_matches(candidate, str(item.get("trackName") or "")) \
+                and _artist_matches(candidate, str(item.get("artistName") or "")):
+            return build_result(candidate, chosen, "upload title")
+
+    original = _lookup_one(track, get_json)
+    if original["status"] != "none":
+        return original
+    for candidate in candidates:
+        if candidate.labels != track.labels:
+            continue
+        # A single structured search covers recordings outside /get's two-second window.
+        # Repeating the full search plan for both orientations would make misses very slow.
+        try:
+            items = get_json("search", {"track_name": candidate.title, "artist_name": candidate.artist})
+        except Exception:
+            continue
+        chosen = choose_best(candidate, items if isinstance(items, list) else [])
+        if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
+                and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
+            return build_result(candidate, chosen, "upload title")
+    return original
 
 
 # ---------------------------------------------------------------------------------------------

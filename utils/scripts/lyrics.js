@@ -234,9 +234,8 @@ function rowsForIndex(lines, index) {
 //   pauseGrace              - true for ~1.5 s after a pause, so a quick pause does not flicker
 //   status                  - "idle" | "loading" | "synced" | "plain" | "instrumental" | "none"
 //   loadingDelayPassed      - loading has lasted long enough (~400 ms) to be worth showing
-//   noticeActive            - the short "no synced lyrics" notice is still within its time
 //   lines, index            - timed lines and the current index (synced only)
-// Returns { visible, mode } where mode is "hidden" | "loading" | "lyrics" | "notes" | "notice".
+// Returns { visible, mode } where mode is "hidden" | "loading" | "lyrics" | "notes".
 function overlayState(s) {
     var hidden = { visible: false, mode: "hidden" };
     if (!s || !s.hasPlayer || s.covered)
@@ -252,10 +251,9 @@ function overlayState(s) {
     case "loading":
         return playing && s.loadingDelayPassed ? { visible: true, mode: "loading" } : hidden;
     case "instrumental":
-        return { visible: true, mode: "notes" };
     case "plain":
     case "none":
-        return playing && s.noticeActive ? { visible: true, mode: "notice" } : hidden;
+        return { visible: true, mode: "notes" };
     case "synced": {
         var lines = s.lines || [];
         if (lines.length === 0)
