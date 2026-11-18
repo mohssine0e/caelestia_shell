@@ -49,15 +49,9 @@ Item {
     readonly property int streak: root.nestedData?.streak ?? 0
     readonly property int bestStreak: root.nestedData?.bestStreak ?? 0
 
-    readonly property color streakColor: {
-        if (root.streak >= 20) return "#fe1d1d"
-        if (root.streak >= 10) return "#FF8C00"
-        if (root.streak >= 3)  return "#FFA500"
-        if (root.streak >= 1)  return Colours.palette.m3primary
-        return Colours.palette.m3outlineVariant
-    }
+    readonly property color streakColor: Colours.streakColour(root.streak)
     readonly property color bestStreakColor:
-        root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+        root.streak >= root.bestStreak ? Colours.favouriteColour : Colours.palette.m3onSurfaceVariant
     readonly property string editPrefill: (function() {
         // Round-trips title + @minutes + link through a rename; only the
         // pieces that actually exist are appended.

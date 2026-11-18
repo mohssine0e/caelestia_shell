@@ -27,7 +27,7 @@ Item {
 
         Text {
             text: "$"
-            color: root.isRecent ? (Colours.palette.m3success || "#4ade80") : Colours.palette.m3primary
+            color: root.isRecent ? Colours.palette.m3success : Colours.palette.m3primary
             font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
             opacity: 0.6
         }
@@ -46,7 +46,7 @@ Item {
                     visible: !tokenItem.modelData.isFlag
                     anchors.verticalCenter: parent.verticalCenter
                     text: tokenItem.modelData.text
-                    color: root.isRecent ? (Colours.palette.m3success || "#4ade80") : Colours.palette.m3primary
+                    color: root.isRecent ? Colours.palette.m3success : Colours.palette.m3primary
                     font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 14 })
                 }
 
@@ -68,7 +68,7 @@ Item {
                         id: flagText
                         anchors.centerIn: parent
                         text: tokenItem.modelData.text
-                        color: root.isRecent ? (Colours.palette.m3success || "#4ade80") : Colours.palette.m3primary
+                        color: root.isRecent ? Colours.palette.m3success : Colours.palette.m3primary
                         font: Qt.font({
                             family: Tokens.font.mono.small.family,
                             pixelSize: 14,

@@ -769,7 +769,7 @@ FocusScope {
                                 MaterialIcon {
                                     text: root.currentCommand?.starred ? "star" : "star_outline"
                                     fontStyle: Tokens.font.icon.medium
-                                    color: root.currentCommand?.starred ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+                                    color: root.currentCommand?.starred ? Colours.favouriteColour : Colours.palette.m3onSurfaceVariant
 
                                     MouseArea {
                                         anchors.fill: parent

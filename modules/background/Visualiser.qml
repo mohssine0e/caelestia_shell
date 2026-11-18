@@ -64,8 +64,8 @@ Item {
                     anchors.margins: Config.border.thickness
 
                     values: Audio.cava.values
-                    primaryColor: Qt.alpha("#487565", 0.85)
-                    secondaryColor: Qt.alpha("#274E41", 0.35)
+                    primaryColor: Qt.alpha(Colours.palette.m3inversePrimary, 0.85)
+                    secondaryColor: Qt.alpha(Colours.palette.m3primaryContainer, 0.35)
                     rounding: Tokens.rounding.medium * Config.background.visualiser.rounding
                     spacing: 3 * Config.background.visualiser.spacing
                     animationDuration: Tokens.anim.durations.normal

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Shapes
 import Caelestia.Config
 import qs.components
+import qs.services
 
 // ╔════════════════════════════════════════════════════════════════╗
 // ║  TreeConnector — draws ONE row's tree lines:                   ║
@@ -27,7 +28,7 @@ Item {
     property real lineWidth: 2         // use EVEN numbers for crisp lines
     property real cornerRadius: 8      // roundness of the elbow (0 = sharp corner)
     property real elbowLength: 24      // spine center → dot center (line end if no dot)
-    property color lineColor: "white"
+    property color lineColor: Colours.palette.m3outlineVariant
 
     // ── Dot ─────────────────────────────────────────────────────
     property bool showDot: true

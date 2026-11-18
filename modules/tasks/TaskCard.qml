@@ -149,14 +149,8 @@ Item {
     }
 
     // One colour binding shared by the streak icon + number
-    readonly property color streakColor: {
-        if (root.streak >= 20) return "#fe1d1d"
-        if (root.streak >= 10) return "#FF8C00"
-        if (root.streak >= 3)  return "#FFA500"
-        if (root.streak >= 1)  return Colours.palette.m3primary
-        return Colours.palette.m3outlineVariant
-    }
-    readonly property color bestStreakColor: root.streak >= root.bestStreak ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+    readonly property color streakColor: Colours.streakColour(root.streak)
+    readonly property color bestStreakColor: root.streak >= root.bestStreak ? Colours.favouriteColour : Colours.palette.m3onSurfaceVariant
 
     // Prefill for the title edit field. Subtask-less tasks carry their
     // estimate inline as "@minutes" (even when it is 0); the submitted
@@ -324,7 +318,7 @@ Item {
                         text: "star"
                         fill: root.isPinned ? 1 : 0
                         fontStyle: Tokens.font.icon.small
-                        color: root.isPinned ? "#ffca1b" : Colours.palette.m3onSurfaceVariant
+                        color: root.isPinned ? Colours.favouriteColour : Colours.palette.m3onSurfaceVariant
                         opacity: root.isPinned ? 1.0 : 0.65
 
                         Behavior on color { enabled: root.animate; CAnim {} }

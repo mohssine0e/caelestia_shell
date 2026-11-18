@@ -24,6 +24,15 @@ Singleton {
     readonly property M3Palette preview: M3Palette {}
     readonly property Transparency transparency: Transparency {}
     readonly property alias wallLuminance: analyser.luminance
+    readonly property color favouriteColour: root.palette.m3tertiary
+
+    function streakColour(streak: int): color {
+        if (streak >= 20) return root.palette.m3error;
+        if (streak >= 10) return root.palette.m3tertiary;
+        if (streak >= 3) return root.palette.m3tertiaryFixedDim;
+        if (streak >= 1) return root.palette.m3primary;
+        return root.palette.m3outlineVariant;
+    }
 
     property bool cooldownPending
     property real lastBaseTransparency
