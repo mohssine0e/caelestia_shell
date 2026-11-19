@@ -260,6 +260,32 @@ class ResultTest(unittest.TestCase):
         self.assertEqual(result["reason"], "network error")
         self.assertEqual(requested, [])
 
+    def test_web_fallback_invoked_when_catalogs_miss(self):
+        def fake(path, params):
+            return None if path == "get" else []
+
+        track = lrclib.Track("Reda Taliani - Topic", "Sfina", "", 323.0)
+        web_called = []
+        def fake_web(artist, title):
+            web_called.append((artist, title))
+            return "Line 1\nLine 2\nLine 3"
+
+        result = lrclib.lookup(track, get_json=fake, metadata_fn=lambda *args: [{"artist": "Reda Taliani", "title": "Sfina"}], web_fallback_fn=fake_web)
+        self.assertEqual(result["status"], "plain")
+        self.assertEqual(result["source"], "Web")
+        self.assertEqual(result["reason"], "web search fallback")
+        self.assertEqual(result["plain"], "Line 1\nLine 2\nLine 3")
+        self.assertEqual(web_called, [("Reda Taliani", "Sfina")])
+
+    def test_web_fallback_not_invoked_on_network_error(self):
+        def offline(path, params):
+            raise OSError("offline")
+
+        web_called = []
+        result = lrclib.lookup(lrclib.Track("Artist", "Song", "", 200), get_json=offline, web_fallback_fn=lambda *args: web_called.append(args))
+        self.assertEqual(result["reason"], "network error")
+        self.assertEqual(web_called, [])
+
 
 if __name__ == "__main__":
     unittest.main()

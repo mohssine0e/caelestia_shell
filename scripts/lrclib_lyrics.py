@@ -495,7 +495,57 @@ def _supported_by_title(track: Track, candidate: Track) -> bool:
         and bool(artist_words & set(raw.split()))
 
 
-def lookup(track: Track, get_json=http_get_json, metadata_fn=None):
+def search_web_lyrics(artist: str, title: str):
+    """Fallback when LRCLIB has no record: searches lyrics sites via grounded web search."""
+    if not artist or not title:
+        return None
+    try:
+        from assistant_common import load_config
+        config = load_config()
+    except Exception:
+        return None
+
+    key = str(config.get("gemini_key", "")).strip()
+    if not key:
+        return None
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+    prompt = (
+        f'Find the exact real lyrics for the song "{title}" by artist "{artist}". '
+        'Search lyrics databases and platforms such as Anghami, Genius, Paroles, or official song pages. '
+        'Output ONLY the raw lyrics text line by line. Do not invent or hallucinate lyrics. '
+        'Do not include markdown headers, chords, explanations, translation notes, or commentary. '
+        'If no lyrics exist for this song, reply with exactly "NONE".'
+    )
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}]
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = json.load(r)
+            cand = data.get("candidates", [{}])[0]
+            text = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", [])).strip()
+            if text.startswith("```"):
+                text = re.sub(r"^```[^\n]*\n", "", text)
+                text = re.sub(r"\n```$", "", text)
+                text = text.strip()
+            if not text or text == "NONE":
+                return None
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            if len(lines) < 3:
+                return None
+            return "\n".join(lines)
+    except Exception:
+        return None
+
+
+def lookup(track: Track, get_json=http_get_json, metadata_fn=None, web_fallback_fn=None):
     # Video titles often carry stronger song evidence than the uploader field. Try exact
     # catalog lookups for extracted pairs before the broader search on the original metadata.
     candidates = upload_track_candidates(track)
@@ -531,36 +581,69 @@ def lookup(track: Track, get_json=http_get_json, metadata_fn=None):
         if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
                 and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
             return build_result(candidate, chosen, "upload title")
-    if metadata_fn is None or original.get("reason") == "network error":
+    if original.get("reason") == "network error":
         return original
-    try:
-        guesses = metadata_fn(track.artist, track.title, track.album, track.duration)
-    except Exception:
-        return original
-    for guess in (guesses or [])[:3]:
-        if not isinstance(guess, dict):
-            continue
-        candidate = Track(str(guess.get("artist") or ""), str(guess.get("title") or ""),
-                          track.album, track.duration)
-        if not candidate.artist or not candidate.title or candidate.labels != track.labels:
-            continue
-        if not _supported_by_title(track, candidate):
-            continue
-        for path, params in (
-            ("get", {"track_name": candidate.title, "artist_name": candidate.artist,
-                     "album_name": candidate.album or None,
-                     "duration": int(round(candidate.duration)) if candidate.duration > 0 else None}),
-            ("search", {"track_name": candidate.title, "artist_name": candidate.artist}),
-        ):
-            try:
-                items = get_json(path, params)
-            except Exception:
+
+    guesses = []
+    if metadata_fn is not None:
+        try:
+            guesses = metadata_fn(track.artist, track.title, track.album, track.duration) or []
+        except Exception:
+            guesses = []
+        for guess in guesses[:3]:
+            if not isinstance(guess, dict):
                 continue
-            items = [items] if isinstance(items, dict) else (items if isinstance(items, list) else [])
-            chosen = choose_best(candidate, items)
-            if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
-                    and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
-                return build_result(candidate, chosen, "verified AI metadata")
+            candidate = Track(str(guess.get("artist") or ""), str(guess.get("title") or ""),
+                              track.album, track.duration)
+            if not candidate.artist or not candidate.title or candidate.labels != track.labels:
+                continue
+            if not _supported_by_title(track, candidate):
+                continue
+            for path, params in (
+                ("get", {"track_name": candidate.title, "artist_name": candidate.artist,
+                         "album_name": candidate.album or None,
+                         "duration": int(round(candidate.duration)) if candidate.duration > 0 else None}),
+                ("search", {"track_name": candidate.title, "artist_name": candidate.artist}),
+            ):
+                try:
+                    items = get_json(path, params)
+                except Exception:
+                    continue
+                items = [items] if isinstance(items, dict) else (items if isinstance(items, list) else [])
+                chosen = choose_best(candidate, items)
+                if chosen and _title_matches(candidate, str(chosen[0].get("trackName") or "")) \
+                        and _artist_matches(candidate, str(chosen[0].get("artistName") or "")):
+                    return build_result(candidate, chosen, "verified AI metadata")
+
+    if web_fallback_fn and not should_skip_lyrics(track.artist, track.title, track.album):
+        search_artist = _TOPIC_CHANNEL.sub("", track.artist).strip() or track.artist
+        search_title = clean_title(track.title, track.artist) or track.title
+        if guesses and isinstance(guesses[0], dict):
+            cand = Track(str(guesses[0].get("artist") or ""), str(guesses[0].get("title") or ""), track.album, track.duration)
+            if cand.artist and cand.title and _supported_by_title(track, cand):
+                search_artist, search_title = cand.artist, cand.title
+        try:
+            lyrics_text = web_fallback_fn(search_artist, search_title)
+            if lyrics_text:
+                return {
+                    "status": "plain",
+                    "source": "Web",
+                    "lines": [],
+                    "plain": lyrics_text,
+                    "approximate": False,
+                    "reason": "web search fallback",
+                    "match": {
+                        "id": None,
+                        "trackName": search_title,
+                        "artistName": search_artist,
+                        "albumName": track.album or "",
+                        "duration": track.duration,
+                        "durationDelta": 0.0,
+                    }
+                }
+        except Exception:
+            pass
+
     return original
 
 
@@ -617,7 +700,7 @@ def main(argv=None) -> int:
                 result = lookup(track)
             else:
                 from lyrics_metadata import guess_candidates
-                result = lookup(track, metadata_fn=guess_candidates)
+                result = lookup(track, metadata_fn=guess_candidates, web_fallback_fn=search_web_lyrics)
             write_cache(track, result)
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
     sys.stdout.flush()
