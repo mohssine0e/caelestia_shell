@@ -87,7 +87,7 @@ Scope {
                     id: hudCard
                     anchors.fill: parent
                     maximumHudWidth: win.maximumSize.width
-                    maximumHudHeight: win.maximumSize.height
+                    maximumHudHeight: Math.round(loader.modelData.height * 0.94)
                     windowRef: win
                     onCloseRequested: {
                         if (win.st) win.st.assistant = false

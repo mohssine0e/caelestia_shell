@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as QQC
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -249,13 +250,21 @@ FocusScope {
         + 2
         + (inlineErrorPanel.visible ? inlineErrorPanel.implicitHeight : 0)
     readonly property real maxResponseViewportHeight: Math.max(0, root.maximumHudHeight - root.assistantChromeHeight)
-    readonly property real minimumResponseViewportHeight: Math.min(320, root.maxResponseViewportHeight)
+    readonly property real minimumResponseViewportHeight: Math.min(root.maxResponseViewportHeight,
+        Math.max(180, root.maximumHudHeight * 0.32))
+    readonly property real questionInputMaxHeight: Math.max(48, Math.min(160, root.maximumHudHeight * 0.18))
+    readonly property real questionComposerHeight: Math.min(root.questionInputMaxHeight,
+        Math.max(48, customQuestionInput.contentHeight
+            + customQuestionInput.topPadding + customQuestionInput.bottomPadding))
     readonly property real preferredResponseViewportHeight: {
-        if (Assistant.isLoading && Assistant.messages.length === 0) return 420
-        if (Assistant.messages.length === 0 && (Assistant.errorMessage.length > 0 || !Assistant.hasApiKey)) return 380
-        if (Assistant.messages.length === 0) return 380
-        if (Assistant.isGenerating) return 340
-        return Math.max(380, chatList.contentHeight + Tokens.padding.medium * 2)
+        if (Assistant.messages.length === 0)
+            return Math.min(root.maxResponseViewportHeight, Math.max(root.minimumResponseViewportHeight,
+                root.maximumHudHeight * (Assistant.isLoading ? 0.48 : 0.42)))
+        if (Assistant.isGenerating)
+            return Math.min(root.maxResponseViewportHeight, Math.max(root.minimumResponseViewportHeight,
+                root.maximumHudHeight * 0.38))
+        return Math.min(root.maxResponseViewportHeight,
+            Math.max(root.minimumResponseViewportHeight, chatList.contentHeight + Tokens.padding.medium * 2))
     }
     readonly property real preferredAssistantHeight: Math.min(root.maximumHudHeight,
         root.assistantChromeHeight + Math.min(root.maxResponseViewportHeight, root.preferredResponseViewportHeight))
@@ -829,11 +838,9 @@ FocusScope {
                                 color: Colours.palette.m3onSurface
                                 font: {
                                     const words = textSnippet.text.trim().split(/\s+/).length;
-                                    if (words === 1 && textSnippet.text.trim().length > 0)
-                                        return Tokens.font.title.small;
                                     if (snippetCard.isCodeSnippet)
-                                        return Tokens.font.mono.builders.small.size(11).build();
-                                    return Tokens.font.body.builders.small.size(11.5).build();
+                                        return Tokens.font.mono.small;
+                                    return Tokens.font.body.small;
                                 }
                                 onTextChanged: {
                                     if (text !== Assistant.selectedText) {
@@ -1469,7 +1476,7 @@ FocusScope {
                                             StyledText {
                                                 Layout.fillWidth: true
                                                 text: modelData.text || ""
-                                                font: Tokens.font.body.medium
+                                                font: Tokens.font.body.small
                                                 color: Colours.palette.m3onPrimaryContainer
                                                 wrapMode: Text.Wrap
                                             }
@@ -1999,32 +2006,62 @@ FocusScope {
                 RowLayout {
                     id: questionInputRow
                     Layout.fillWidth: true
-                    implicitHeight: Math.max(customQuestionInput.implicitHeight, sendQuestionButton.implicitHeight, 40)
+                    implicitHeight: Math.max(root.questionComposerHeight, sendQuestionButton.implicitHeight, 40)
                     spacing: Tokens.spacing.small
 
-                StyledTextField {
-                    id: customQuestionInput
-                    Layout.fillWidth: true
-                    placeholderText: root.askBoundToSelection ? qsTr("Ask about this selection...") : qsTr("Ask a custom question...")
-                    placeholderFloats: false
+                    QQC.ScrollView {
+                        id: questionScroll
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: root.questionComposerHeight
+                        Layout.minimumHeight: 48
+                        clip: true
+                        contentWidth: availableWidth
+                        background: StyledRect {
+                            radius: Tokens.rounding.small
+                            color: Colours.palette.m3surfaceContainerLow
+                            border.width: customQuestionInput.activeFocus ? 1 : 0
+                            border.color: Colours.palette.m3primary
+                        }
 
-                    function submit() {
-                        if (!Assistant.isGenerating && text.trim().length > 0) {
-                            if (root.askBoundToSelection) {
-                                Assistant.clearThread()
+                        QQC.TextArea {
+                            id: customQuestionInput
+                            width: questionScroll.availableWidth
+                            implicitHeight: contentHeight + topPadding + bottomPadding
+                            padding: Tokens.padding.small
+                            wrapMode: TextEdit.Wrap
+                            selectByMouse: true
+                            color: Colours.palette.m3onSurface
+                            placeholderTextColor: Colours.palette.m3onSurfaceVariant
+                            selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
+                            selectedTextColor: Colours.palette.m3onSurface
+                            font: Tokens.font.body.small
+                            background: null
+                            placeholderText: root.askBoundToSelection
+                                ? qsTr("Ask about this selection…")
+                                : qsTr("Ask anything…  ·  Ctrl+Enter to send")
+
+                            function submit(): void {
+                                const prompt = text.trim()
+                                if (Assistant.isGenerating || !prompt) return
+                                if (root.askBoundToSelection) Assistant.clearThread()
+                                Assistant.runAction("ask", prompt)
+                                clear()
+                                root.askBoundToSelection = false
                             }
-                            Assistant.runAction("ask", text.trim())
-                            text = ""
-                            root.askBoundToSelection = false
+
+                            Keys.onPressed: event => {
+                                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                        && (event.modifiers & Qt.ControlModifier)) {
+                                    submit()
+                                    event.accepted = true
+                                }
+                            }
                         }
                     }
 
-                    onAccepted: submit()
-                    Keys.onReturnPressed: submit()
-                }
-
                 IconButton {
                     id: sendQuestionButton
+                    Layout.alignment: Qt.AlignBottom
                     type: IconButton.Filled
                     icon: "send"
                     font: Tokens.font.icon.small
@@ -2032,16 +2069,7 @@ FocusScope {
                     implicitHeight: 36
                     enabled: !Assistant.isGenerating && customQuestionInput.text.trim().length > 0
                     opacity: enabled ? 1.0 : 0.4
-                    onClicked: {
-                        if (!Assistant.isGenerating && customQuestionInput.text.trim().length > 0) {
-                            if (root.askBoundToSelection) {
-                                Assistant.clearThread()
-                            }
-                            Assistant.runAction("ask", customQuestionInput.text.trim())
-                            customQuestionInput.text = ""
-                            root.askBoundToSelection = false
-                        }
-                    }
+                    onClicked: customQuestionInput.submit()
                 }
             }
             }
