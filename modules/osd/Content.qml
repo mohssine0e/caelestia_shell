@@ -24,12 +24,6 @@ Item {
     implicitWidth: layout.implicitWidth + Tokens.padding.large + layout.anchors.horizontalCenterOffset * 2
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
 
-    PopoutBorder {
-        anchors.fill: parent
-        edge: "right"
-        z: 10
-    }
-
     ColumnLayout {
         id: layout
 

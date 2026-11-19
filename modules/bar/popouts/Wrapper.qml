@@ -104,13 +104,6 @@ Item {
         value: WlrKeyboardFocus.OnDemand
     }
 
-    PopoutBorder {
-        anchors.fill: parent
-        edge: root.isDetached ? "all" : "left"
-        visible: root.hasCurrent || root.isDetached
-        z: 10
-    }
-
     Comp {
         id: content
 
