@@ -62,6 +62,27 @@ class TranscriptionTests(unittest.TestCase):
              patch.object(voice, 'transcribe_gemini', return_value='Bonjour'):
             self.assertEqual(voice.transcribe(self.audio), 'Bonjour')
 
+    def test_english_audio_is_not_left_as_arabic_text(self):
+        with patch.object(voice, 'load_keys', return_value=('g', 'm')), \
+             patch.object(voice, 'transcribe_groq', side_effect=['مرحبا', 'Hello']) as groq, \
+             patch.object(voice, 'detect_spoken_language', return_value='en'):
+            self.assertEqual(voice.transcribe(self.audio), 'Hello')
+            self.assertEqual(groq.call_args.args[2], 'en')
+
+    def test_genuine_arabic_speech_keeps_arabic_transcript(self):
+        with patch.object(voice, 'load_keys', return_value=('g', 'm')), \
+             patch.object(voice, 'transcribe_groq', return_value='مرحبا') as groq, \
+             patch.object(voice, 'detect_spoken_language', return_value='ar'):
+            self.assertEqual(voice.transcribe(self.audio), 'مرحبا')
+            self.assertEqual(groq.call_count, 1)
+
+    def test_french_speech_corrects_arabic_misclassification(self):
+        with patch.object(voice, 'load_keys', return_value=('g', 'm')), \
+             patch.object(voice, 'transcribe_groq', side_effect=['مرحبا', 'Bonjour']) as groq, \
+             patch.object(voice, 'detect_spoken_language', return_value='fr'):
+            self.assertEqual(voice.transcribe(self.audio), 'Bonjour')
+            self.assertEqual(groq.call_args.args[2], 'fr')
+
     def test_api_failure_is_reported_without_secret_url(self):
         error = urllib.error.HTTPError('https://example.com/?key=SECRET', 401, 'SECRET', {}, None)
         with patch.object(voice, 'load_keys', return_value=('g', '')), \
@@ -73,8 +94,10 @@ class TranscriptionTests(unittest.TestCase):
 
     def test_real_short_utterances_are_not_blacklisted(self):
         response = io.BytesIO(json.dumps({'text': 'Merci.', 'segments': [{'no_speech_prob': 0.01}]}).encode())
-        with patch.object(voice.urllib.request, 'urlopen', return_value=response):
+        with patch.object(voice.urllib.request, 'urlopen', return_value=response) as request:
             self.assertEqual(voice.transcribe_groq(self.audio, 'test'), 'Merci.')
+            self.assertIn(b'whisper-large-v3-turbo', request.call_args.args[0].data)
+            self.assertIn('/audio/transcriptions', request.call_args.args[0].full_url)
 
     def test_gemini_skips_missing_model_and_thought_parts(self):
         error = urllib.error.HTTPError('https://example.com', 404, 'missing', {}, None)
