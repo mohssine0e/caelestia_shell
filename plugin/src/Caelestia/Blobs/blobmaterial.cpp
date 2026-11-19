@@ -36,7 +36,7 @@ bool BlobMaterialShader::updateUniformData(RenderState& state, QSGMaterial* newM
     Q_UNUSED(oldMaterial);
     auto* mat = static_cast<BlobMaterial*>(newMaterial);
     QByteArray* buf = state.uniformData();
-    Q_ASSERT(buf->size() >= 1440);
+    Q_ASSERT(buf->size() >= 1472);
 
     if (state.isMatrixDirty()) {
         const QMatrix4x4 m = state.combinedMatrix();
@@ -95,13 +95,20 @@ bool BlobMaterialShader::updateUniformData(RenderState& state, QSGMaterial* newM
         memcpy(&maskAsFloat, &r.excludeMask, sizeof(float));
         const float d0[4] = { r.cx, r.cy, r.hw, r.hh };
         const float d1[4] = { maskAsFloat, r.offsetX, r.offsetY, r.minEig };
-        const float d3[4] = { r.screenHalfX, r.screenHalfY, 0.0f, 0.0f };
+        const float d3[4] = { r.screenHalfX, r.screenHalfY, r.outlined, 0.0f };
         memcpy(buf->data() + base, d0, 16);
         memcpy(buf->data() + base + 16, d1, 16);
         memcpy(buf->data() + base + 32, r.invDeform, 16);
         memcpy(buf->data() + base + 48, d3, 16);
         memcpy(buf->data() + base + 64, r.radius, 16);
     }
+
+    // Appended uniforms preserve the existing rect-data offsets.
+    const float outlineColor[4] = { mat->m_outlineColor.redF(), mat->m_outlineColor.greenF(),
+        mat->m_outlineColor.blueF(), mat->m_outlineColor.alphaF() };
+    const float outlineParams[4] = { mat->m_outlineWidth, 0, 0, 0 };
+    memcpy(buf->data() + 1440, outlineColor, 16);
+    memcpy(buf->data() + 1456, outlineParams, 16);
 
     return true;
 }

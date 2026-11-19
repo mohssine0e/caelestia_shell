@@ -13,6 +13,7 @@ class BlobGroup;
 class BlobShape : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(caelestia::shell::blobs::BlobGroup* group READ group WRITE setGroup NOTIFY groupChanged)
+    Q_PROPERTY(bool outlined READ outlined WRITE setOutlined NOTIFY outlinedChanged)
     Q_PROPERTY(qreal radius READ radius WRITE setRadius NOTIFY radiusChanged)
     Q_PROPERTY(QMatrix4x4 deformMatrix READ deformMatrix NOTIFY deformMatrixChanged)
     Q_PROPERTY(QMatrix4x4 rawDeformMatrix READ rawDeformMatrix NOTIFY rawDeformMatrixChanged)
@@ -26,6 +27,9 @@ public:
     [[nodiscard]] BlobGroup* group() const;
     void setGroup(BlobGroup* g);
 
+    [[nodiscard]] bool outlined() const;
+    void setOutlined(bool outlined);
+
     [[nodiscard]] qreal radius() const;
     void setRadius(qreal r);
 
@@ -35,6 +39,7 @@ public:
 signals:
     void groupChanged();
     void radiusChanged();
+    void outlinedChanged();
     void deformMatrixChanged();
     void rawDeformMatrixChanged();
 
@@ -71,6 +76,7 @@ protected:
 
     BlobGroup* m_group = nullptr;
     qreal m_radius = 0;
+    bool m_outlined = false;
     QMatrix4x4 m_deformMatrix; // identity by default
     QMatrix4x4 m_centeredDeformMatrix;
 

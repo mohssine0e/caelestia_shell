@@ -21,6 +21,8 @@ layout(std140, binding = 0) uniform buf {
     vec4 invertedOuter;
     vec4 invertedInner;
     vec4 rectData[80];
+    vec4 outlineColor;
+    vec4 outlineParams; // x: stroke width in physical pixels
 };
 
 void main() {

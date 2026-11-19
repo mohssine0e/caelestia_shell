@@ -165,6 +165,8 @@ StyledWindow {
             id: blobGroup
 
             color: root.surfaceColour
+            outlineWidth: 1
+            outlineColor: Colours.palette.m3primary
             smoothing: root.contentItem.Config.border.smoothing
         }
 
@@ -245,6 +247,8 @@ StyledWindow {
 
         PanelBg {
             id: popoutBg
+
+            outlined: panel.visible && !panels.popouts.isDetached && panel.width > 0.5
 
             // Extra width to prevent vertical movement deformation partially detaching panel from bar
             property real extraWidth: panels.popouts.isDetached ? 0 : 0.2
@@ -354,6 +358,7 @@ StyledWindow {
         property real deformAmount: 0.15
 
         group: blobGroup
+        outlined: panel.visible && panel.width > 0.5 && panel.height > 0.5
         x: panel.x + bar.implicitWidth
         y: panel.y + root.borderThickness
         implicitWidth: panel.width

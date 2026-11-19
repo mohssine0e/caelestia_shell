@@ -39,6 +39,31 @@ void BlobGroup::setColor(const QColor& c) {
     markDirty();
 }
 
+qreal BlobGroup::outlineWidth() const {
+    return m_outlineWidth;
+}
+
+void BlobGroup::setOutlineWidth(qreal width) {
+    width = qMax(qreal(0), width);
+    if (qFuzzyCompare(m_outlineWidth, width))
+        return;
+    m_outlineWidth = width;
+    emit outlineWidthChanged();
+    markDirty();
+}
+
+QColor BlobGroup::outlineColor() const {
+    return m_outlineColor;
+}
+
+void BlobGroup::setOutlineColor(const QColor& color) {
+    if (m_outlineColor == color)
+        return;
+    m_outlineColor = color;
+    emit outlineColorChanged();
+    markDirty();
+}
+
 bool BlobGroup::cornerFill() const {
     return m_cornerFill;
 }

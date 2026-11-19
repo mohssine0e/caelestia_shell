@@ -16,6 +16,7 @@ struct BlobRectData {
     // Inverse of 2x2 deformation matrix, column-major for GLSL
     float invDeform[4] = { 1, 0, 0, 1 };
     // Screen-space AABB half-extents of the deformed rect
+    float outlined = 0;
     float screenHalfX = 0, screenHalfY = 0;
     // Effective per-corner radii (tr, br, bl, tl), pre-computed on CPU
     float radius[4] = { 0, 0, 0, 0 };
@@ -38,6 +39,8 @@ public:
     int m_rectCount = 0;
     int m_myIndex = -2;
     QColor m_color{ 0x44, 0x88, 0xff };
+    QColor m_outlineColor{ Qt::transparent };
+    float m_outlineWidth = 0;
     int m_hasInverted = 0;
     float m_invertedRadius = 0;
     float m_invertedOuter[4] = {};

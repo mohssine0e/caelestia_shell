@@ -19,6 +19,8 @@ layout(std140, binding = 0) uniform buf {
     vec4 invertedOuter;
     vec4 invertedInner;
     vec4 rectData[80];
+    vec4 outlineColor;
+    vec4 outlineParams; // x: stroke width in physical pixels
 };
 
 float sdRoundedBox(vec2 p, vec2 center, vec2 halfSize, float radius) {
@@ -77,7 +79,7 @@ void main() {
         vec4 rect = rectData[i * 5];         // cx, cy, hw, hh
         vec4 props = rectData[i * 5 + 1];    // excludeMask(int bits), offsetX, offsetY, minEig
         vec4 invDm = rectData[i * 5 + 2];    // inverse deform matrix
-        vec4 sh = rectData[i * 5 + 3];       // screenHalfX, screenHalfY, 0, 0
+        vec4 sh = rectData[i * 5 + 3];       // screenHalfX, screenHalfY, outlined, 0
         vec4 radii = rectData[i * 5 + 4];    // effective per-corner radii (tr, br, bl, tl)
 
         // Offset center for asymmetric deformation
@@ -265,5 +267,25 @@ void main() {
 
     float fw = fwidth(mergedSdf);
     float alpha = 1.0 - smoothstep(-fw, fw, mergedSdf);
-    fragColor = vec4(color.rgb * alpha, alpha) * qt_Opacity;
+    // Tint the existing final contour, including the circular joins to the
+    // frame. No second geometry or independent deformation simulation is used.
+    float outlinedDistance = 1e10;
+    for (int i = 0; i < rectCount; ++i) {
+        if (rectData[i * 5 + 3].z > 0.5)
+            outlinedDistance = min(outlinedDistance, dArr[i]);
+    }
+    float reach = max(smoothFactor, 1.0);
+    float scope = 1.0 - smoothstep(reach, reach * 1.5, outlinedDistance);
+    if (hasInverted != 0) {
+        // Stop at the inner screen frame: never stroke the physical screen
+        // edge or continue along the straight frame beyond a panel's joins.
+        vec2 inset = invertedInner.zw - abs(pixel - invertedInner.xy);
+        scope *= smoothstep(0.0, 1.5, min(inset.x, inset.y));
+    }
+    float gradient = max(length(vec2(dFdx(mergedSdf), dFdy(mergedSdf))), 0.001);
+    float distancePx = mergedSdf / gradient;
+    float stroke = smoothstep(-outlineParams.x - 0.5, -outlineParams.x + 0.5, distancePx);
+    stroke *= scope * outlineColor.a * step(0.001, outlineParams.x);
+    vec3 shaded = mix(color.rgb, outlineColor.rgb, stroke);
+    fragColor = vec4(shaded * alpha, alpha) * qt_Opacity;
 }

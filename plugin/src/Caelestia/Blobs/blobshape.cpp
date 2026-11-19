@@ -87,6 +87,19 @@ void BlobShape::setGroup(BlobGroup* g) {
         m_group->markDirty();
 }
 
+bool BlobShape::outlined() const {
+    return m_outlined;
+}
+
+void BlobShape::setOutlined(bool outlined) {
+    if (m_outlined == outlined)
+        return;
+    m_outlined = outlined;
+    emit outlinedChanged();
+    if (m_group)
+        m_group->markDirty();
+}
+
 qreal BlobShape::radius() const {
     return m_radius;
 }
@@ -230,6 +243,7 @@ void BlobShape::writeRectData(BlobRectData& r, const QPointF& scenePos) const {
     const float m01 = dm(0, 1);
     const float m11 = dm(1, 1);
 
+    r.outlined = m_outlined ? 1.0f : 0.0f;
     r.cx = static_cast<float>(scenePos.x() + width() / 2.0);
     r.cy = static_cast<float>(scenePos.y() + height() / 2.0);
     r.hw = static_cast<float>(width() / 2.0);
@@ -481,6 +495,8 @@ QSGNode* BlobShape::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* data)
     material->m_smoothFactor = static_cast<float>(m_group->smoothing());
     material->m_myIndex = m_cachedMyIndex;
     material->m_color = m_group->color();
+    material->m_outlineColor = m_group->outlineColor();
+    material->m_outlineWidth = static_cast<float>(m_group->outlineWidth());
     material->m_hasInverted = m_cachedHasInverted ? 1 : 0;
     material->m_invertedRadius = m_cachedInvertedRadius;
     memcpy(material->m_invertedOuter, m_cachedInvertedOuter, sizeof(m_cachedInvertedOuter));
