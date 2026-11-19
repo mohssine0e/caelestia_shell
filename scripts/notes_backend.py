@@ -65,6 +65,9 @@ Rules:
 - Personal observations, feelings, preferences, plans, and ideas belong in
   personal or idea. Preserve them verbatim: return empty bullet and excerpt
   arrays. A software product idea may be an idea rather than a technical fact.
+- Notes may be written in Moroccan Darija, in Arabic script, or in Latin/French
+  transliteration (Arabizi). Understand and preserve these as meaningful notes;
+  do not classify them as noise just because they are not English or use French letters.
 - If a technical note is incomplete, add at most three completion bullets only
   when the missing fact is well established and directly implied. Never invent
   project-specific details, personal facts, credentials, paths, or intent.
@@ -954,6 +957,35 @@ def _clean_text(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
+def _is_obvious_noise(value: str) -> bool:
+    """Reject unmistakable accidental input without asking an AI provider."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if not any(char.isalnum() for char in text):
+        return True
+
+    words = re.findall(r"[^\W_]+", text.casefold(), flags=re.UNICODE)
+    if len(words) >= 5 and len(set(words)) == 1:
+        return True
+    if re.fullmatch(r"(?:asdf+|qwerty+|zxcv+|test(?:ing)?|lorem\s+ipsum)[.!?\s]*", text, re.IGNORECASE):
+        return True
+
+    # Catch an unspaced punctuation-delimited keyboard mash such as
+    # "a;ldsja;ljdf", without rejecting normal phrases or common commands.
+    pieces = re.split(r"[;,]+", text)
+    if len(pieces) >= 3 and not re.search(r"\s", text) and all(re.fullmatch(r"[A-Za-z]{1,10}", p) for p in pieces):
+        joined = "".join(pieces).lower()
+        command_prefix = re.match(
+            r"^(?:git|docker|kubectl|npm|pnpm|yarn|sudo|cd|ls|cat|grep|python|pip|systemctl|pacman)",
+            joined,
+        )
+        vowels = sum(char in "aeiouy" for char in joined)
+        if not command_prefix and len(joined) >= 7 and vowels / len(joined) < 0.34:
+            return True
+    return False
+
+
 def _detect_sensitive_content(raw: str) -> str:
     for label, pattern in SECRET_PATTERNS:
         if pattern.search(raw):
@@ -1095,6 +1127,20 @@ def triage_note(payload: dict[str, Any]) -> dict[str, Any]:
         if row is None:
             raise ValueError("Note not found.")
         raw = row["raw_content"]
+        if _is_obvious_noise(raw) and row["origin"] != "assistant_selection":
+            db.execute(
+                """UPDATE notes SET status = 'formatted', category = 'noise',
+                   keep_decision = 'skip', title = '', technical_type = '',
+                   topic_section = '', topic = '', subconcept = '',
+                   formatted_content = NULL, essentials_json = '[]',
+                   completions_json = '[]', excerpts_json = '[]', ai_tags_json = '[]',
+                   triage_error = NULL, triage_token = NULL, provider = NULL,
+                   updated_at = ?, schema_version = ? WHERE id = ?""",
+                (utc_now(), SCHEMA_VERSION, note_id),
+            )
+            stored = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+            sync_notes_json(db)
+            return {"success": True, "note": _row_to_note(stored), "ignored": True}
         existing_notes = [
             {"id": str(n["id"]), "title": str(n["title"]).strip()}
             for n in db.execute(
@@ -1896,6 +1942,8 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("The note is empty.")
     if len(raw_text) > 200_000:
         raise ValueError("The note is too large (maximum 200,000 characters).")
+    if _is_obvious_noise(raw_text):
+        return {"success": True, "action": "ignore", "message": "Obvious accidental input ignored."}
 
     with database() as db:
         rows = db.execute(
@@ -1955,6 +2003,8 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         '  "formatted_content": "Markdown text combining title, summary, code blocks with language fences, and mechanics bullets"\n'
         "}\n\n"
         "Rules:\n"
+        "- The note may use Moroccan Darija in Arabic script or Latin/French transliteration (Arabizi). Treat it as meaningful, preserve its language, and never reject it merely for not being English.\n"
+        "- Use action=ignore for obvious keyboard mashing, repeated test filler, or meaningless symbol strings; do not create a topic for them.\n"
         "- NEVER discard code snippets, commands, flags, or technical syntax from the note.\n"
         "- If the note contrasts before/after or old vs new (e.g. Java 8 vs 16, imperative vs declarative), extract both into snippets with labels.\n"
         "- If the note is a single command or snippet, extract it into snippets and describe what each flag/argument does.\n"
