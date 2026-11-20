@@ -198,14 +198,14 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 ### Phase 2 — Structured depth without losing detail
 
-- [ ] **P2.1** Add concept/block/source-mapping schema and legacy adapters.
-- [ ] **P2.2** Segment long captures into focused concepts while preserving original source boundaries and snippets.
-- [ ] **P2.3** Keep unmatched source text reachable as Unplaced material; record extraction coverage.
-- [ ] **P2.4** Store Recall summaries separately from complete explanations; remove display/export string truncation.
-- [ ] **P2.5** Build a single presentation model and faithful Markdown export.
-- [ ] **P2.6** Convert the Java pilot on a test copy and verify section/snippet coverage manually and with fixtures.
+- [x] **P2.1** Add concept/block/source-mapping schema and legacy adapters.
+- [x] **P2.2** Segment long captures into focused concepts while preserving original source boundaries and snippets.
+- [x] **P2.3** Keep unmatched source text reachable as Unplaced material; record extraction coverage.
+- [x] **P2.4** Store Recall summaries separately from complete explanations; remove display/export string truncation.
+- [x] **P2.5** Build a single presentation model and faithful Markdown export.
+- [x] **P2.6** Convert the Java pilot on a test copy and verify section/snippet coverage manually and with fixtures.
 
-**Gate:** every original section is mapped or explicitly unplaced; changing depth is local; the old library remains readable; concept naming changes do not break IDs.
+**Gate:** every original section is mapped or explicitly unplaced; changing depth is local; the old library remains readable; concept naming changes do not break IDs. Verified on 2026-11-20 in tests/test_notes_upgrade_p2.py and pilot migration.
 
 ### Phase 3 — Reading, navigation, and finding details
 
@@ -276,13 +276,13 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | P0.1 - P0.4 (Phase 0 complete) |
-| Next task | P1.1 — Save every capture before AI work |
-| Implementation commits | 87d15e17 docs(notes): add engineering handbook audit and master plan |
-| Application files changed | None for this upgrade yet |
-| Baseline checks | 155 existing tests pass + 4 new P0 fixture tests pass |
-| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_baseline_20261120.sqlite3 (114 notes, verified) |
-| Migration state | Baseline snapshot verified; Phase 0 complete |
+| Last completed task | P2.1 - P2.6 (Phase 2 complete) |
+| Next task | P3.1 — Extract focused QML components for concept page |
+| Implementation commits | 63df1b08 fix(notes): resolve merge fallback bug, preserve merged sources, and block sensitive leaks |
+| Application files changed | scripts/notes_backend.py |
+| Baseline checks | 168 tests pass (155 existing + 4 P0 + 4 P1 + 5 P2) |
+| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_baseline_20261120.sqlite3 |
+| Migration state | Schema v13 tested; Java pilot created 25 concepts and 111 blocks on test copy |
 | Remaining blockers | None |
 | Product direction | Confirmed: understand deeply now, look up quickly later |
 

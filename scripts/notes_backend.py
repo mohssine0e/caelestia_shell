@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 TAG_PATTERN = re.compile(r"(?<![\w#])#([\w-]+)", re.UNICODE)
 ORGANIZER_PROMPT = (
     "You are a technical note formatter. Format the supplied raw developer note as "
@@ -227,6 +227,57 @@ def connect() -> sqlite3.Connection:
         )""")
     db.execute("CREATE INDEX IF NOT EXISTS notes_category_updated ON notes(category, updated_at DESC)")
     db.execute("CREATE INDEX IF NOT EXISTS notes_keep_updated ON notes(keep_decision, updated_at DESC)")
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS concepts (
+            id TEXT PRIMARY KEY,
+            legacy_note_id TEXT,
+            topic TEXT NOT NULL,
+            area TEXT NOT NULL DEFAULT 'General',
+            title TEXT NOT NULL,
+            definition TEXT NOT NULL DEFAULT '',
+            aliases_json TEXT NOT NULL DEFAULT '[]',
+            preferred_depth TEXT NOT NULL DEFAULT 'understand',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_concepts_topic_area ON concepts(topic, area);
+        CREATE INDEX IF NOT EXISTS idx_concepts_legacy_note ON concepts(legacy_note_id);
+
+        CREATE TABLE IF NOT EXISTS blocks (
+            id TEXT PRIMARY KEY,
+            concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'primary',
+            content TEXT NOT NULL,
+            language TEXT,
+            label TEXT,
+            explanation TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            in_recall INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_blocks_concept ON blocks(concept_id, sort_order);
+
+        CREATE TABLE IF NOT EXISTS block_sources (
+            id TEXT PRIMARY KEY,
+            block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+            source_span TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_block_sources_block ON block_sources(block_id);
+
+        CREATE TABLE IF NOT EXISTS concept_reading_state (
+            concept_id TEXT PRIMARY KEY REFERENCES concepts(id) ON DELETE CASCADE,
+            preferred_depth TEXT NOT NULL DEFAULT 'understand',
+            expanded_blocks_json TEXT NOT NULL DEFAULT '[]',
+            last_seen_at TEXT NOT NULL
+        );
+        """
+    )
     db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     db.commit()
     _secure_path(path)
@@ -2197,6 +2248,365 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def _insert_concept_with_blocks(
+    db: sqlite3.Connection,
+    concept: dict[str, Any],
+    blocks: list[dict[str, Any]],
+    source_note_id: str = ""
+) -> str:
+    now = utc_now()
+    cid = str(concept.get("id") or uuid.uuid4())
+    topic = str(concept.get("topic") or "General").strip()
+    area = str(concept.get("area") or "General").strip()
+    title = str(concept.get("title") or "Untitled Concept").strip()
+    definition = str(concept.get("definition") or "").strip()
+    aliases = concept.get("aliases_json")
+    if not isinstance(aliases, str):
+        aliases = json.dumps(concept.get("aliases", []), ensure_ascii=False)
+    pref_depth = str(concept.get("preferred_depth") or "understand").lower()
+    legacy_note_id = str(concept.get("legacy_note_id") or source_note_id or "")
+
+    db.execute(
+        """INSERT INTO concepts
+           (id, legacy_note_id, topic, area, title, definition, aliases_json, preferred_depth, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+           legacy_note_id = excluded.legacy_note_id,
+           topic = excluded.topic,
+           area = excluded.area,
+           title = excluded.title,
+           definition = excluded.definition,
+           aliases_json = excluded.aliases_json,
+           preferred_depth = excluded.preferred_depth,
+           updated_at = excluded.updated_at""",
+        (cid, legacy_note_id or None, topic, area, title, definition, aliases, pref_depth, now, now),
+    )
+
+    db.execute("DELETE FROM blocks WHERE concept_id = ?", (cid,))
+
+    for idx, b in enumerate(blocks, start=1):
+        bid = str(b.get("id") or uuid.uuid4())
+        kind = str(b.get("kind") or "rule").lower()
+        role = str(b.get("role") or "primary").lower()
+        content = str(b.get("content") or "").strip()
+        lang = str(b.get("language") or "").strip().lower() or None
+        lbl = str(b.get("label") or "").strip() or None
+        expl = str(b.get("explanation") or "").strip() or None
+        sort_order = int(b.get("sort_order") or idx)
+        in_recall = 1 if b.get("in_recall") in (1, True, "1") else 0
+
+        db.execute(
+            """INSERT INTO blocks
+               (id, concept_id, kind, role, content, language, label, explanation, sort_order, in_recall, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (bid, cid, kind, role, content, lang, lbl, expl, sort_order, in_recall, now, now),
+        )
+
+        if legacy_note_id:
+            bs_id = str(uuid.uuid4())
+            db.execute(
+                """INSERT INTO block_sources (id, block_id, note_id, source_span, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (bs_id, bid, legacy_note_id, content[:200], now),
+            )
+
+    return cid
+
+
+def get_concept_view(concept_id: str, mode: str = "") -> dict[str, Any]:
+    with database() as db:
+        c_row = db.execute("SELECT * FROM concepts WHERE id = ? AND deleted_at IS NULL", (concept_id,)).fetchone()
+        if not c_row:
+            raise ValueError(f"Concept not found: {concept_id}")
+
+        concept = dict(c_row)
+        selected_mode = mode.lower() if mode else concept.get("preferred_depth", "understand")
+        if selected_mode not in ("understand", "recall"):
+            selected_mode = "understand"
+
+        b_rows = db.execute(
+            "SELECT * FROM blocks WHERE concept_id = ? ORDER BY sort_order ASC, created_at ASC",
+            (concept_id,),
+        ).fetchall()
+        all_blocks = [dict(b) for b in b_rows]
+
+        if selected_mode == "recall":
+            main_blocks = [b for b in all_blocks if b["in_recall"] == 1]
+            expandable = [b for b in all_blocks if b["in_recall"] == 0]
+        else:
+            main_blocks = all_blocks
+            expandable = []
+
+        return {
+            "concept": concept,
+            "mode": selected_mode,
+            "blocks": main_blocks,
+            "expandable_blocks": expandable,
+            "total_blocks": len(all_blocks),
+        }
+
+
+def export_concept_markdown(concept_id: str, mode: str = "understand") -> str:
+    data = get_concept_view(concept_id, mode=mode)
+    concept = data["concept"]
+    blocks = data["blocks"]
+
+    lines = [f"## {concept['title']}"]
+    if concept.get("definition"):
+        lines.append(concept["definition"])
+        lines.append("")
+
+    for b in blocks:
+        kind = b.get("kind", "")
+        content = b.get("content", "").strip()
+        lang = b.get("language") or ""
+        lbl = b.get("label") or ""
+
+        if kind in ("code", "command"):
+            if lbl:
+                lines.append(f"### {lbl}")
+            lines.append(f"```{lang}\n{content}\n```")
+        elif kind in ("rule", "caveat"):
+            prefix = "**Caveat:** " if kind == "caveat" else ""
+            lines.append(f"- {prefix}{content}")
+        else:
+            lines.append(content)
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def segment_text_to_concepts(raw_text: str, topic: str = "General") -> list[dict[str, Any]]:
+    lines = raw_text.splitlines()
+    if not lines:
+        return []
+
+    sec_pattern = re.compile(r"^(?:Section\s+\d+\s*[-—:]\s*|#+\s+Section\s+\d+\s*[-—:]\s*|#\s+)(.+)$", re.IGNORECASE)
+    subsec_pattern = re.compile(r"^(?:\d+\.\d+\s+|#{2,4}\s+)(.+)$", re.IGNORECASE)
+
+    current_area = "General"
+    current_title = ""
+    current_lines: list[str] = []
+    sections: list[dict[str, Any]] = []
+
+    first_non_empty = next((l.strip() for l in lines if l.strip()), "")
+    if first_non_empty and not first_non_empty.startswith(("-", "*", "#", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")):
+        if len(first_non_empty) < 80:
+            current_area = first_non_empty
+            current_title = first_non_empty
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == first_non_empty and current_title == first_non_empty:
+            continue
+
+        s_match = sec_pattern.match(stripped)
+        if s_match:
+            if current_lines:
+                sections.append({"area": current_area, "title": current_title or current_area, "lines": current_lines})
+                current_lines = []
+            current_area = s_match.group(1).strip()
+            current_title = current_area
+            continue
+
+        sub_match = subsec_pattern.match(stripped)
+        if sub_match:
+            if current_lines:
+                sections.append({"area": current_area, "title": current_title or current_area, "lines": current_lines})
+                current_lines = []
+            current_title = sub_match.group(1).strip()
+            continue
+
+        current_lines.append(line)
+
+    if current_lines:
+        sections.append({"area": current_area, "title": current_title or current_area or "Overview", "lines": current_lines})
+
+    if not sections:
+        sections.append({"area": "General", "title": "Overview", "lines": lines})
+
+    concepts: list[dict[str, Any]] = []
+    for s in sections:
+        sec_text = "\n".join(s["lines"]).strip()
+        if not sec_text:
+            continue
+
+        concept_id = str(uuid.uuid4())
+        area = s["area"]
+        title = s["title"]
+
+        blocks: list[dict[str, Any]] = []
+        sort_order = 1
+
+        fences = list(re.finditer(r"```([A-Za-z0-9_-]*)\n?(.*?)```", sec_text, re.DOTALL))
+        remaining_text = sec_text
+        if fences:
+            for match in fences:
+                lang = match.group(1).strip() or topic.lower() or "text"
+                code = match.group(2).strip()
+                blocks.append({
+                    "id": str(uuid.uuid4()),
+                    "concept_id": concept_id,
+                    "kind": "code",
+                    "language": lang,
+                    "content": code,
+                    "in_recall": 1,
+                    "sort_order": sort_order
+                })
+                sort_order += 1
+            remaining_text = re.sub(r"```([A-Za-z0-9_-]*)\n?(.*?)```", "", sec_text, flags=re.DOTALL)
+        else:
+            detected_snippets = _detect_code_snippets(sec_text, default_lang=topic.lower())
+            for snip in detected_snippets:
+                blocks.append({
+                    "id": str(uuid.uuid4()),
+                    "concept_id": concept_id,
+                    "kind": "code",
+                    "language": snip.get("language", topic.lower()),
+                    "content": snip.get("content", ""),
+                    "label": snip.get("label", ""),
+                    "in_recall": 1,
+                    "sort_order": sort_order
+                })
+                sort_order += 1
+                remaining_text = remaining_text.replace(snip["content"], "")
+
+        definition = ""
+        unplaced_lines: list[str] = []
+        for line in remaining_text.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+
+            if line_str.startswith(("-", "*", "•")):
+                content = re.sub(r"^[-*•]\s*", "", line_str).strip()
+                lower = content.lower()
+                if lower.startswith(("caveat:", "warning:", "watch out:", "gotcha:")):
+                    kind = "caveat"
+                    in_recall = 1
+                elif lower.startswith(("rule:", "must:", "important:")):
+                    kind = "rule"
+                    in_recall = 1
+                elif lower.startswith(("why:", "because:", "mechanism:")):
+                    kind = "mechanism"
+                    in_recall = 0
+                elif lower.startswith(("problem:", "purpose:")):
+                    kind = "problem"
+                    in_recall = 0
+                elif lower.startswith(("counterexample:", "not this:")):
+                    kind = "counterexample"
+                    in_recall = 0
+                elif lower.startswith(("compare:", "vs:")):
+                    kind = "comparison"
+                    in_recall = 0
+                else:
+                    kind = "rule" if len(content) < 140 else "mechanism"
+                    in_recall = 1 if kind == "rule" else 0
+
+                if not definition and kind in ("rule", "mechanism"):
+                    definition = content
+
+                blocks.append({
+                    "id": str(uuid.uuid4()),
+                    "concept_id": concept_id,
+                    "kind": kind,
+                    "content": content,
+                    "in_recall": in_recall,
+                    "sort_order": sort_order
+                })
+                sort_order += 1
+            else:
+                if not definition:
+                    definition = line_str.split(".")[0].strip() + "."
+                    blocks.append({
+                        "id": str(uuid.uuid4()),
+                        "concept_id": concept_id,
+                        "kind": "rule" if len(line_str) < 140 else "mechanism",
+                        "content": line_str,
+                        "in_recall": 1 if len(line_str) < 140 else 0,
+                        "sort_order": sort_order
+                    })
+                    sort_order += 1
+                else:
+                    unplaced_lines.append(line_str)
+
+        if unplaced_lines:
+            blocks.append({
+                "id": str(uuid.uuid4()),
+                "concept_id": concept_id,
+                "kind": "unplaced",
+                "content": "\n".join(unplaced_lines),
+                "in_recall": 0,
+                "sort_order": sort_order
+            })
+
+        concepts.append({
+            "id": concept_id,
+            "topic": topic,
+            "area": area,
+            "title": title,
+            "definition": definition or title,
+            "preferred_depth": "understand",
+            "blocks": blocks
+        })
+
+    return concepts
+
+
+def read_concept_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    cid = str(payload.get("id") or "").strip()
+    if not cid:
+        raise ValueError("Missing concept id.")
+    mode = str(payload.get("mode") or "").strip()
+    view = get_concept_view(cid, mode=mode)
+    return {"success": True, **view}
+
+
+def list_concepts_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    topic = str(payload.get("topic") or "").strip()
+    area = str(payload.get("area") or "").strip()
+    with database() as db:
+        query = "SELECT * FROM concepts WHERE deleted_at IS NULL"
+        params: list[Any] = []
+        if topic:
+            query += " AND topic = ?"
+            params.append(topic)
+        if area:
+            query += " AND area = ?"
+            params.append(area)
+        query += " ORDER BY topic ASC, area ASC, title ASC"
+        rows = db.execute(query, params).fetchall()
+        return {"success": True, "concepts": [dict(r) for r in rows]}
+
+
+def export_concept_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    cid = str(payload.get("id") or "").strip()
+    if not cid:
+        raise ValueError("Missing concept id.")
+    mode = str(payload.get("mode") or "understand").strip()
+    md = export_concept_markdown(cid, mode=mode)
+    return {"success": True, "markdown": md}
+
+
+def set_concept_depth_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    cid = str(payload.get("id") or "").strip()
+    depth = str(payload.get("depth") or "").strip().lower()
+    if not cid or depth not in ("understand", "recall"):
+        raise ValueError("Invalid concept id or depth preference.")
+    now = utc_now()
+    with database() as db:
+        db.execute(
+            """INSERT INTO concept_reading_state (concept_id, preferred_depth, last_seen_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(concept_id) DO UPDATE SET
+               preferred_depth = excluded.preferred_depth,
+               last_seen_at = excluded.last_seen_at""",
+            (cid, depth, now)
+        )
+        db.execute("UPDATE concepts SET preferred_depth = ?, updated_at = ? WHERE id = ?", (depth, now, cid))
+    return {"success": True, "concept_id": cid, "preferred_depth": depth}
+
+
 COMMANDS = {
     "smart-upsert": smart_upsert,
     "upsert": smart_upsert,
@@ -2222,6 +2632,10 @@ COMMANDS = {
     "triage": triage_note,
     "retry": organize_note,
     "provider-status": provider_status,
+    "read-concept": read_concept_rpc,
+    "list-concepts": list_concepts_rpc,
+    "export-concept": export_concept_rpc,
+    "set-concept-depth": set_concept_depth_rpc,
 }
 
 
