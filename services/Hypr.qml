@@ -27,9 +27,24 @@ Singleton {
     readonly property HyprKeyboard keyboard: extras.devices.keyboards.find(kb => kb.main) ?? null
     readonly property bool capsLock: keyboard?.capsLock ?? false
     readonly property bool numLock: keyboard?.numLock ?? false
-    readonly property string defaultKbLayout: keyboard?.layout.split(",")[0] ?? "??"
+    readonly property string defaultKbLayout: keyboard?.layout.split(",")[0] ?? "us"
     readonly property string kbLayoutFull: keyboard?.activeKeymap ?? Tr.trCtx("Unknown", "keyboard layout")
-    readonly property string kbLayout: kbMap.get(kbLayoutFull) ?? "??"
+    readonly property string kbLayout: {
+        const _v = root.mapVersion;
+        const full = (kbLayoutFull || "").toLowerCase();
+        const code = (kbMap.get(kbLayoutFull) || "").toLowerCase();
+        const idx = keyboard?.lastIpcObject?.active_layout_index;
+
+        if (idx === 1 || full.includes("arabic") || code.includes("ar") || code === "ara")
+            return "Ar";
+        if (idx === 0 || full.includes("english") || code.includes("en") || code.includes("us") || code === "gb")
+            return "En";
+
+        if (code && code.length >= 2)
+            return code.slice(0, 2).charAt(0).toUpperCase() + code.slice(1, 2).toLowerCase();
+        return "En";
+    }
+    property int mapVersion: 0
     readonly property var kbMap: new Map()
 
     readonly property alias extras: extras
@@ -189,6 +204,8 @@ Singleton {
                         root.kbMap.set(match[3], match[2]);
                 }
             }
+
+            root.mapVersion++;
         }
     }
 
