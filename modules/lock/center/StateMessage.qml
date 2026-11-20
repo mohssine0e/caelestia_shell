@@ -39,26 +39,26 @@ Item {
 
         // Password fail
         if (pam.state === Pam.Failed) {
-            if (pam.fprint.available && pam.fprint.state !== Pam.MaxTries)
+            if (pam.fprint.canAttempt)
                 return Tr.tr("Incorrect password. Please try again or use fingerprint.");
-            if (pam.howdy.available && pam.howdy.state !== Pam.MaxTries)
+            if (pam.howdy.canAttempt)
                 return Tr.tr("Incorrect password. Please try again or use face.");
             return Tr.tr("Incorrect password. Please try again.");
         }
 
         // Maxed out
         if (pam.state === Pam.MaxTries) {
-            if (pam.fprint.available && pam.fprint.state !== Pam.MaxTries)
+            if (pam.fprint.canAttempt)
                 return Tr.tr("Maximum password attempts reached. Please use fingerprint.");
-            if (pam.howdy.available && pam.howdy.state !== Pam.MaxTries)
+            if (pam.howdy.canAttempt)
                 return Tr.tr("Maximum password attempts reached. Please use face.");
-            if (pam.fprint.available || pam.howdy.available)
+            if (pam.fprint.canAttempt || pam.howdy.canAttempt)
                 return Tr.tr("Maximum attempts for all authentication methods reached.");
             return Tr.tr("Maximum password attempts reached.");
         }
-        if (pam.fprint.state === Pam.MaxTries)
+        if (pam.fprint.state === Pam.MaxTries && pam.fprint.enabled)
             return Tr.tr("Fingerprint limit reached. Use password.");
-        if (pam.howdy.state === Pam.MaxTries)
+        if (pam.howdy.state === Pam.MaxTries && pam.howdy.enabled)
             return Tr.tr("Face limit reached. Use password.");
 
         return "";

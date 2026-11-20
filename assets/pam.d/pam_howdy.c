@@ -3,11 +3,30 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <pwd.h>
 
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     const char *user = NULL;
-    if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || !user || !*user) {
+    pam_get_item(pamh, PAM_USER, (const void **)&user);
+    if (!user || !*user) {
+        user = getenv("USER");
+    }
+    if (!user || !*user) {
+        struct passwd *pw = getpwuid(getuid());
+        if (pw) {
+            user = pw->pw_name;
+        }
+    }
+    if (!user || !*user) {
+        pam_get_user(pamh, &user, NULL);
+    }
+    if (!user || !*user) {
         return PAM_USER_UNKNOWN;
+    }
+
+    const char *script = "/home/mohssine/.config/quickshell/caelestia/scripts/face_compare.py";
+    if (access(script, X_OK) != 0 && access(script, R_OK) != 0) {
+        script = "/usr/lib/security/howdy/compare.py";
     }
 
     pid_t pid = fork();
@@ -15,7 +34,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
         return PAM_SYSTEM_ERR;
     }
     if (pid == 0) {
-        execl("/usr/bin/python3", "python3", "/usr/lib/security/howdy/compare.py", user, (char *)NULL);
+        execl("/usr/bin/python3", "python3", script, user, (char *)NULL);
         _exit(1);
     }
 
@@ -34,4 +53,3 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
 PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     return PAM_SUCCESS;
 }
-

@@ -75,6 +75,7 @@ Scope {
     PamContext {
         id: passwd
 
+        user: Quickshell.env("USER")
         config: "passwd"
         configDirectory: Quickshell.shellPath("assets/pam.d")
 
@@ -216,7 +217,10 @@ Scope {
         signal availProcExited(code: int)
 
         function checkAvailable(): void {
-            availProc.running = true;
+            if (enabled)
+                availProc.running = true;
+            else
+                available = false;
         }
 
         function start(): void {
@@ -236,6 +240,7 @@ Scope {
         PamContext {
             id: pam
 
+            user: Quickshell.env("USER")
             configDirectory: Quickshell.shellPath("assets/pam.d")
 
             onCompleted: res => {
