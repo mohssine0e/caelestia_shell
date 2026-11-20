@@ -1,0 +1,348 @@
+Java Memory, Objects & References
+1.1 Stack vs Heap
+- Stack: Each thread has its own call stack, containing method frames and local variables.
+- Heap: Stores objects and arrays. Objects can be shared between threads through references.
+- Reference: A value that identifies an object, not a raw memory pointer.
+User u1 = new User("Adam");
+User u2 = u1;
+
+u2.name = "Sara";
+
+System.out.println(u1.name); // Sara
+
+
+Rule: Both references refer to the same object.
+1.2 Java is always pass-by-value
+static void change(User user) {
+    user.name = "Youssef";
+    user = new User("Sara");
+}
+
+User u1 = new User("Adam");
+change(u1);
+
+System.out.println(u1.name); // Youssef
+
+
+Java copies the reference when passing an object to a method.
+- user.name = ... mutates the shared object.
+- user = new User(...) only changes the method's local reference.
+Remember: Reassigning a parameter doesn't change the caller's reference.
+
+Section 02 — Strings, Equality & Hashing
+2.1 == vs equals()
+String a = "Java";
+String b = "Java";
+String c = new String("Java");
+
+System.out.println(a == b);      // true
+System.out.println(a == c);      // false
+System.out.println(a.equals(c)); // true
+
+
+- == compares primitive values or object identity.
+- equals() uses the class's equality implementation.
+- String literals are interned and can share an object.
+2.2 String Pool and intern()
+String a = new String("Backend");
+String b = a.intern();
+String c = "Backend";
+
+System.out.println(a == b); // false
+System.out.println(b == c); // true
+
+
+intern() returns the canonical pooled String reference. It doesn't modify the original String.
+2.3 equals() and hashCode()
+import java.util.Objects;
+
+class User {
+    private final Long id;
+
+    User(Long id) {
+        this.id = Objects.requireNonNull(id);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+
+        if (!(obj instanceof User other))
+            return false;
+
+        return Objects.equals(id, other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(id);
+    }
+}
+
+
+The contract:
+Condition	Meaning
+a.equals(b) == true	Hash codes must be equal
+Same hash codes	Objects aren't necessarily equal
+Different hash codes	Objects cannot be equal if the contract is respected
+
+Hash collisions happen when different objects generate identical hash codes.
+2.4 HashSet and collisions
+@Override
+public int hashCode() {
+    return 42;
+}
+
+
+Even if all objects return 42, HashSet can store multiple objects if equals() says they're different.
+
+A HashMap bucket can contain multiple entries, commonly organized as linked nodes, and may be treeified under certain conditions.
+2.5 Mutable HashMap keys
+Map<User, String> map = new HashMap<>();
+
+User user = new User("adam"); // Assume mutable username-based key
+map.put(user, "ACTIVE");
+
+user.username = "sara";
+
+// The changed hash may make normal lookup fail.
+
+
+Changing a field involved in hashCode() while the object is a key can make the entry difficult to retrieve.
+
+Backend rule: Prefer stable, immutable keys, such as a user's immutable database ID.
+
+Section 03 — HashMap & ConcurrentHashMap
+3.1 HashMap
+Map<Long, String> map = new HashMap<>();
+
+map.put(1L, "Adam");
+map.put(2L, null);
+
+
+- Not thread-safe for unsynchronized concurrent modifications.
+- Allows one null key and multiple null values.
+- Uses hashCode() and equals() for key lookup.
+3.2 ConcurrentHashMap
+ConcurrentHashMap<Long, String> cache =
+    new ConcurrentHashMap<>();
+
+
+- Supports concurrent access.
+- Does not allow null keys or null values.
+- Provides atomic operations such as putIfAbsent() and computeIfAbsent().
+But this is not atomic as a whole:
+if (!cache.containsKey(1L)) {
+    cache.put(1L, "ACTIVE");
+}
+
+
+Two threads may both see that the key is absent.
+3.3 putIfAbsent() vs computeIfAbsent()
+// Value is evaluated before the method call
+cache.putIfAbsent(1L, loadUser(1L));
+
+// Value is computed only when needed
+cache.computeIfAbsent(1L, id -> loadUser(id));
+
+
+	putIfAbsent()	computeIfAbsent()
+Accepts	Value	Function
+Lazy computation	No	Yes
+Existing non-null mapping	Preserved	Preserved
+Existing null mapping in HashMap	Can be replaced	Can be replaced
+Computation returns null	Depends on map and supplied value	No new mapping
+
+If a mapping function throws an exception, computeIfAbsent() propagates it and doesn't establish the new mapping.
+
+Backend example: Lazy user-cache loading.
+User user = cache.computeIfAbsent(
+    userId,
+    id -> repository.findById(id).orElse(null)
+);
+
+
+This handles lazy loading, but not cache expiration, stale entries, or every kind of database failure.
+
+Section 04 — Java Concurrency Essentials
+4.1 What is a thread?
+Thread = Worker executing instructions.
+
+Thread pool = Office managing workers.
+
+Threads in the same JVM can access shared heap objects, but each thread has its own execution stack.
+4.2 Race condition
+int count = 0;
+
+void increment() {
+    count++;
+}
+
+
+count++ is not atomic.
+
+Conceptually:
+READ → ADD 1 → WRITE
+
+
+Two threads can both read 0 and both write 1, losing an increment.
+4.3 volatile
+private volatile boolean running = true;
+
+
+Provides visibility and ordering guarantees.
+
+It doesn't make compound operations such as count++ atomic.
+4.4 synchronized
+private int count = 0;
+
+public synchronized void increment() {
+    count++;
+}
+
+
+A thread must acquire the monitor lock before executing the synchronized method.
+
+This provides mutual exclusion and visibility when threads coordinate using the same lock.
+4.5 AtomicInteger
+AtomicInteger count = new AtomicInteger(0);
+
+count.incrementAndGet();
+count.addAndGet(10);
+
+System.out.println(count.get());
+
+
+Atomic operations safely update one integer without requiring an explicit synchronized block.
+4.6 Choosing the right mechanism
+Situation	Suitable mechanism
+Shared boolean status flag	volatile
+Shared integer counter	AtomicInteger
+Protect multiple related operations	synchronized
+Highly contended counter	Consider LongAdder
+
+Important: Atomic individual operations don't automatically make an entire business transaction atomic.
+
+Section 05 — CAS (Compare-And-Set)
+5.1 What is CAS?
+CAS means:
+Update the value only if it still equals the value you expected.
+
+AtomicInteger balance = new AtomicInteger(1000);
+
+boolean first = balance.compareAndSet(1000, 700);
+boolean second = balance.compareAndSet(1000, 500);
+
+System.out.println(first);        // true
+System.out.println(second);       // false
+System.out.println(balance.get()); // 700
+
+
+The second CAS fails because the balance is no longer 1000.
+5.2 CAS retry loop
+public boolean withdraw(int amount) {
+    if (amount <= 0) {
+        throw new IllegalArgumentException();
+    }
+
+    while (true) {
+        int current = balance.get();
+
+        if (current < amount)
+            return false;
+
+        int updated = current - amount;
+
+        if (balance.compareAndSet(current, updated)) {
+            return true;
+        }
+
+        // Retry because another thread changed balance
+    }
+}
+
+
+This protects the condition and update together, assuming balance is an AtomicInteger and all modifications follow compatible atomic rules.
+
+Remember: CAS failure means the observed value changed, not necessarily that the business operation failed.
+
+Section 06 — Threads, Thread Pools & Executors
+6.1 start() vs run()
+Thread worker = new Thread(() -> {
+    System.out.println(Thread.currentThread().getName());
+});
+
+worker.run();   // Executes on calling thread
+worker.start(); // Starts a separate execution thread
+
+
+- start() starts a new thread.
+- Directly calling run() is an ordinary method call.
+- You cannot call start() twice on the same thread.
+6.2 ExecutorService
+ExecutorService executor =
+    Executors.newFixedThreadPool(2);
+
+executor.submit(() -> System.out.println("Task A"));
+executor.submit(() -> System.out.println("Task B"));
+executor.submit(() -> System.out.println("Task C"));
+
+executor.shutdown();
+
+
+The pool has up to two active worker threads. Additional submitted tasks wait when both workers are occupied.
+6.3 shutdown() vs shutdownNow()
+executor.shutdown();
+
+
+Stops accepting new tasks while allowing submitted tasks to complete.
+executor.shutdownNow();
+
+
+Attempts to interrupt running tasks and returns tasks that never started. It doesn't guarantee immediate termination.
+6.4 execute() vs submit()
+executor.execute(() -> doWork());
+
+
+Returns void.
+Future<Integer> future =
+    executor.submit(() -> 10 + 20);
+
+System.out.println(future.get()); // 30
+
+
+submit() returns a Future, which can represent a task result.
+
+future.get() blocks the calling thread until the result is available.
+
+Section 07 — Platform Threads vs Virtual Threads
+7.1 Platform threads
+Thread thread = new Thread(() -> doWork());
+thread.start();
+
+
+Traditional Java threads backed by operating-system threads.
+7.2 Virtual threads (Java 21+)
+Thread.startVirtualThread(() -> doWork());
+
+
+Lightweight threads managed by the JVM, scheduled onto carrier platform threads.
+7.3 Virtual-thread executor
+try (ExecutorService executor =
+        Executors.newVirtualThreadPerTaskExecutor()) {
+
+    executor.submit(() -> {
+        Thread.sleep(1000);
+        return "DONE";
+    });
+}
+
+
+Useful when managing many concurrent I/O-bound tasks.
+Platform threads	Virtual threads
+Dedicated OS thread	Share carrier threads over time
+Relatively expensive	Lightweight
+Commonly reused in pools	Commonly created per task
+General execution	Especially useful for I/O-bound workloads
+
+Virtual threads don't make CPU calculations faster and don't remove the need for thread safety.

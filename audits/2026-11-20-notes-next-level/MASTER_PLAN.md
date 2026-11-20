@@ -177,12 +177,12 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 ### Phase 0 — Baseline and recovery
 
-- [ ] **P0.1** Recheck repository state and applicable instructions; identify concurrent work before edits.
-- [ ] **P0.2** Create a consistent SQLite backup using the backup API and a test copy. Record counts, source hashes, schema version, and restore instructions.
-- [ ] **P0.3** Capture the current review/capture behavior and establish isolated fixtures for long Java notes, commands, personal text, errors, and links.
-- [ ] **P0.4** Add a feature switch/adapter strategy so the old review remains available during conversion.
+- [x] **P0.1** Recheck repository state and applicable instructions; identify concurrent work before edits.
+- [x] **P0.2** Create a consistent SQLite backup using the backup API and a test copy. Record counts, source hashes, schema version, and restore instructions.
+- [x] **P0.3** Capture the current review/capture behavior and establish isolated fixtures for long Java notes, commands, personal text, errors, and links.
+- [x] **P0.4** Add a feature switch/adapter strategy so the old review remains available during conversion.
 
-**Gate:** restore works on a temporary path; baseline source content is accounted for; no production migration has been attempted without a recoverable snapshot.
+**Gate:** restore works on a temporary path; baseline source content is accounted for; no production migration has been attempted without a recoverable snapshot. Passed on 2026-11-20.
 
 ### Phase 1 — Capture and merge correctness
 
@@ -276,15 +276,14 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | Audit and master plan only |
-| Next task | P0.1 — recheck repository and concurrent work |
-| Implementation commits | None for this upgrade |
-| Application files changed | None for this upgrade |
-| Baseline checks | 43 existing backend tests pass; audit reproductions recorded in 01-current-audit.md |
-| New checks run | None yet |
-| Backup / restore path | To record in P0.2 |
-| Migration state | Not started |
-| Remaining blockers | None for starting implementation |
+| Last completed task | P0.1 - P0.4 (Phase 0 complete) |
+| Next task | P1.1 — Save every capture before AI work |
+| Implementation commits | 87d15e17 docs(notes): add engineering handbook audit and master plan |
+| Application files changed | None for this upgrade yet |
+| Baseline checks | 155 existing tests pass + 4 new P0 fixture tests pass |
+| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_baseline_20261120.sqlite3 (114 notes, verified) |
+| Migration state | Baseline snapshot verified; Phase 0 complete |
+| Remaining blockers | None |
 | Product direction | Confirmed: understand deeply now, look up quickly later |
 
 For every completed phase, append its changed files, verification results, remaining limitations, and the next task. Keep this record current so a later session can continue without guessing.
