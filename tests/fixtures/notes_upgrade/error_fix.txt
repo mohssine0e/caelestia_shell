@@ -1,1 +1,0 @@
-Avoid using 'git push --force' on shared remote branches as it can overwrite and destroy collaborators' commit histories.

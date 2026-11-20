@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 
 docs/*
+tests/fixtures/
 # all the hidden files except .gitignore
 .*
 !.gitignore
