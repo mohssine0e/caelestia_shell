@@ -229,15 +229,6 @@ def connect() -> sqlite3.Connection:
     db.execute("CREATE INDEX IF NOT EXISTS notes_keep_updated ON notes(keep_decision, updated_at DESC)")
     db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     db.commit()
-    try:
-        empty_subc = db.execute(
-            "SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL AND (subconcept IS NULL OR subconcept = '')"
-        ).fetchone()[0]
-        if empty_subc > 0:
-            _refactor_subconcepts_internal(db)
-            db.commit()
-    except Exception:
-        pass
     _secure_path(path)
     for suffix in ("-wal", "-shm"):
         sidecar = Path(str(path) + suffix)
@@ -1977,57 +1968,64 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         for dom, subcs in sorted(domain_subconcepts.items())
     ) or "- Docker: Containers & CLI, Images & Build, Volumes, Compose\n- Git: Core Git, Branching & Workflows, GitHub Actions, History & Inspection, State & Stash, Configuration"
 
-    prompt = (
-        "You are an expert developer knowledge organizer for a senior backend / DevOps engineer.\n"
-        "The engineer is saving a technical note.\n"
-        f"Existing notes context: {json.dumps(existing_summary, ensure_ascii=False)}.\n"
-        f"Existing note IDs and titles: {json.dumps(existing_identity, ensure_ascii=False)}. Use only those exact IDs for links.\n"
-        f"Current domains and active subconcepts:\n{subconcepts_text}\n\n"
-        f"Input note:\n{raw_text}\n\n"
-        "Analyze the note and respond with one strict JSON object:\n"
-        "{\n"
-        '  "action": "create" | "merge" | "ignore",\n'
-        '  "domain": "Java" | "Docker" | "Kubernetes" | ..., (the high-level technology or domain)\n'
-        '  "subconcept": "Modern Language Features" | "Compose" | ..., (specific subconcept)\n'
-        '  "title": "Pattern Matching for instanceof", (concise searchable title under 70 chars)\n'
-        '  "technical_type": "code" | "command" | "concept" | "configuration" | "error_fix" | "reference",\n'
-        '  "technology": "Java 16+",\n'
-        '  "summary": "1-2 sentence core definition of the concept or tool",\n'
-        '  "mechanics": ["Mechanic 1: runtime/compiler behavior", "Mechanic 2: scope or usage rule"],\n'
-        '  "snippets": [\n'
-        '    {"label": "Modern (Java 16+)", "language": "java", "code": "...", "role": "after"},\n'
-        '    {"label": "Legacy (Java < 16)", "language": "java", "code": "...", "role": "before"}\n'
-        '  ],\n'
-        '  "suggested_tags": ["#java", "#pattern-matching"],\n'
-        '  "related_note_ids": ["id1", "id2"],\n'
-        '  "formatted_content": "Markdown text combining title, summary, code blocks with language fences, and mechanics bullets"\n'
-        "}\n\n"
-        "Rules:\n"
-        "- The note may use Moroccan Darija in Arabic script or Latin/French transliteration (Arabizi). Treat it as meaningful, preserve its language, and never reject it merely for not being English.\n"
-        "- Use action=ignore for obvious keyboard mashing, repeated test filler, or meaningless symbol strings; do not create a topic for them.\n"
-        "- NEVER discard code snippets, commands, flags, or technical syntax from the note.\n"
-        "- If the note contrasts before/after or old vs new (e.g. Java 8 vs 16, imperative vs declarative), extract both into snippets with labels.\n"
-        "- If the note is a single command or snippet, extract it into snippets and describe what each flag/argument does.\n"
-        "- For MERGE: Return {\"action\": \"merge\", \"existing_id\": \"...\", \"updated_subconcept\": \"...\", \"updated_content\": \"...\", \"related_note_ids\": []}\n"
-        "- For IGNORE: Return {\"action\": \"ignore\"} only if exactly duplicate."
-        "\n- Analyze the new note. If it directly relates to, contradicts, or expands upon an existing note, return the exact IDs of those notes in related_note_ids. Return an empty array if there are no strong connections."
-    )
-
-    parsed = None
-    try:
-        response, provider = _run_provider(
-            "You are a technical knowledge manager. Output strict JSON only.",
-            prompt
-        )
-        cleaned = response.strip()
-        fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
-        if fence:
-            cleaned = fence.group(1).strip()
-        parsed = json.loads(cleaned)
-        if not isinstance(parsed, dict):
-            raise ValueError("Expected a JSON object")
-    except Exception:
+    sensitive_reason = _detect_sensitive_content(raw_text)
+    if sensitive_reason:
         parsed = _heuristic_upsert(raw_text, existing_summary)
+        parsed["action"] = "create"
+        parsed["domain"] = _infer_local_topic(raw_text) or "General"
+        parsed["subconcept"] = "Sensitive / Local"
+    else:
+        prompt = (
+            "You are an expert developer knowledge organizer for a senior backend / DevOps engineer.\n"
+            "The engineer is saving a technical note.\n"
+            f"Existing notes context: {json.dumps(existing_summary, ensure_ascii=False)}.\n"
+            f"Existing note IDs and titles: {json.dumps(existing_identity, ensure_ascii=False)}. Use only those exact IDs for links.\n"
+            f"Current domains and active subconcepts:\n{subconcepts_text}\n\n"
+            f"Input note:\n{raw_text}\n\n"
+            "Analyze the note and respond with one strict JSON object:\n"
+            "{\n"
+            '  "action": "create" | "merge" | "ignore",\n'
+            '  "domain": "Java" | "Docker" | "Kubernetes" | ..., (the high-level technology or domain)\n'
+            '  "subconcept": "Modern Language Features" | "Compose" | ..., (specific subconcept)\n'
+            '  "title": "Pattern Matching for instanceof", (concise searchable title under 70 chars)\n'
+            '  "technical_type": "code" | "command" | "concept" | "configuration" | "error_fix" | "reference",\n'
+            '  "technology": "Java 16+",\n'
+            '  "summary": "1-2 sentence core definition of the concept or tool",\n'
+            '  "mechanics": ["Mechanic 1: runtime/compiler behavior", "Mechanic 2: scope or usage rule"],\n'
+            '  "snippets": [\n'
+            '    {"label": "Modern (Java 16+)", "language": "java", "code": "...", "role": "after"},\n'
+            '    {"label": "Legacy (Java < 16)", "language": "java", "code": "...", "role": "before"}\n'
+            '  ],\n'
+            '  "suggested_tags": ["#java", "#pattern-matching"],\n'
+            '  "related_note_ids": ["id1", "id2"],\n'
+            '  "formatted_content": "Markdown text combining title, summary, code blocks with language fences, and mechanics bullets"\n'
+            "}\n\n"
+            "Rules:\n"
+            "- The note may use Moroccan Darija in Arabic script or Latin/French transliteration (Arabizi). Treat it as meaningful, preserve its language, and never reject it merely for not being English.\n"
+            "- Use action=ignore for obvious keyboard mashing, repeated test filler, or meaningless symbol strings; do not create a topic for them.\n"
+            "- NEVER discard code snippets, commands, flags, or technical syntax from the note.\n"
+            "- If the note contrasts before/after or old vs new (e.g. Java 8 vs 16, imperative vs declarative), extract both into snippets with labels.\n"
+            "- If the note is a single command or snippet, extract it into snippets and describe what each flag/argument does.\n"
+            "- For MERGE: Return {\"action\": \"merge\", \"existing_id\": \"...\", \"updated_subconcept\": \"...\", \"updated_content\": \"...\", \"related_note_ids\": []}\n"
+            "- For IGNORE: Return {\"action\": \"ignore\"} only if exactly duplicate."
+            "\n- Analyze the new note. If it directly relates to, contradicts, or expands upon an existing note, return the exact IDs of those notes in related_note_ids. Return an empty array if there are no strong connections."
+        )
+
+        parsed = None
+        try:
+            response, provider = _run_provider(
+                "You are a technical knowledge manager. Output strict JSON only.",
+                prompt
+            )
+            cleaned = response.strip()
+            fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
+            if fence:
+                cleaned = fence.group(1).strip()
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                raise ValueError("Expected a JSON object")
+        except Exception:
+            parsed = _heuristic_upsert(raw_text, existing_summary)
 
     action = str(parsed.get("action", "create")).lower()
 
@@ -2048,19 +2046,55 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
             target_row = None
             if existing_id:
                 target_row = db.execute("SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL", (existing_id,)).fetchone()
-            if not target_row and existing_summary:
-                target_row = db.execute("SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL", (existing_summary[0]["id"],)).fetchone()
 
-            if target_row:
+            if not target_row:
+                # Target not found; reject invalid merge and fall back to create
+                action = "create"
+            else:
                 nid = target_row["id"]
                 subc = updated_subconcept or target_row["subconcept"] or "Core"
+
+                # 1. Preserve incoming source in raw_content
+                old_raw = str(target_row["raw_content"] or "")
+                merged_raw = (old_raw + "\n\n---\n" + raw_text).strip() if raw_text not in old_raw else old_raw
+
+                # 2. Merge mechanics into essentials_json
+                try:
+                    curr_essentials = json.loads(target_row["essentials_json"] or "[]")
+                except Exception:
+                    curr_essentials = []
+                for m in (parsed.get("mechanics") or parsed.get("essential_bullets") or []):
+                    if m and isinstance(m, str) and m not in curr_essentials:
+                        curr_essentials.append(m)
+
+                # 3. Merge snippets into excerpts_json
+                try:
+                    curr_excerpts = json.loads(target_row["excerpts_json"] or "[]")
+                except Exception:
+                    curr_excerpts = []
+                raw_snippets = parsed.get("snippets") or parsed.get("exact_excerpts") or []
+                if isinstance(raw_snippets, list):
+                    for s in raw_snippets:
+                        if isinstance(s, dict):
+                            code = str(s.get("code") or s.get("content") or "").strip()
+                            if code and not any(e.get("content") == code for e in curr_excerpts):
+                                curr_excerpts.append({
+                                    "label": str(s.get("label") or "").strip()[:50],
+                                    "language": str(s.get("language") or "bash").lower()[:24],
+                                    "content": code
+                                })
+
                 db.execute(
                     """UPDATE notes SET
+                       raw_content = ?,
                        formatted_content = ?,
+                       essentials_json = ?,
+                       excerpts_json = ?,
                        subconcept = ?,
                        updated_at = ?
                        WHERE id = ?""",
-                    (updated_content, subc, now, nid),
+                    (merged_raw, updated_content, json.dumps(curr_essentials, ensure_ascii=False),
+                     json.dumps(curr_excerpts, ensure_ascii=False), subc, now, nid),
                 )
                 _save_related_links(db, nid, parsed.get("related_note_ids", []))
                 sync_notes_json(db)
@@ -2143,11 +2177,12 @@ def smart_upsert(payload: dict[str, Any]) -> dict[str, Any]:
             """INSERT INTO notes
                (id, created_at, updated_at, raw_content, formatted_content, topic, subconcept,
                 title, technology, status, category, keep_decision, technical_type, topic_section,
-                ai_tags_json, essentials_json, excerpts_json, schema_version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'formatted', 'technical', 'keep', ?, ?, ?, ?, ?, ?)""",
+                ai_tags_json, essentials_json, excerpts_json, local_only, sensitive_reason, schema_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'formatted', 'technical', 'keep', ?, ?, ?, ?, ?, ?, ?, ?)""",
             (note_id, now, now, raw_text, formatted_content, domain, subconcept,
              title, technology, tech_type, sec, json.dumps(tags, ensure_ascii=False),
-             json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False), SCHEMA_VERSION),
+             json.dumps(essentials, ensure_ascii=False), json.dumps(excerpts, ensure_ascii=False),
+             1 if sensitive_reason else 0, sensitive_reason or None, SCHEMA_VERSION),
         )
         _save_related_links(db, note_id, parsed.get("related_note_ids", []))
         sync_notes_json(db)

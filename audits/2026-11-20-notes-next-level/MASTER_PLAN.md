@@ -186,15 +186,15 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 ### Phase 1 — Capture and merge correctness
 
-- [ ] **P1.1** Save every capture before AI work; acknowledge only after durable persistence.
-- [ ] **P1.2** Unify sensitive-content, personal/idea, noise, and language policies across all entry points.
+- [x] **P1.1** Save every capture before AI work; acknowledge only after durable persistence.
+- [x] **P1.2** Unify sensitive-content, personal/idea, noise, and language policies across all entry points.
 - [ ] **P1.3** Replace the single overwriteable pending draft with session/revision-safe scheduling and recoverable unsaved text.
-- [ ] **P1.4** Reject invalid merge targets and accidental cross-topic merges; remove the “newest note” fallback.
-- [ ] **P1.5** Preserve incoming sources during merge, update all derived structures atomically, and support undo.
-- [ ] **P1.6** Stop broad content rewriting during database reads; use explicit idempotent migrations.
+- [x] **P1.4** Reject invalid merge targets and accidental cross-topic merges; remove the “newest note” fallback.
+- [x] **P1.5** Preserve incoming sources during merge, update all derived structures atomically, and support undo.
+- [x] **P1.6** Stop broad content rewriting during database reads; use explicit idempotent migrations.
 - [ ] **P1.7** Handle deliberate ignores, failures, retries, cancellations, and stale results consistently in QML.
 
-**Gate:** offline capture survives restart; invalid IDs alter no unrelated note; sensitive fixtures make no provider call; concurrent capture sessions do not overwrite each other; the displayed content matches accepted merges.
+**Gate:** offline capture survives restart; invalid IDs alter no unrelated note; sensitive fixtures make no provider call; concurrent capture sessions do not overwrite each other; the displayed content matches accepted merges. Partially verified in tests/test_notes_upgrade_p1.py.
 
 ### Phase 2 — Structured depth without losing detail
 
