@@ -2561,6 +2561,119 @@ def dismiss_concept_detail_rpc(payload: dict[str, Any]) -> dict[str, Any]:
     return {"success": True, "state": "dismissed", "concept_id": proposal["concept_id"]}
 
 
+def coverage_inventory_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    """Report structured coverage for an exact concept, area, topic, or the whole library.
+
+    Candidates are prompts for source review, never claims that the source lacks a fact.
+    """
+    scope = str(payload.get("scope") or "concept").strip().lower()
+    if scope not in {"concept", "area", "topic", "all"}:
+        raise ValueError("Unknown coverage scope.")
+    cid = str(payload.get("id") or "").strip()
+    topic = str(payload.get("topic") or "").strip()
+    area = str(payload.get("area") or "").strip()
+    if scope == "concept" and not cid:
+        raise ValueError("Choose a concept to inspect.")
+    if scope in {"topic", "area"} and not topic:
+        raise ValueError("Choose a topic to inspect.")
+    if scope == "area" and not area:
+        raise ValueError("Choose an area to inspect.")
+    try:
+        offset = max(0, int(payload.get("offset") or 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid coverage cursor.") from exc
+    limit = 100
+
+    where = ["deleted_at IS NULL"]
+    params: list[Any] = []
+    if scope == "concept":
+        where.append("id = ?")
+        params.append(cid)
+    if scope in {"area", "topic"}:
+        where.append("topic = ? COLLATE NOCASE")
+        params.append(topic)
+    if scope == "area":
+        where.append("area = ? COLLATE NOCASE")
+        params.append(area)
+    clause = " AND ".join(where)
+
+    with database() as db:
+        total = db.execute("SELECT count(*) FROM concepts WHERE " + clause, params).fetchone()[0]
+        if scope == "concept" and not total:
+            raise ValueError("Concept not found.")
+        rows = db.execute(
+            "SELECT id, topic, area, title, definition, updated_at FROM concepts WHERE " + clause
+            + " ORDER BY topic COLLATE NOCASE, area COLLATE NOCASE, title COLLATE NOCASE, id LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        concepts = []
+        for row in rows:
+            blocks = db.execute(
+                "SELECT id, kind, role FROM blocks WHERE concept_id = ? ORDER BY sort_order", (row["id"],)
+            ).fetchall()
+            kinds = {str(b["kind"] or "").lower() for b in blocks}
+            has_definition = bool(str(row["definition"] or "").strip()
+                                  and str(row["definition"] or "").strip().casefold()
+                                  != str(row["title"] or "").strip().casefold())
+            known = {
+                "definition": has_definition,
+                "purpose": bool(kinds & {"problem", "why"}),
+                "mechanism": "mechanism" in kinds,
+                "rules": "rule" in kinds,
+                "example": bool(kinds & {"code", "command"}),
+                "boundary": bool(kinds & {"caveat", "counterexample"}),
+                "comparison": "comparison" in kinds,
+                "name": "name" in kinds,
+            }
+            command_like = "command" in kinds
+            code_like = "code" in kinds
+            candidates = []
+            if not has_definition:
+                candidates.append("definition")
+            if not command_like and not code_like:
+                if (known["rules"] or known["purpose"]) and not known["mechanism"]:
+                    candidates.append("mechanism")
+                if known["rules"] and known["mechanism"] and not known["example"]:
+                    candidates.append("example")
+            elif not known["example"]:
+                candidates.append("example")
+            source_rows = db.execute(
+                """SELECT DISTINCT s.note_id, s.source_span FROM block_sources s
+                   JOIN blocks b ON b.id = s.block_id WHERE b.concept_id = ?""", (row["id"],)
+            ).fetchall()
+            source_ids = sorted({str(s["note_id"]) for s in source_rows})
+            unmatched = 0
+            for source in source_rows:
+                try:
+                    span = json.loads(source["source_span"] or "{}")
+                except (TypeError, ValueError):
+                    span = {}
+                if not isinstance(span, dict) or span.get("matched") is not True:
+                    unmatched += 1
+            concepts.append({
+                "id": row["id"], "topic": row["topic"], "area": row["area"],
+                "title": row["title"], "revision": row["updated_at"],
+                "known_roles": known, "candidate_roles": candidates,
+                "source_note_ids": source_ids, "unmatched_source_mappings": unmatched,
+                "unplaced_blocks": sum(1 for b in blocks if b["kind"] == "unplaced"),
+                "source_review_required": bool(source_ids or unmatched or "unplaced" in kinds),
+            })
+
+    areas: dict[str, dict[str, Any]] = {}
+    for item in concepts:
+        key = str(item["area"])
+        summary = areas.setdefault(key, {"area": key, "concept_count": 0,
+                                         "candidate_count": 0, "source_review_count": 0})
+        summary["concept_count"] += 1
+        summary["candidate_count"] += len(item["candidate_roles"])
+        summary["source_review_count"] += int(item["source_review_required"])
+    end = offset + len(concepts)
+    return {"success": True, "scope": scope, "topic": topic, "area": area,
+            "offset": offset, "total_count": total, "inspected_count": len(concepts),
+            "complete": end >= total, "next_offset": end if end < total else None,
+            "areas": list(areas.values()), "concepts": concepts}
+
+
 def export_concept_markdown(concept_id: str, mode: str = "understand") -> str:
     data = get_concept_view(concept_id, mode=mode)
     concept = data["concept"]
@@ -3125,6 +3238,7 @@ COMMANDS = {
     "concept-detail": concept_detail_rpc,
     "accept-concept-detail": accept_concept_detail_rpc,
     "dismiss-concept-detail": dismiss_concept_detail_rpc,
+    "coverage-inventory": coverage_inventory_rpc,
 }
 
 

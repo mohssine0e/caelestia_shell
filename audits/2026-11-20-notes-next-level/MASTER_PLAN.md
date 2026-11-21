@@ -4,7 +4,7 @@
 **Created:** 2026-11-20  
 **State:** in progress; handbook UI repaired and focused explanations implemented
 
-**Next task:** P4.2, then the remaining Phase 1/3 verification gaps
+**Next task:** P4.3 scoped gap proposals, then the remaining Phase 1/3 verification gaps
 
 **Primary requirement:** understand deeply now, look up quickly later.
 
@@ -226,7 +226,7 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 ### Phase 4 — Teaching and useful gap completion
 
 - [x] **P4.1** Add contextual Why, Name, Counterexample, and Compare using existing content before generation. A saved answer opens locally; missing answers become reviewable proposals. Verified with `tests/test_notes_concept_details.py` and QML load at 600×400 and 1200×800.
-- [ ] **P4.2** Implement scope-aware coverage inventory and missing-role detection.
+- [x] **P4.2** Implement scope-aware coverage inventory and missing-role detection. The local `coverage-inventory` endpoint pages concept/area/topic/All scopes, reports structured roles and provisional candidates, and marks original captures for review before any gap claim. Verified with `tests/test_notes_coverage_inventory.py` and the live 104-concept library.
 - [ ] **P4.3** Let All propose missing areas while selected-scope requests remain confined.
 - [ ] **P4.4** Add ranked suggestion batches, accept/dismiss/accept-all, evidence details, and undo.
 - [ ] **P4.5** Track version/applicability, distinguish unsupported material, and handle source-retrieval failure honestly.
@@ -278,11 +278,11 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | P4.1 focused explanations; Phase 1/3 follow-up checks remain open |
-| Next task | P4.2 coverage inventory; manually verify capture recovery and search destinations |
-| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f; takeover: see current Notes repair commit |
+| Last completed task | P4.2 coverage inventory; Phase 1/3 follow-up checks remain open |
+| Next task | P4.3 scoped gap proposals; manually verify capture recovery and search destinations |
+| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: current commit |
 | Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, HandbookNav.qml, ConceptIndex.qml, ConceptPage.qml, ConceptDetailActions.qml, HandbookSearchResults.qml, QuickNote.qml |
-| Baseline checks | 183 tests pass including focused explanation, capture retry, source search, reading preferences, and migration repair tests; isolated QML load at 600×400 and 1200×800 |
+| Baseline checks | 185 tests pass including focused explanation, capture retry, source search, reading preferences, coverage paging, and migration repair tests; isolated QML load at 600×400 and 1200×800 |
 | Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_pre_repair_20261121T145050Z.sqlite3 (also the original 2026-11-20 baseline) |
 | Migration state | Schema v14 active; 115 original captures and 104 concept IDs preserved; 73 live concept metadata/command repairs; original raw capture hash unchanged |
 | Remaining blockers | Exact block-level unread navigation, UI click-through, scoped gap inventory, and later phase work |
