@@ -72,6 +72,14 @@ Item {
             wrapMode: Text.WordWrap
         }
 
+        GapSuggestions {
+            Layout.fillWidth: true
+            visible: root.topic !== "All"
+            scope: root.area === "All" ? "topic" : "area"
+            topic: root.topic
+            area: root.area
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1

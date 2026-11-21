@@ -168,6 +168,12 @@ Item {
                         Notes.listConcepts("", "")
                     }
                 }
+                GapSuggestions {
+                    scope: "concept"
+                    topic: root.concept.topic || ""
+                    area: root.concept.area || ""
+                    conceptId: root.concept.id || ""
+                }
                 Rectangle {
                     width: parent.width
                     height: 1
