@@ -274,9 +274,16 @@ void main() {
         if (rectData[i * 5 + 3].z > 0.5)
             outlinedDistance = min(outlinedDistance, dArr[i]);
     }
+    if (hasInverted >= 2) {
+        float innerTop = invertedInner.y - invertedInner.w;
+        float innerBot = invertedInner.y + invertedInner.w;
+        float innerLeft = invertedInner.x - invertedInner.z;
+        float dBarEdge = length(vec2(pixel.x - innerLeft, max(0.0, max(innerTop - pixel.y, pixel.y - innerBot))));
+        outlinedDistance = min(outlinedDistance, dBarEdge);
+    }
     float reach = max(smoothFactor, 1.0);
     float scope = 1.0 - smoothstep(reach, reach * 1.5, outlinedDistance);
-    if (hasInverted != 0) {
+    if (hasInverted == 1) {
         // Stop at the inner screen frame: never stroke the physical screen
         // edge or continue along the straight frame beyond a panel's joins.
         vec2 inset = invertedInner.zw - abs(pixel - invertedInner.xy);

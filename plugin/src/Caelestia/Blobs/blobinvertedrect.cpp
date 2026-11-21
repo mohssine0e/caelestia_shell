@@ -127,7 +127,7 @@ QSGNode* BlobInvertedRect::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData
     material->m_color = m_group->color();
     material->m_outlineColor = m_group->outlineColor();
     material->m_outlineWidth = static_cast<float>(m_group->outlineWidth());
-    material->m_hasInverted = m_cachedHasInverted ? 1 : 0;
+    material->m_hasInverted = m_cachedHasInverted ? (m_outlined ? 2 : 1) : 0;
     material->m_invertedRadius = m_cachedInvertedRadius;
     memcpy(material->m_invertedOuter, m_cachedInvertedOuter, sizeof(m_cachedInvertedOuter));
     memcpy(material->m_invertedInner, m_cachedInvertedInner, sizeof(m_cachedInvertedInner));

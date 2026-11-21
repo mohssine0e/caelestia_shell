@@ -179,6 +179,7 @@ StyledWindow {
             borderRight: root.borderThickness - anchors.margins - root.sdfBorderOffset
             borderTop: root.borderThickness - anchors.margins - root.sdfBorderOffset
             borderBottom: root.borderThickness - anchors.margins - root.sdfBorderOffset
+            outlined: bar.shouldBeVisible && !root.hasFullscreen
         }
 
         PanelBg {
