@@ -4,7 +4,7 @@
 **Created:** 2026-11-20  
 **State:** in progress; handbook UI repaired and focused explanations implemented
 
-**Next task:** P4.4 suggestion acceptance, evidence, and undo; then the remaining Phase 1/3 verification gaps
+**Next task:** P4.5 applicability and unsupported material; then the remaining Phase 1/3 verification gaps
 
 **Primary requirement:** understand deeply now, look up quickly later.
 
@@ -228,7 +228,7 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 - [x] **P4.1** Add contextual Why, Name, Counterexample, and Compare using existing content before generation. A saved answer opens locally; missing answers become reviewable proposals. Verified with `tests/test_notes_concept_details.py` and QML load at 600×400 and 1200×800.
 - [x] **P4.2** Implement scope-aware coverage inventory and missing-role detection. The local `coverage-inventory` endpoint pages concept/area/topic/All scopes, reports structured roles and provisional candidates, and marks original captures for review before any gap claim. Verified with `tests/test_notes_coverage_inventory.py` and the live 104-concept library.
 - [x] **P4.3** Let All propose missing areas while selected-scope requests remain confined. `suggest-gaps` inspects every inventory page in the selected topic, offers new-area leads only for topic All, and filters AI output to the exact selected area or concept. Original captures are checked for concept suggestions; private sources never reach the provider. Suggestions are review-only until P4.4. Verified by `tests/test_notes_gap_suggestions.py`, the full 191-test suite, and an isolated 900×620 QML load.
-- [ ] **P4.4** Add ranked suggestion batches, accept/dismiss/accept-all, evidence details, and undo.
+- [x] **P4.4** Add persistent ranked suggestion batches, accept/dismiss/accept-all, evidence details, and undo. Proposals are saved by exact scope and inventory revision; individual operations verify their target scope; accept-all only accepts the displayed scope; undo removes only the exact added block or an otherwise untouched new concept. Verified by `tests/test_notes_gap_suggestions.py` and the full 194-test suite.
 - [ ] **P4.5** Track version/applicability, distinguish unsupported material, and handle source-retrieval failure honestly.
 - [ ] **P4.6** Add bounded context, caching, stale-result rejection, cancellation, and duplicate-request protection.
 
@@ -278,14 +278,14 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | P4.3 scoped review-only gap suggestions; Phase 1/3 follow-up checks remain open |
-| Next task | P4.4 persistent ranked proposals with accept/dismiss/accept-all, evidence details, and undo; manually verify capture recovery and search destinations |
-| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: 75fc574d; P4.3: current commit |
+| Last completed task | P4.4 persistent gap proposals with acceptance, dismissal, and undo; Phase 1/3 follow-up checks remain open |
+| Next task | P4.5 applicability and unsupported material; manually verify capture recovery and search destinations |
+| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: 75fc574d; P4.3: 7b58947f; P4.4: current commit |
 | Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, HandbookNav.qml, ConceptIndex.qml, ConceptPage.qml, ConceptDetailActions.qml, GapSuggestions.qml, HandbookSearchResults.qml, QuickNote.qml |
-| Baseline checks | 191 tests pass including scoped gap output filtering and inventory paging; isolated QML load at 900×620 (earlier handbook loads at 600×400 and 1200×800) |
+| Baseline checks | 194 tests pass, including persisted scope validation, accept-all, undo, and paging; isolated QML load at 900×620 (earlier handbook loads at 600×400 and 1200×800) |
 | Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_pre_repair_20261121T145050Z.sqlite3 (also the original 2026-11-20 baseline) |
-| Migration state | Schema v14 active; 115 original captures and 104 concept IDs preserved; 73 live concept metadata/command repairs; original raw capture hash unchanged |
-| Remaining blockers | Exact block-level unread navigation, UI click-through, persistent gap acceptance/undo, and later phase work |
+| Migration state | Schema v15 additive migration defined for persistent gap proposals; applies on next backend access. 115 original captures and 104 concept IDs preserved; 73 live concept metadata/command repairs; original raw capture hash unchanged |
+| Remaining blockers | Exact block-level unread navigation, UI click-through, applicability/version handling, and later phase work |
 | Product direction | Confirmed: understand deeply now, look up quickly later |
 
 For every completed phase, append its changed files, verification results, remaining limitations, and the next task. Keep this record current so a later session can continue without guessing.

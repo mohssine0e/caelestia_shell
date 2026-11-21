@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sqlite3
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 TAG_PATTERN = re.compile(r"(?<![\w#])#([\w-]+)", re.UNICODE)
 ORGANIZER_PROMPT = (
     "You are a technical note formatter. Format the supplied raw developer note as "
@@ -291,6 +292,29 @@ def connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_concept_detail_scope
             ON concept_detail_proposals(concept_id, detail_kind, state);
+
+        CREATE TABLE IF NOT EXISTS concept_gap_proposals (
+            id TEXT PRIMARY KEY,
+            scope_kind TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            area TEXT NOT NULL DEFAULT '',
+            concept_id TEXT,
+            proposal_kind TEXT NOT NULL,
+            target_concept_id TEXT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            block_kind TEXT NOT NULL DEFAULT '',
+            base_revision TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT 'suggested',
+            accepted_concept_id TEXT,
+            accepted_block_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_concept_gap_scope
+            ON concept_gap_proposals(scope_kind, topic, area, concept_id, state);
         """
     )
     db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -2796,11 +2820,276 @@ def suggest_gaps_rpc(payload: dict[str, Any]) -> dict[str, Any]:
                             "block_kind": block_kind})
         if len(suggestions) == 4:
             break
+    revision_data = [{"id": c["id"], "revision": c["revision"]} for c in inventory]
+    base_revision = _gap_revision(revision_data)
+    evidence = "Compared against %d original capture(s)." % len(source_text) if scope == "concept" else \
+        "Based on the topic outline; original captures were not reviewed."
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        saved_suggestions = []
+        for suggestion in suggestions:
+            existing = db.execute(
+                """SELECT id FROM concept_gap_proposals WHERE scope_kind=? AND topic=? COLLATE NOCASE
+                   AND area=? COLLATE NOCASE AND COALESCE(concept_id,'')=? AND proposal_kind=?
+                   AND title=? COLLATE NOCASE AND content=? COLLATE NOCASE AND state='suggested'
+                   AND base_revision=? ORDER BY created_at DESC LIMIT 1""",
+                (scope, topic, suggestion["area"], cid, suggestion["kind"], suggestion["title"],
+                 suggestion["content"], base_revision)).fetchone()
+            proposal_id = existing["id"] if existing else str(uuid.uuid4())
+            if not existing:
+                now = utc_now()
+                db.execute(
+                    """INSERT INTO concept_gap_proposals
+                       (id, scope_kind, topic, area, concept_id, proposal_kind, target_concept_id,
+                        title, content, reason, block_kind, base_revision, provider, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (proposal_id, scope, topic, suggestion["area"], cid or None, suggestion["kind"],
+                     suggestion["related_concept_id"] or None, suggestion["title"], suggestion["content"],
+                     suggestion["reason"], suggestion["block_kind"], base_revision, provider, now, now))
+            saved_suggestions.append({**suggestion, "proposal_id": proposal_id, "evidence": evidence})
     return {"success": True, "scope": scope, "topic": topic, "area": area,
             "concept_id": cid, "inspection_complete": True,
             "source_review_complete": scope == "concept", "inspected_count": len(inventory),
-            "provider": provider, "suggestions": suggestions,
-            "message": "Outline leads; check Sources before adding." if scope != "concept" else ""}
+            "provider": provider, "suggestions": saved_suggestions,
+            "message": "Outline leads; original captures were not reviewed." if scope != "concept" else ""}
+
+
+def _gap_scope_inventory(db: sqlite3.Connection, scope: str, topic: str, area: str, concept_id: str) -> list[dict[str, str]]:
+    where = ["deleted_at IS NULL"]
+    params: list[Any] = []
+    if scope == "concept":
+        where.append("id = ?")
+        params.append(concept_id)
+    else:
+        where.append("topic = ? COLLATE NOCASE")
+        params.append(topic)
+        if scope == "area":
+            where.append("area = ? COLLATE NOCASE")
+            params.append(area)
+    rows = db.execute("SELECT id, updated_at FROM concepts WHERE " + " AND ".join(where), params).fetchall()
+    return [{"id": str(row["id"]), "revision": str(row["updated_at"])} for row in rows]
+
+
+def _gap_revision(records: list[dict[str, str]]) -> str:
+    return hashlib.sha256(json.dumps(sorted(records, key=lambda r: r["id"]), sort_keys=True).encode()).hexdigest()
+
+
+def _monotonic_utc_after(timestamp: str) -> str:
+    now = utc_now()
+    try:
+        previous = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        current = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        if current <= previous:
+            now = (previous + timedelta(seconds=1)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    except ValueError:
+        pass
+    return now
+
+
+def _validate_gap_scope(proposal: sqlite3.Row, payload: dict[str, Any]) -> None:
+    scope = str(payload.get("scope") or "").strip().lower()
+    if scope != proposal["scope_kind"]:
+        raise ValueError("This suggestion belongs to a different scope.")
+    if scope != "concept" and str(payload.get("topic") or "").strip().casefold() != str(proposal["topic"]).casefold():
+        raise ValueError("This suggestion belongs to a different topic.")
+    if scope == "area" and str(payload.get("area") or "").strip().casefold() != str(proposal["area"]).casefold():
+        raise ValueError("This suggestion belongs to a different area.")
+    if scope == "concept" and str(payload.get("id") or "").strip() != str(proposal["concept_id"] or ""):
+        raise ValueError("This suggestion belongs to a different concept.")
+
+
+def list_gap_proposals_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    scope = str(payload.get("scope") or "").strip().lower()
+    topic = str(payload.get("topic") or "").strip()
+    area = str(payload.get("area") or "").strip()
+    cid = str(payload.get("id") or "").strip()
+    if scope not in {"concept", "area", "topic"}:
+        raise ValueError("Choose a concept, area, or topic.")
+    with database() as db:
+        records = _gap_scope_inventory(db, scope, topic, area, cid)
+        revision = _gap_revision(records)
+        query = "SELECT * FROM concept_gap_proposals WHERE scope_kind=? AND COALESCE(concept_id,'')=? "
+        params: list[Any] = [scope, cid]
+        if scope != "concept":
+            query += " AND topic=? COLLATE NOCASE"
+            params.append(topic)
+        query += " AND state IN ('suggested','accepted')"
+        if scope == "area":
+            query += " AND area=? COLLATE NOCASE"
+            params.append(area)
+        rows = db.execute(query + " ORDER BY CASE state WHEN 'suggested' THEN 0 ELSE 1 END, created_at DESC",
+                          params).fetchall()
+        proposals = []
+        for row in rows:
+            item = dict(row)
+            item["proposal_id"] = item["id"]
+            item["stale"] = item["state"] == "suggested" and item["base_revision"] != revision
+            if item["stale"]:
+                db.execute("UPDATE concept_gap_proposals SET state='stale', updated_at=? WHERE id=?",
+                           (utc_now(), item["id"]))
+                continue
+            if scope == "topic":
+                item["destination_area"] = item["area"]
+            item["evidence"] = ("Compared against original captures." if scope == "concept"
+                                else "Based on the topic outline; check Sources before adding.")
+            proposals.append(item)
+    return {"success": True, "proposals": proposals}
+
+
+def accept_gap_proposal_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    proposal_id = str(payload.get("proposal_id") or "").strip()
+    if not proposal_id:
+        raise ValueError("Choose a suggestion to add.")
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        proposal = db.execute("SELECT * FROM concept_gap_proposals WHERE id=?", (proposal_id,)).fetchone()
+        if proposal is None:
+            raise ValueError("Suggestion not found.")
+        _validate_gap_scope(proposal, payload)
+        if proposal["state"] == "accepted":
+            return {"success": True, "state": "accepted", "proposal_id": proposal_id}
+        if proposal["state"] != "suggested":
+            raise ValueError("This suggestion is no longer available.")
+        records = _gap_scope_inventory(db, proposal["scope_kind"], proposal["topic"],
+                                       proposal["area"] if proposal["scope_kind"] == "area" else "",
+                                       proposal["concept_id"] or "")
+        if _gap_revision(records) != proposal["base_revision"]:
+            db.execute("UPDATE concept_gap_proposals SET state='stale', updated_at=? WHERE id=?",
+                       (utc_now(), proposal_id))
+            raise ValueError("This scope changed. Run Fill gaps again for fresh suggestions.")
+        now = utc_now()
+        if proposal["proposal_kind"] == "block":
+            concept = db.execute("SELECT id, updated_at FROM concepts WHERE id=? AND deleted_at IS NULL",
+                                 (proposal["target_concept_id"],)).fetchone()
+            if concept is None or proposal["target_concept_id"] != proposal["concept_id"]:
+                raise ValueError("The suggestion no longer targets this concept.")
+            now = _monotonic_utc_after(concept["updated_at"])
+            block_id = str(uuid.uuid4())
+            order = db.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM blocks WHERE concept_id=?",
+                               (proposal["target_concept_id"],)).fetchone()[0]
+            db.execute("""INSERT INTO blocks
+                (id, concept_id, kind, role, content, sort_order, in_recall, created_at, updated_at)
+                VALUES (?, ?, ?, 'additional', ?, ?, 0, ?, ?)""",
+                       (block_id, proposal["target_concept_id"], proposal["block_kind"],
+                        proposal["content"], order, now, now))
+            db.execute("UPDATE concepts SET updated_at=? WHERE id=?", (now, proposal["target_concept_id"]))
+            accepted_concept_id = proposal["target_concept_id"]
+        else:
+            accepted_concept_id = str(uuid.uuid4())
+            block_id = str(uuid.uuid4())
+            db.execute("""INSERT INTO concepts
+                (id, topic, area, title, definition, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       (accepted_concept_id, proposal["topic"], proposal["area"], proposal["title"],
+                        proposal["content"], now, now))
+            db.execute("""INSERT INTO blocks
+                (id, concept_id, kind, role, content, sort_order, in_recall, created_at, updated_at)
+                VALUES (?, ?, 'rule', 'primary', ?, 1, 0, ?, ?)""",
+                       (block_id, accepted_concept_id, proposal["content"], now, now))
+        db.execute("""UPDATE concept_gap_proposals SET state='accepted', accepted_concept_id=?,
+            accepted_block_id=?, updated_at=? WHERE id=?""",
+                   (accepted_concept_id, block_id, now, proposal_id))
+        revision_area = proposal["area"] if proposal["scope_kind"] == "area" else ""
+        updated_revision = _gap_revision(_gap_scope_inventory(
+            db, proposal["scope_kind"], proposal["topic"], revision_area,
+            proposal["concept_id"] or ""))
+        update_sql = """UPDATE concept_gap_proposals SET base_revision=?, updated_at=?
+            WHERE scope_kind=? AND topic=? COLLATE NOCASE AND COALESCE(concept_id,'')=?
+            AND state='suggested'"""
+        update_params: list[Any] = [updated_revision, now, proposal["scope_kind"],
+                                    proposal["topic"], proposal["concept_id"] or ""]
+        if proposal["scope_kind"] == "area":
+            update_sql += " AND area=? COLLATE NOCASE"
+            update_params.append(proposal["area"])
+        db.execute(update_sql, update_params)
+    return {"success": True, "state": "accepted", "proposal_id": proposal_id,
+            "concept_id": accepted_concept_id, "block_id": block_id}
+
+
+def dismiss_gap_proposal_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    proposal_id = str(payload.get("proposal_id") or "").strip()
+    with database() as db:
+        proposal = db.execute("SELECT * FROM concept_gap_proposals WHERE id=?", (proposal_id,)).fetchone()
+        if proposal is None:
+            raise ValueError("Suggestion not found.")
+        _validate_gap_scope(proposal, payload)
+        changed = db.execute("UPDATE concept_gap_proposals SET state='dismissed', updated_at=? "
+                             "WHERE id=? AND state='suggested'", (utc_now(), proposal_id)).rowcount
+        if not changed:
+            raise ValueError("This suggestion is no longer pending.")
+    return {"success": True, "state": "dismissed", "proposal_id": proposal_id}
+
+
+def accept_all_gap_proposals_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    proposal_ids = payload.get("proposal_ids")
+    if not isinstance(proposal_ids, list) or not proposal_ids:
+        raise ValueError("There are no suggestions to add.")
+    scope = str(payload.get("scope") or "").strip().lower()
+    topic = str(payload.get("topic") or "").strip()
+    area = str(payload.get("area") or "").strip()
+    cid = str(payload.get("id") or "").strip()
+    if scope not in {"concept", "area", "topic"}:
+        raise ValueError("Choose the scope for this batch.")
+    with database() as db:
+        for proposal_id in proposal_ids[:20]:
+            proposal = db.execute("SELECT * FROM concept_gap_proposals WHERE id=?", (str(proposal_id),)).fetchone()
+            if proposal is None:
+                raise ValueError("A suggestion in this batch no longer exists.")
+            _validate_gap_scope(proposal, {"scope": scope, "topic": topic, "area": area, "id": cid})
+    accepted = []
+    for proposal_id in proposal_ids[:20]:
+        accepted.append(accept_gap_proposal_rpc({"proposal_id": proposal_id, "scope": scope,
+                                                 "topic": topic, "area": area, "id": cid}))
+    return {"success": True, "accepted": accepted, "count": len(accepted)}
+
+
+def undo_gap_proposal_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    proposal_id = str(payload.get("proposal_id") or "").strip()
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        proposal = db.execute("SELECT * FROM concept_gap_proposals WHERE id=?", (proposal_id,)).fetchone()
+        if proposal is None or proposal["state"] != "accepted":
+            raise ValueError("This addition can no longer be undone.")
+        _validate_gap_scope(proposal, payload)
+        cid, bid = proposal["accepted_concept_id"], proposal["accepted_block_id"]
+        if proposal["proposal_kind"] == "block":
+            block = db.execute("SELECT concept_id, kind, role, content FROM blocks WHERE id=?", (bid,)).fetchone()
+            concept = db.execute("SELECT updated_at FROM concepts WHERE id=?", (cid,)).fetchone()
+            if (block is None or concept is None or block["concept_id"] != cid
+                    or block["content"] != proposal["content"] or block["kind"] != proposal["block_kind"]
+                    or block["role"] != "additional"):
+                raise ValueError("This note changed after the suggestion was added; undo it manually.")
+            db.execute("DELETE FROM blocks WHERE id=?", (bid,))
+            current = db.execute("SELECT updated_at FROM concepts WHERE id=?", (cid,)).fetchone()
+            db.execute("UPDATE concepts SET updated_at=? WHERE id=?",
+                       (_monotonic_utc_after(current["updated_at"]), cid))
+        else:
+            concept = db.execute("SELECT * FROM concepts WHERE id=?", (cid,)).fetchone()
+            block_count = db.execute("SELECT count(*) FROM blocks WHERE concept_id=?", (cid,)).fetchone()[0]
+            source_count = db.execute("SELECT count(*) FROM block_sources s JOIN blocks b ON b.id=s.block_id "
+                                      "WHERE b.concept_id=?", (cid,)).fetchone()[0]
+            if (concept is None or concept["title"] != proposal["title"]
+                    or concept["definition"] != proposal["content"] or concept["topic"] != proposal["topic"]
+                    or concept["area"] != proposal["area"] or block_count != 1 or source_count):
+                raise ValueError("This concept changed after the suggestion was added; undo it manually.")
+            db.execute("DELETE FROM concepts WHERE id=?", (cid,))
+        revision_area = proposal["area"] if proposal["scope_kind"] == "area" else ""
+        updated_revision = _gap_revision(_gap_scope_inventory(
+            db, proposal["scope_kind"], proposal["topic"], revision_area,
+            proposal["concept_id"] or ""))
+        update_sql = """UPDATE concept_gap_proposals SET base_revision=?, updated_at=?
+            WHERE scope_kind=? AND topic=? COLLATE NOCASE AND COALESCE(concept_id,'')=?
+            AND state='suggested'"""
+        update_params: list[Any] = [updated_revision, utc_now(), proposal["scope_kind"],
+                                    proposal["topic"], proposal["concept_id"] or ""]
+        if proposal["scope_kind"] == "area":
+            update_sql += " AND area=? COLLATE NOCASE"
+            update_params.append(proposal["area"])
+        db.execute(update_sql, update_params)
+        db.execute("UPDATE concept_gap_proposals SET state='undone', updated_at=? WHERE id=?",
+                   (utc_now(), proposal_id))
+    return {"success": True, "state": "undone", "proposal_id": proposal_id,
+            "concept_id": cid, "block_id": bid}
 
 
 def export_concept_markdown(concept_id: str, mode: str = "understand") -> str:
@@ -3369,6 +3658,11 @@ COMMANDS = {
     "dismiss-concept-detail": dismiss_concept_detail_rpc,
     "coverage-inventory": coverage_inventory_rpc,
     "suggest-gaps": suggest_gaps_rpc,
+    "list-gap-proposals": list_gap_proposals_rpc,
+    "accept-gap-proposal": accept_gap_proposal_rpc,
+    "dismiss-gap-proposal": dismiss_gap_proposal_rpc,
+    "accept-all-gap-proposals": accept_all_gap_proposals_rpc,
+    "undo-gap-proposal": undo_gap_proposal_rpc,
 }
 
 
