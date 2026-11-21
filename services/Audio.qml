@@ -8,6 +8,7 @@ import Caelestia
 import Caelestia.Config
 import Caelestia.I18n
 import Caelestia.Services
+import Caelestia.State
 
 Singleton {
     id: root
@@ -125,6 +126,36 @@ Singleton {
         root.sinks = newSinks;
         root.sources = newSources;
         root.streams = newStreams;
+
+        if (PersistentState.doNotDisturb)
+            root.applyDndMute();
+    }
+
+    function applyDndMute(): void {
+        if (!PersistentState.doNotDisturb)
+            return;
+
+        for (const stream of root.streams) {
+            if (!stream?.audio)
+                continue;
+            const role = String(stream.properties["media.role"] || "").toLowerCase();
+            const name = String(stream.properties["media.name"] || "").toLowerCase();
+            const app = String(stream.properties["application.name"] || "").toLowerCase();
+            if (role === "notification" || role === "event" || role === "alert" ||
+                name.includes("notification") || name.includes("bell") || name.includes("alert") ||
+                app.includes("canberra") || app.includes("gsound")) {
+                stream.audio.muted = true;
+            }
+        }
+    }
+
+    Connections {
+        function onDoNotDisturbChanged(): void {
+            if (PersistentState.doNotDisturb)
+                root.applyDndMute();
+        }
+
+        target: PersistentState
     }
 
     onSinkChanged: {

@@ -43,15 +43,28 @@ Singleton {
             saveTimer.restart();
     }
 
+    function syncGsettingsDnd(): void {
+        const dnd = PersistentState.doNotDisturb;
+        Quickshell.execDetached(["gsettings", "set", "org.gnome.desktop.sound", "event-sounds", dnd ? "false" : "true"]);
+        Quickshell.execDetached(["gsettings", "set", "org.gnome.desktop.notifications", "show-banners", dnd ? "false" : "true"]);
+        Quickshell.execDetached(["gsettings", "set", "org.erikreider.swaync", "dnd-state", dnd ? "true" : "false"]);
+    }
+
+    Component.onCompleted: {
+        root.syncGsettingsDnd();
+    }
+
     Connections {
         function onDoNotDisturbChanged(): void {
+            root.syncGsettingsDnd();
+
             if (!GlobalConfig.utilities.toasts.dndChanged)
                 return;
 
             if (PersistentState.doNotDisturb)
-                Toaster.toast(Tr.tr("Do not disturb enabled"), Tr.tr("Popup notifications are now disabled"), "do_not_disturb_on");
+                Toaster.toast(Tr.tr("Do not disturb enabled"), Tr.tr("Popup notifications and sounds are silenced"), "do_not_disturb_on");
             else
-                Toaster.toast(Tr.tr("Do not disturb disabled"), Tr.tr("Popup notifications are now enabled"), "do_not_disturb_off");
+                Toaster.toast(Tr.tr("Do not disturb disabled"), Tr.tr("Popup notifications and sounds are enabled"), "do_not_disturb_off");
         }
 
         target: PersistentState

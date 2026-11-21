@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Caelestia
 import Caelestia.I18n
+import Caelestia.State
 import qs.services
 import qs.utils
 
@@ -16,6 +17,27 @@ Singleton {
     property int remainingSeconds: 35 * 60
     property int totalDurationSeconds: 35 * 60
     property string mode: "work" // "work" | "break" | "stopwatch" | "custom"
+
+    // ── Focus / DND Auto-management ──────────────────────────────
+    property bool _dndManagedByTimer: false
+
+    function _syncFocusMode(): void {
+        const shouldBeOn = root.isRunning && root.mode === "work";
+        if (shouldBeOn) {
+            root._dndManagedByTimer = true;
+            if (!PersistentState.doNotDisturb) {
+                PersistentState.doNotDisturb = true;
+            }
+        } else if (root._dndManagedByTimer) {
+            root._dndManagedByTimer = false;
+            if (PersistentState.doNotDisturb) {
+                PersistentState.doNotDisturb = false;
+            }
+        }
+    }
+
+    onIsRunningChanged: _syncFocusMode()
+    onModeChanged: _syncFocusMode()
 
     // ── Stopwatch elapsed counter ────────────────────────────────
     property int elapsedSeconds: 0
@@ -152,6 +174,12 @@ Singleton {
     Component.onCompleted: {
         checkDayRollover();
         root._loadObjectives();
+    }
+
+    Component.onDestruction: {
+        if (_dndManagedByTimer && PersistentState.doNotDisturb) {
+            PersistentState.doNotDisturb = false;
+        }
     }
 
     function onTimerFinished(): void {
@@ -368,5 +396,16 @@ Singleton {
         path: `${Paths.state}/timer_objectives.json`
         printErrors: false
         onLoaded: root._loadObjectives()
+    }
+
+    IpcHandler {
+        function toggle(): void { root.toggle(); }
+        function start(): void { root.start(); }
+        function pause(): void { root.pause(); }
+        function reset(): void { root.reset(); }
+        function isRunning(): bool { return root.isRunning; }
+        function getMode(): string { return root.mode; }
+
+        target: "timer"
     }
 }
