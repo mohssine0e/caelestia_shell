@@ -36,7 +36,8 @@ Singleton {
     property string _activeOrganizeId: ""
     property string _rerunOrganizeId: ""
     property var _activeDraftRequest: ({})
-    property var _queuedDraftRequest: null
+    property var _draftQueue: []
+    property var _draftIds: ({})
     property string _createOutput: ""
     property string _draftOutput: ""
     property string _listOutput: ""
@@ -76,35 +77,78 @@ Singleton {
     property var _conceptsListInput: ({})
     property var _conceptGetInput: ({})
     property var _depthInput: ({})
+    property var _expansionInput: ({})
     property var _searchInput: ({})
+    property var _exportInput: ({})
+    property var _seenQueue: []
+    property string _activeSeenId: ""
+    property bool _pendingSync: false
+    property bool _pendingRefresh: false
 
     function listConcepts(topic, area): void {
         _conceptsListInput = { topic: topic || "", area: area || "" }
+        if (conceptsListProc.running) return
         conceptsListProc.command = ["python3", root.backendPath, "list-concepts"]
         conceptsListProc.running = true
     }
 
     function getConcept(conceptId, mode): void {
         _conceptGetInput = { id: conceptId, mode: mode || "" }
+        if (conceptGetProc.running) return
         conceptGetProc.command = ["python3", root.backendPath, "read-concept"]
         conceptGetProc.running = true
     }
 
     function setConceptDepth(conceptId, depth): void {
         _depthInput = { id: conceptId, depth: depth }
-        depthProc.command = ["python3", root.backendPath, "set-concept-depth"]
+        if (depthProc.running) return
         depthProc.running = true
+    }
+
+    function setConceptExpansion(conceptId, expanded): void {
+        root._expansionInput = { id: conceptId, expanded: expanded === true }
+        if (expansionProc.running) return
+        expansionProc.running = true
     }
 
     function searchConcepts(query): void {
         _searchInput = { query: query }
+        if (searchProc.running) return
         searchProc.command = ["python3", root.backendPath, "search-concepts"]
         searchProc.running = true
     }
 
+    function copyConcept(conceptId): void {
+        _exportInput = { id: conceptId, mode: "understand" }
+        if (exportProc.running) return
+        exportProc.running = true
+    }
+
     function syncLegacyNotes(): void {
+        if (syncLegacyProc.running) {
+            root._pendingSync = true
+            return
+        }
         syncLegacyProc.command = ["python3", root.backendPath, "sync-legacy-notes"]
         syncLegacyProc.running = true
+    }
+
+    function markConceptSeen(conceptId): void {
+        const id = String(conceptId || "")
+        if (!id) return
+        root.concepts = root.concepts.map(c => c.id === id ? Object.assign({}, c, { unseen: 0 }) : c)
+        const queue = root._seenQueue.slice()
+        if (id !== root._activeSeenId && queue.indexOf(id) < 0) queue.push(id)
+        root._seenQueue = queue
+        root._startNextSeen()
+    }
+
+    function _startNextSeen(): void {
+        if (seenProc.running || root._seenQueue.length === 0) return
+        const queue = root._seenQueue.slice()
+        root._activeSeenId = queue.shift()
+        root._seenQueue = queue
+        seenProc.running = true
     }
 
     function parseResult(text): var {
@@ -136,11 +180,14 @@ Singleton {
     }
 
     function smartUpsert(content): bool {
-        return root.create(content, true)
+        return root.save(content, true)
     }
 
     function refresh(): void {
-        if (listProc.running) return
+        if (listProc.running) {
+            root._pendingRefresh = true
+            return
+        }
         root.loading = true
         root._listOutput = ""
         listProc.command = ["python3", root.backendPath, "list"]
@@ -166,19 +213,24 @@ Singleton {
         const content = String(rawContent || "").trim()
         if (!content) return false
         const id = String(noteId || "")
+        const token = String(clientToken || "")
+        const knownId = id || root._draftIds[token] || ""
         const request = {
-            action: id ? "update" : (analyzeAfterSave === true ? "smart-upsert" : "create"),
-            payload: id ? { id: id, raw_content: content } : { raw_content: content },
-            client_token: String(clientToken || ""),
+            action: knownId ? "update" : "create",
+            payload: knownId ? { id: knownId, raw_content: content } : { raw_content: content, client_token: token },
+            client_token: token,
             analyze: analyzeAfterSave === true
         }
-        if (draftProc.running) {
-            if (root._queuedDraftRequest && root._queuedDraftRequest.client_token === request.client_token)
-                request.analyze = request.analyze || root._queuedDraftRequest.analyze
-            root._queuedDraftRequest = request
+        const queue = root._draftQueue.slice()
+        const existing = queue.findIndex(item => item.client_token === token)
+        if (existing >= 0) {
+            request.analyze = request.analyze || queue[existing].analyze
+            queue[existing] = request
         } else {
-            root._startDraftSave(request)
+            queue.push(request)
         }
+        root._draftQueue = queue
+        root._startNextDraftSave()
         return true
     }
 
@@ -202,10 +254,23 @@ Singleton {
     }
 
     function _startDraftSave(request): void {
+        const knownId = root._draftIds[request.client_token] || ""
+        if (knownId && request.action === "create") {
+            request.action = "update"
+            request.payload = { id: knownId, raw_content: request.payload.raw_content }
+        }
         root._activeDraftRequest = request
         root._draftOutput = ""
         draftProc.command = ["python3", root.backendPath, request.action]
         draftProc.running = true
+    }
+
+    function _startNextDraftSave(): void {
+        if (draftProc.running || root._draftQueue.length === 0) return
+        const queue = root._draftQueue.slice()
+        const next = queue.shift()
+        root._draftQueue = queue
+        root._startDraftSave(next)
     }
 
     function queueOrganization(noteId): void {
@@ -350,6 +415,10 @@ Singleton {
             } else {
                 root.errorMessage = result.error || qsTr("Notes could not be loaded.")
             }
+            if (root._pendingRefresh) {
+                root._pendingRefresh = false
+                Qt.callLater(() => root.refresh())
+            }
         }
     }
 
@@ -365,7 +434,10 @@ Singleton {
             const request = root._activeDraftRequest
             const result = root.parseResult(root._draftOutput)
             root._draftOutput = ""
-            if (result.success && result.note) {
+            if (exitCode === 0 && result.success && result.note) {
+                const ids = Object.assign({}, root._draftIds)
+                ids[request.client_token] = result.note.id
+                root._draftIds = ids
                 root.draftSaved(result.note, request.client_token || "")
                 if (request.analyze === true) root.queueOrganization(result.note.id)
                 root.refresh()
@@ -373,16 +445,7 @@ Singleton {
                 const message = result.error || qsTr("The note could not be saved.")
                 root.draftSaveFailed(message, request.client_token || "")
             }
-            const queued = root._queuedDraftRequest
-            root._queuedDraftRequest = null
-            if (queued) {
-                if (result.success && result.note && request.action === "create"
-                        && queued.action === "create" && queued.client_token === request.client_token) {
-                    queued.action = "update"
-                    queued.payload.id = result.note.id
-                }
-                root._startDraftSave(queued)
-            }
+            Qt.callLater(() => root._startNextDraftSave())
         }
     }
 
@@ -461,6 +524,7 @@ Singleton {
             if (rerun) root._rerunOrganizeId = ""
             if (result.success) {
                 root.organizationFinished(noteId, true, "")
+                root.syncLegacyNotes()
             } else if (!result.stale) {
                 const message = result.error || qsTr("Note analysis failed. Your raw note is safe.")
                 root.organizationFinished(noteId, false, message)
@@ -523,51 +587,138 @@ Singleton {
     Process {
         id: conceptsListProc
         stdinEnabled: true
-        onStarted: write(JSON.stringify(root._conceptsListInput) + "\n")
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._conceptsListInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
         stdout: StdioCollector {
             onStreamFinished: {
                 const res = root.parseResult(text)
-                if (res.success && Array.isArray(res.concepts)) {
+                if (res.success && Array.isArray(res.concepts)
+                        && conceptsListProc.sentInput.topic === root._conceptsListInput.topic
+                        && conceptsListProc.sentInput.area === root._conceptsListInput.area) {
                     root.concepts = res.concepts
                     root.conceptsLoaded(res.concepts)
                 }
             }
+        }
+        onExited: {
+            if (sentInput.topic !== root._conceptsListInput.topic || sentInput.area !== root._conceptsListInput.area)
+                Qt.callLater(() => root.listConcepts(root._conceptsListInput.topic, root._conceptsListInput.area))
         }
     }
 
     Process {
         id: conceptGetProc
         stdinEnabled: true
-        onStarted: write(JSON.stringify(root._conceptGetInput) + "\n")
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._conceptGetInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
         stdout: StdioCollector {
             onStreamFinished: {
                 const res = root.parseResult(text)
-                if (res.success) {
+                if (res.success && conceptGetProc.sentInput.id === root._conceptGetInput.id
+                        && conceptGetProc.sentInput.mode === root._conceptGetInput.mode) {
                     root.currentConceptView = res
                     root.conceptViewLoaded(res)
                 }
             }
         }
+        onExited: {
+            if (sentInput.id !== root._conceptGetInput.id || sentInput.mode !== root._conceptGetInput.mode)
+                Qt.callLater(() => root.getConcept(root._conceptGetInput.id, root._conceptGetInput.mode))
+        }
     }
 
     Process {
         id: depthProc
+        command: ["python3", root.backendPath, "set-concept-depth"]
         stdinEnabled: true
-        onStarted: write(JSON.stringify(root._depthInput) + "\n")
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._depthInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
+        onExited: {
+            if (sentInput.id !== root._depthInput.id || sentInput.depth !== root._depthInput.depth)
+                Qt.callLater(() => root.setConceptDepth(root._depthInput.id, root._depthInput.depth))
+        }
+    }
+
+    Process {
+        id: expansionProc
+        command: ["python3", root.backendPath, "set-concept-expansion"]
+        stdinEnabled: true
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._expansionInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
+        onExited: {
+            if (sentInput.id !== root._expansionInput.id || sentInput.expanded !== root._expansionInput.expanded)
+                Qt.callLater(() => root.setConceptExpansion(root._expansionInput.id, root._expansionInput.expanded))
+        }
     }
 
     Process {
         id: searchProc
         stdinEnabled: true
-        onStarted: write(JSON.stringify(root._searchInput) + "\n")
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._searchInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
         stdout: StdioCollector {
             onStreamFinished: {
                 const res = root.parseResult(text)
-                if (res.success && Array.isArray(res.results)) {
+                if (res.success && Array.isArray(res.results)
+                        && searchProc.sentInput.query === root._searchInput.query) {
                     root.searchResults = res.results
                     root.searchCompleted(res.results)
                 }
             }
+        }
+        onExited: {
+            if (sentInput.query !== root._searchInput.query)
+                Qt.callLater(() => root.searchConcepts(root._searchInput.query))
+        }
+    }
+
+    Process {
+        id: seenProc
+        command: ["python3", root.backendPath, "mark-concept-seen"]
+        stdinEnabled: true
+        onStarted: write(JSON.stringify({ id: root._activeSeenId }) + "\n")
+        onExited: {
+            root._activeSeenId = ""
+            Qt.callLater(() => root._startNextSeen())
+        }
+    }
+
+    Process {
+        id: exportProc
+        command: ["python3", root.backendPath, "export-concept"]
+        stdinEnabled: true
+        property var sentInput: ({})
+        onStarted: {
+            sentInput = root._exportInput
+            write(JSON.stringify(sentInput) + "\n")
+        }
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const res = root.parseResult(text)
+                if (res.success && exportProc.sentInput.id === root._exportInput.id) {
+                    Quickshell.clipboardText = res.markdown || ""
+                    Toaster.toast(qsTr("Copied"), qsTr("Concept copied as Markdown"), "content_copy")
+                }
+            }
+        }
+        onExited: {
+            if (sentInput.id !== root._exportInput.id)
+                Qt.callLater(() => root.copyConcept(root._exportInput.id))
         }
     }
 
@@ -577,7 +728,14 @@ Singleton {
         onStarted: write("{}\n")
         stdout: StdioCollector {
             onStreamFinished: {
-                root.listConcepts("", "")
+                const res = root.parseResult(text)
+                if (res.success) root.listConcepts("", "")
+            }
+        }
+        onExited: {
+            if (root._pendingSync) {
+                root._pendingSync = false
+                Qt.callLater(() => root.syncLegacyNotes())
             }
         }
     }

@@ -2,8 +2,10 @@
 
 **Owner:** implementation agent working with Mohssine  
 **Created:** 2026-11-20  
-**State:** planned; application implementation has not started  
-**Next task:** P0.1  
+**State:** in progress; handbook UI repaired and focused explanations implemented
+
+**Next task:** P4.2, then the remaining Phase 1/3 verification gaps
+
 **Primary requirement:** understand deeply now, look up quickly later.
 
 This is the authoritative scope and progress checklist. The other documents in this folder provide audit evidence, examples, and design rationale. Update completion status here as work proceeds.
@@ -188,7 +190,7 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 - [x] **P1.1** Save every capture before AI work; acknowledge only after durable persistence.
 - [x] **P1.2** Unify sensitive-content, personal/idea, noise, and language policies across all entry points.
-- [ ] **P1.3** Replace the single overwriteable pending draft with session/revision-safe scheduling and recoverable unsaved text.
+- [ ] **P1.3** Replace the single overwriteable pending draft with session/revision-safe scheduling and recoverable unsaved text. Queue and disk recovery are implemented; restart recovery still needs a manual UI check.
 - [x] **P1.4** Reject invalid merge targets and accidental cross-topic merges; remove the “newest note” fallback.
 - [x] **P1.5** Preserve incoming sources during merge, update all derived structures atomically, and support undo.
 - [x] **P1.6** Stop broad content rewriting during database reads; use explicit idempotent migrations.
@@ -211,19 +213,19 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 - [x] **P3.1** Extract focused QML components for navigation, concept page, blocks, proposals, and Sources.
 - [x] **P3.2** Implement stable topic/area navigation, grouped All index, concept page, and Back history.
-- [x] **P3.3** Add Understand/Recall with saved per-concept preference and expansion state.
-- [x] **P3.4** Implement local search results that open an exact block, including raw-source matches.
+- [x] **P3.3** Add Understand/Recall with saved per-concept preference and expansion state. Both persist per concept; opening and switching modes leave the content revision unchanged. Verified in `tests/test_notes_upgrade_recovery.py`.
+- [ ] **P3.4** Implement local search results that open an exact block, including raw-source matches. Backend source spans and QML navigation are implemented; manual click-through is still needed.
 - [x] **P3.5** Simplify the header/actions; preserve dragging, close behavior, search shortcut, and text selection.
 - [x] **P3.6** Make commands/code responsive with correct copy behavior and expected-result presentation.
-- [x] **P3.7** Add unseen-revision indicators and exact navigation to changed content.
+- [ ] **P3.7** Add unseen-revision indicators and exact navigation to changed content. Concept/topic/area dots work; block-level revision destinations remain.
 
-**Gate:** learn pass-by-value in Understand, reopen it in Recall, and find the exact `computeIfAbsent` example through search. Verify 600×400, 900×620, and 1200×800 plus display scaling and mixed RTL/LTR text. Verified on 2026-11-21 in tests/test_notes_upgrade_p3.py, live QML load, and database pilot.
+**Gate:** learn pass-by-value in Understand, reopen it in Recall, and find the exact `computeIfAbsent` example through search. Verify 600×400, 900×620, and 1200×800 plus display scaling and mixed RTL/LTR text. The QML harness loaded at all three sizes; click-through, display scaling, and mixed RTL/LTR remain to check.
 
-**First usable release:** phases 0–3. Completed on 2026-11-21.
+**First usable release:** the core handbook is available; the Phase 3 gate above remains open.
 
 ### Phase 4 — Teaching and useful gap completion
 
-- [ ] **P4.1** Add contextual Why, Name, Counterexample, and Compare using existing content before generation.
+- [x] **P4.1** Add contextual Why, Name, Counterexample, and Compare using existing content before generation. A saved answer opens locally; missing answers become reviewable proposals. Verified with `tests/test_notes_concept_details.py` and QML load at 600×400 and 1200×800.
 - [ ] **P4.2** Implement scope-aware coverage inventory and missing-role detection.
 - [ ] **P4.3** Let All propose missing areas while selected-scope requests remain confined.
 - [ ] **P4.4** Add ranked suggestion batches, accept/dismiss/accept-all, evidence details, and undo.
@@ -276,14 +278,14 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | P3.1 - P3.7 (Phase 3 complete - First Usable Release) |
-| Next task | P4.1 — Add contextual Why, Name, Counterexample, and Compare |
-| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: pending commit |
-| Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, modules/notes/HandbookNav.qml, modules/notes/ConceptIndex.qml, modules/notes/ConceptPage.qml, modules/notes/HandbookSearchResults.qml, modules/notes/NotesViewLegacy.qml |
-| Baseline checks | 173 tests pass (155 existing + 4 P0 + 4 P1 + 5 P2 + 5 P3) |
-| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_baseline_20261120.sqlite3 |
-| Migration state | Schema v13 active; 104 concepts synced into SQLite; live Quick Notes window verified |
-| Remaining blockers | None |
+| Last completed task | P4.1 focused explanations; Phase 1/3 follow-up checks remain open |
+| Next task | P4.2 coverage inventory; manually verify capture recovery and search destinations |
+| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f; takeover: see current Notes repair commit |
+| Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, HandbookNav.qml, ConceptIndex.qml, ConceptPage.qml, ConceptDetailActions.qml, HandbookSearchResults.qml, QuickNote.qml |
+| Baseline checks | 183 tests pass including focused explanation, capture retry, source search, reading preferences, and migration repair tests; isolated QML load at 600×400 and 1200×800 |
+| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_pre_repair_20261121T145050Z.sqlite3 (also the original 2026-11-20 baseline) |
+| Migration state | Schema v14 active; 115 original captures and 104 concept IDs preserved; 73 live concept metadata/command repairs; original raw capture hash unchanged |
+| Remaining blockers | Exact block-level unread navigation, UI click-through, scoped gap inventory, and later phase work |
 | Product direction | Confirmed: understand deeply now, look up quickly later |
 
 For every completed phase, append its changed files, verification results, remaining limitations, and the next task. Keep this record current so a later session can continue without guessing.

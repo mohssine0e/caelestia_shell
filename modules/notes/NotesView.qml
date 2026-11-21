@@ -1,9 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
-import Quickshell
 import Caelestia.Config
 import qs.components
 import qs.components.controls
@@ -11,121 +9,152 @@ import qs.services
 
 Item {
     id: win
-
     signal closeRequested()
     signal moveRequested()
 
-    property string viewMode: "index" // "index" | "concept" | "search" | "legacy"
-    property string selectedTopic: "Java"
+    property string viewMode: "index" // index | concept | search | legacy
+    property string selectedTopic: "All"
     property string selectedArea: "All"
     property string activeConceptId: ""
     property string highlightBlockId: ""
+    property string highlightSourceId: ""
+    property int highlightSourceStart: -1
+    property int highlightSourceEnd: -1
+    property string searchQuery: ""
     property var historyStack: []
 
-    // Distinct list of topics
     readonly property var availableTopics: {
-        const set = new Set(["Java", "Git", "Docker", "RabbitMQ"])
+        const names = new Map()
         for (const c of Notes.concepts || []) {
-            if (c.topic) set.add(c.topic)
+            const name = String(c.topic || "").trim()
+            if (name) names.set(name.toLowerCase(), name)
         }
-        for (const n of Notes.notes || []) {
-            if (n.topic && n.category !== "noise" && n.keep_decision !== "skip") {
-                set.add(n.topic)
-            }
-        }
-        return Array.from(set)
+        return ["All"].concat(Array.from(names.values()).sort((a, b) => a.localeCompare(b)))
     }
-
-    // Distinct list of areas for current topic
     readonly property var availableAreas: {
-        const set = new Set(["All"])
+        if (win.selectedTopic === "All") return ["All"]
+        const names = new Map()
         for (const c of Notes.concepts || []) {
-            if ((c.topic || "").toLowerCase() === win.selectedTopic.toLowerCase() && c.area) {
-                set.add(c.area)
-            }
+            if (String(c.topic || "").toLowerCase() !== win.selectedTopic.toLowerCase()) continue
+            const name = String(c.area || "").trim()
+            if (name) names.set(name.toLowerCase(), name)
         }
-        return Array.from(set)
+        return ["All"].concat(Array.from(names.values()).sort((a, b) => a.localeCompare(b)))
+    }
+    readonly property var unseenMap: {
+        const map = ({})
+        for (const c of Notes.concepts || [])
+            if (c.unseen) map[String(c.topic || "").toLowerCase()] = true
+        return map
+    }
+    readonly property var unseenAreas: {
+        const map = ({})
+        for (const c of Notes.concepts || []) {
+            if (c.unseen && String(c.topic || "").toLowerCase() === win.selectedTopic.toLowerCase())
+                map[String(c.area || "").toLowerCase()] = true
+        }
+        return map
     }
 
     function pushHistory(): void {
-        win.historyStack.push({
-            viewMode: win.viewMode,
-            topic: win.selectedTopic,
-            area: win.selectedArea,
-            conceptId: win.activeConceptId,
-            highlightBlockId: win.highlightBlockId
-        })
+        win.historyStack = win.historyStack.concat([{
+            viewMode: win.viewMode, topic: win.selectedTopic, area: win.selectedArea,
+            conceptId: win.activeConceptId, blockId: win.highlightBlockId,
+            sourceId: win.highlightSourceId,
+            sourceStart: win.highlightSourceStart, sourceEnd: win.highlightSourceEnd
+        }])
     }
-
     function popHistory(): void {
-        if (win.historyStack.length > 0) {
-            const prev = win.historyStack.pop()
-            win.selectedTopic = prev.topic
-            win.selectedArea = prev.area
-            win.activeConceptId = prev.conceptId
-            win.highlightBlockId = prev.highlightBlockId
-            win.viewMode = prev.viewMode
-            if (win.viewMode === "concept" && win.activeConceptId) {
-                Notes.getConcept(win.activeConceptId, "")
-            }
-        } else {
+        if (!win.historyStack.length) {
             win.viewMode = "index"
-            win.highlightBlockId = ""
+            return
         }
+        const stack = win.historyStack.slice()
+        const previous = stack.pop()
+        win.historyStack = stack
+        win.selectedTopic = previous.topic
+        win.selectedArea = previous.area
+        win.activeConceptId = previous.conceptId
+        win.highlightBlockId = previous.blockId
+        win.highlightSourceId = previous.sourceId
+        win.highlightSourceStart = previous.sourceStart
+        win.highlightSourceEnd = previous.sourceEnd
+        win.viewMode = previous.viewMode
+        if (previous.viewMode === "concept" && previous.conceptId)
+            Notes.getConcept(previous.conceptId, "")
     }
-
-    function openConcept(concept, blockId): void {
+    function chooseTopic(topic): void {
+        win.selectedTopic = topic
+        win.selectedArea = "All"
+        win.viewMode = "index"
+    }
+    function openConcept(concept, blockId, sourceId, sourceStart, sourceEnd): void {
+        const id = String(concept.id || concept.concept_id || "")
+        if (!id) return
         win.pushHistory()
-        win.activeConceptId = concept.id || concept.concept_id
+        win.activeConceptId = id
         win.highlightBlockId = blockId || ""
+        win.highlightSourceId = sourceId || ""
+        win.highlightSourceStart = sourceStart === undefined ? -1 : sourceStart
+        win.highlightSourceEnd = sourceEnd === undefined ? -1 : sourceEnd
         if (concept.topic) win.selectedTopic = concept.topic
         if (concept.area) win.selectedArea = concept.area
-        Notes.getConcept(win.activeConceptId, "")
         win.viewMode = "concept"
+        Notes.getConcept(id, blockId ? "understand" : "")
     }
-
-    Component.onCompleted: {
-        Notes.syncLegacyNotes()
-        Notes.listConcepts(win.selectedTopic, "")
-    }
-
-    onSelectedTopicChanged: {
-        win.selectedArea = "All"
-        Notes.listConcepts(win.selectedTopic, "")
-        if (win.viewMode !== "search" && win.viewMode !== "legacy") {
-            win.viewMode = "index"
-        }
-    }
-
-    onSelectedAreaChanged: {
-        if (win.viewMode !== "search" && win.viewMode !== "legacy") {
-            win.viewMode = "index"
-        }
-    }
-
-    // Focus & Global Keys Handling
-    focus: true
-    Keys.onPressed: event => {
-        if (event.key === Qt.Key_Slash && win.viewMode !== "search") {
-            event.accepted = true
+    function startSearch(): void {
+        if (win.viewMode !== "search") {
             win.pushHistory()
             win.viewMode = "search"
-        } else if (event.key === Qt.Key_Escape) {
+        }
+    }
+
+    focus: true
+    Component.onCompleted: Notes.listConcepts("", "")
+    onVisibleChanged: if (visible) Notes.listConcepts("", "")
+
+    Connections {
+        target: Notes
+        function onConceptViewLoaded(view): void {
+            if (win.viewMode === "concept" && view.concept?.id === win.activeConceptId)
+                Notes.markConceptSeen(win.activeConceptId)
+        }
+    }
+
+    Timer {
+        id: searchDebounce
+        interval: 180
+        onTriggered: Notes.searchConcepts(win.searchQuery)
+    }
+
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_Slash && win.viewMode !== "legacy") {
+            nav.focusSearch()
             event.accepted = true
-            if (win.viewMode === "search" || win.viewMode === "concept") {
+        } else if (event.key === Qt.Key_Escape) {
+            if (conceptPage.sourcesOpen) {
+                conceptPage.sourcesOpen = false
+            } else if (nav.releaseSearchFocus()) {
+                // The next Escape leaves search or closes the window.
+            } else if (win.viewMode === "concept" || win.viewMode === "search" || win.viewMode === "legacy") {
                 win.popHistory()
             } else {
                 win.closeRequested()
             }
+            event.accepted = true
         }
     }
 
-    // Main Layout
+    Rectangle {
+        anchors.fill: parent
+        radius: Tokens.rounding.medium
+        color: Colours.palette.m3surface
+        border.width: 1
+        border.color: Colours.palette.m3outlineVariant
+    }
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-
-        // 1. Top Handbook Navigation Strip
         HandbookNav {
             id: nav
             Layout.fillWidth: true
@@ -133,74 +162,86 @@ Item {
             selectedArea: win.selectedArea
             topics: win.availableTopics
             areas: win.availableAreas
-            searchActive: win.viewMode === "search"
+            unseenMap: win.unseenMap
+            unseenAreas: win.unseenAreas
+            searchText: win.searchQuery
             isLegacyActive: win.viewMode === "legacy"
-
-            onTopicSelected: topic => win.selectedTopic = topic
-            onAreaSelected: area => win.selectedArea = area
-            onSearchToggled: {
-                if (win.viewMode === "search") {
-                    win.popHistory()
-                } else {
-                    win.pushHistory()
-                    win.viewMode = "search"
-                }
+            onTopicSelected: topic => win.chooseTopic(topic)
+            onAreaSelected: area => {
+                win.selectedArea = area
+                win.viewMode = "index"
+            }
+            onSearchRequested: win.startSearch()
+            onSearchEdited: query => {
+                win.searchQuery = query
+                win.startSearch()
+                searchDebounce.restart()
             }
             onLegacyToggled: {
-                win.viewMode = (win.viewMode === "legacy") ? "index" : "legacy"
+                if (win.viewMode === "legacy") win.popHistory()
+                else {
+                    win.pushHistory()
+                    win.viewMode = "legacy"
+                }
             }
             onCloseRequested: win.closeRequested()
             onMoveRequested: win.moveRequested()
         }
-
         Rectangle {
             Layout.fillWidth: true
-            height: 1
+            Layout.preferredHeight: 1
             color: Colours.palette.m3outlineVariant
         }
-
-        // 2. View Mode Content Container
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-
-            // View 1: Concept Index
             ConceptIndex {
                 anchors.fill: parent
                 visible: win.viewMode === "index"
                 topic: win.selectedTopic
                 area: win.selectedArea
                 concepts: Notes.concepts
-                onConceptSelected: concept => win.openConcept(concept, "")
+                onConceptSelected: concept => win.openConcept(concept, "", "")
             }
-
-            // View 2: Concept Page (Understand vs Recall)
             ConceptPage {
                 id: conceptPage
                 anchors.fill: parent
-                visible: win.viewMode === "concept" && Notes.currentConceptView !== null
+                visible: win.viewMode === "concept" && Notes.currentConceptView?.concept?.id === win.activeConceptId
                 conceptView: Notes.currentConceptView
                 highlightBlockId: win.highlightBlockId
+                highlightSourceId: win.highlightSourceId
+                highlightSourceStart: win.highlightSourceStart
+                highlightSourceEnd: win.highlightSourceEnd
                 onBackRequested: win.popHistory()
             }
-
-            // View 3: Search Results
             HandbookSearchResults {
-                id: searchResultsView
                 anchors.fill: parent
                 visible: win.viewMode === "search"
+                query: win.searchQuery
                 results: Notes.searchResults
-                onResultSelected: result => win.openConcept({ id: result.concept_id, topic: result.topic, area: result.area }, result.block_id)
-                onCloseSearchRequested: win.popHistory()
+                onResultSelected: result => win.openConcept({
+                    id: result.concept_id, topic: result.topic, area: result.area
+                }, result.block_id, result.source_note_id, result.source_start, result.source_end)
             }
-
-            // View 4: Legacy Review Adapter (P0.4 fallback)
-            NotesViewLegacy {
-                id: legacyReview
+            Loader {
                 anchors.fill: parent
-                visible: win.viewMode === "legacy"
-                onCloseRequested: win.closeRequested()
-                onMoveRequested: win.moveRequested()
+                active: win.viewMode === "legacy"
+                sourceComponent: NotesViewLegacy {
+                    onCloseRequested: win.closeRequested()
+                    onMoveRequested: win.moveRequested()
+                }
+            }
+            Column {
+                anchors.centerIn: parent
+                spacing: 8
+                visible: win.viewMode === "index" && Notes.concepts.length === 0 &&
+                    Notes.notes.some(n => n.category === "technical" || n.category === "reference")
+                TextButton {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: qsTr("Build handbook from saved captures")
+                    type: ButtonBase.Tonal
+                    onClicked: Notes.syncLegacyNotes()
+                }
             }
         }
     }

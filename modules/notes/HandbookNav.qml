@@ -1,9 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
-import Quickshell
 import Caelestia.Config
 import qs.components
 import qs.components.controls
@@ -11,170 +9,236 @@ import qs.services
 
 Item {
     id: root
-
-    property string selectedTopic: "Java"
+    property string selectedTopic: "All"
     property string selectedArea: "All"
     property var topics: []
     property var areas: []
-    property bool searchActive: false
-    property bool isLegacyActive: false
     property var unseenMap: ({})
+    property var unseenAreas: ({})
+    property string searchText: ""
+    property bool isLegacyActive: false
 
     signal topicSelected(string topic)
     signal areaSelected(string area)
-    signal searchToggled()
+    signal searchRequested()
+    signal searchEdited(string query)
     signal legacyToggled()
     signal closeRequested()
     signal moveRequested()
 
-    implicitHeight: navCol.implicitHeight + Tokens.padding.small * 2
+    function focusSearch(): void { searchInput.forceActiveFocus() }
+    function releaseSearchFocus(): bool {
+        if (!searchInput.activeFocus) return false
+        root.forceActiveFocus()
+        return true
+    }
 
-    // Background drag region
+    implicitHeight: 92
+
+    Rectangle {
+        anchors.fill: parent
+        color: Colours.palette.m3surfaceContainerLow
+        radius: Tokens.rounding.medium
+    }
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
         onPressed: root.moveRequested()
     }
-
     ColumnLayout {
-        id: navCol
         anchors.fill: parent
-        anchors.margins: Tokens.padding.small
-        spacing: Tokens.spacing.small
-
-        // Row 1: Topics + Search + Legacy toggle + Close
-        RowLayout {
+        anchors.leftMargin: 18
+        anchors.rightMargin: 14
+        anchors.topMargin: 10
+        anchors.bottomMargin: 8
+        spacing: 9
+        Item {
             Layout.fillWidth: true
-            spacing: Tokens.spacing.small
-
-            // Topic Pills Flickable
+            Layout.preferredHeight: 34
+            MaterialIcon {
+                id: bookIcon
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "auto_stories"
+                color: Colours.palette.m3primary
+                fontStyle: Tokens.font.icon.medium
+            }
             Flickable {
-                id: topicFlick
-                Layout.fillWidth: true
-                implicitHeight: 32
-                contentWidth: topicRow.implicitWidth
+                id: topicsScroll
+                anchors.left: bookIcon.right
+                anchors.right: searchBox.left
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                height: 32
+                contentWidth: topicsRow.implicitWidth
                 contentHeight: height
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-
                 Row {
-                    id: topicRow
+                    id: topicsRow
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 6
-
+                    spacing: 5
                     Repeater {
                         model: root.topics
-
                         delegate: Rectangle {
                             id: topicPill
                             required property var modelData
-                            required property int index
-
-                            readonly property string topicName: String(modelData || "")
-                            readonly property bool active: root.selectedTopic.toLowerCase() === topicName.toLowerCase()
-                            readonly property bool hasUnseen: !!root.unseenMap[topicName.toLowerCase()]
-
-                            implicitWidth: topicLabel.implicitWidth + (hasUnseen ? 28 : 20)
-                            implicitHeight: 28
+                            readonly property string topic: String(modelData)
+                            readonly property bool active: root.selectedTopic === topic
+                            readonly property bool unseen: !!root.unseenMap[topic.toLowerCase()]
+                            implicitWidth: topicRow.implicitWidth + 18
+                            implicitHeight: 29
                             radius: Tokens.rounding.small
-                            color: active ? Colours.palette.m3secondaryContainer : Colours.palette.m3surfaceContainerHigh
-
-                            RowLayout {
+                            color: active ? Colours.palette.m3secondaryContainer : "transparent"
+                            Row {
+                                id: topicRow
                                 anchors.centerIn: parent
-                                spacing: 4
-
+                                spacing: 5
                                 StyledText {
-                                    id: topicLabel
-                                    text: topicPill.topicName
-                                    color: topicPill.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                                    text: topicPill.topic
                                     font: Tokens.font.label.medium
+                                    color: topicPill.active ? Colours.palette.m3onSecondaryContainer
+                                        : Colours.palette.m3onSurfaceVariant
                                 }
-
                                 Rectangle {
-                                    visible: topicPill.hasUnseen
-                                    width: 6
-                                    height: 6
+                                    visible: topicPill.unseen
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 5
+                                    height: 5
                                     radius: 3
                                     color: Colours.palette.m3primary
                                 }
                             }
-
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.topicSelected(topicPill.topicName)
+                                onClicked: root.topicSelected(topicPill.topic)
                             }
                         }
                     }
                 }
             }
-
-            // Search Toggle Button (P3.4, P3.5)
-            IconButton {
-                icon: "search"
-                type: root.searchActive ? ButtonBase.Filled : ButtonBase.Tonal
-                onClicked: root.searchToggled()
+            Rectangle {
+                id: searchBox
+                anchors.right: legacyButton.left
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 192
+                height: 32
+                radius: Tokens.rounding.small
+                color: Colours.palette.m3surfaceContainerHigh
+                border.width: searchInput.activeFocus ? 1 : 0
+                border.color: Colours.palette.m3primary
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 9
+                    anchors.rightMargin: 9
+                    spacing: 6
+                    MaterialIcon {
+                        text: "search"
+                        color: Colours.palette.m3onSurfaceVariant
+                        fontStyle: Tokens.font.icon.small
+                    }
+                    TextInput {
+                        id: searchInput
+                        Layout.fillWidth: true
+                        text: root.searchText
+                        color: Colours.palette.m3onSurface
+                        font: Tokens.font.body.small
+                        selectByMouse: true
+                        clip: true
+                        verticalAlignment: TextInput.AlignVCenter
+                        onActiveFocusChanged: if (activeFocus) root.searchRequested()
+                        onTextEdited: {
+                            root.searchText = text
+                            root.searchEdited(text)
+                        }
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Escape) {
+                                root.releaseSearchFocus()
+                                event.accepted = true
+                            }
+                        }
+                        StyledText {
+                            visible: !searchInput.text
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Search  /")
+                            color: Colours.palette.m3onSurfaceVariant
+                            font: Tokens.font.body.small
+                        }
+                    }
+                }
             }
-
-            // Legacy Mode Switcher (P0.4 adapter)
             IconButton {
-                icon: root.isLegacyActive ? "auto_stories" : "history"
-                type: ButtonBase.Tonal
+                id: legacyButton
+                anchors.right: closeButton.left
+                anchors.rightMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                width: 32
+                height: 32
+                icon: root.isLegacyActive ? "menu_book" : "inventory_2"
+                type: ButtonBase.Text
                 onClicked: root.legacyToggled()
             }
-
-            // Close Window Button
             IconButton {
+                id: closeButton
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 32
+                height: 32
                 icon: "close"
                 type: ButtonBase.Text
                 onClicked: root.closeRequested()
             }
         }
-
-        // Row 2: Area Sub-Navigation (Memory & References, Collections, Concurrency, etc.)
         Flickable {
-            id: areaFlick
             Layout.fillWidth: true
-            visible: !root.searchActive && !root.isLegacyActive && root.areas.length > 0
-            implicitHeight: visible ? 26 : 0
-            contentWidth: areaRow.implicitWidth
+            Layout.preferredHeight: 24
+            contentWidth: areasRow.implicitWidth
             contentHeight: height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-
             Row {
-                id: areaRow
+                id: areasRow
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 6
-
                 Repeater {
                     model: root.areas
-
                     delegate: Rectangle {
                         id: areaPill
                         required property var modelData
-                        required property int index
-
-                        readonly property string areaName: String(modelData || "")
-                        readonly property bool active: root.selectedArea.toLowerCase() === areaName.toLowerCase()
-
-                        implicitWidth: areaLabel.implicitWidth + 16
-                        implicitHeight: 24
-                        radius: Tokens.rounding.full
-                        color: active ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3surfaceContainerHighest, 0.6)
-
-                        StyledText {
-                            id: areaLabel
+                        readonly property string area: String(modelData)
+                        readonly property bool active: root.selectedArea === area
+                        readonly property bool unseen: area === "All"
+                            ? Object.keys(root.unseenAreas).length > 0
+                            : !!root.unseenAreas[area.toLowerCase()]
+                        implicitWidth: areaRow.implicitWidth + 16
+                        implicitHeight: 23
+                        radius: Tokens.rounding.small
+                        color: active ? Qt.alpha(Colours.palette.m3primary, 0.17) : "transparent"
+                        Row {
+                            id: areaRow
                             anchors.centerIn: parent
-                            text: areaPill.areaName
-                            color: areaPill.active ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                            font: Tokens.font.label.small
+                            spacing: 5
+                            StyledText {
+                                text: areaPill.area
+                                color: areaPill.active ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                                font: Tokens.font.label.small
+                            }
+                            Rectangle {
+                                visible: areaPill.unseen
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 5
+                                height: 5
+                                radius: 3
+                                color: Colours.palette.m3primary
+                            }
                         }
-
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.areaSelected(areaPill.areaName)
+                            onClicked: root.areaSelected(areaPill.area)
                         }
                     }
                 }

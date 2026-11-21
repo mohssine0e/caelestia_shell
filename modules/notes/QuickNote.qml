@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Caelestia.Config
 import qs.components
 import qs.components.controls
@@ -9,6 +10,46 @@ import qs.services
 
 Scope {
     id: root
+
+    readonly property string recoveryPath: Quickshell.env("HOME") + "/.local/share/caelestia/notes/draft_recovery.json"
+    property var recoverableDrafts: ({})
+    property bool recoveryReadable: true
+
+    FileView {
+        id: recoveryFile
+        path: root.recoveryPath
+        printErrors: false
+        onLoaded: {
+            try {
+                const value = JSON.parse(text())
+                if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid draft file")
+                root.recoverableDrafts = value
+                root.recoveryReadable = true
+            } catch (e) {
+                root.recoveryReadable = false
+                Toaster.toast(qsTr("Notes recovery needs attention"),
+                    qsTr("The saved draft file is unreadable; it was left untouched."), "warning")
+            }
+        }
+    }
+
+    function rememberDraft(token, noteId, content): void {
+        if (!root.recoveryReadable || !token) return
+        const drafts = Object.assign({}, root.recoverableDrafts)
+        drafts[token] = { noteId: noteId || "", text: content, updatedAt: Date.now() }
+        root.recoverableDrafts = drafts
+        recoveryFile.setText(JSON.stringify(drafts))
+    }
+
+    function forgetDraft(token, savedText): void {
+        const draft = root.recoverableDrafts[token]
+        if (!draft || String(draft.text || "").trim() !== String(savedText || "").trim()
+                || !root.recoveryReadable) return
+        const drafts = Object.assign({}, root.recoverableDrafts)
+        delete drafts[token]
+        root.recoverableDrafts = drafts
+        recoveryFile.setText(JSON.stringify(drafts))
+    }
 
     Variants {
         model: Screens.screens
@@ -39,16 +80,21 @@ Scope {
                 property string draftSessionToken: ""
                 property string lastSavedText: ""
                 property bool resettingEditor: false
+                property bool recoverOnNextOpen: true
 
                 function beginCapture(): void {
                     localSaveTimer.stop()
                     analysisTimer.stop()
-                    win.draftNoteId = ""
+                    const pending = win.recoverOnNextOpen
+                        ? Object.entries(root.recoverableDrafts).sort((a, b) => b[1].updatedAt - a[1].updatedAt)[0]
+                        : null
+                    win.draftNoteId = pending?.[1]?.noteId || ""
                     win.lastSavedText = ""
-                    win.draftSessionToken = "draft_" + Date.now() + "_" + Math.random()
+                    win.draftSessionToken = pending?.[0] || ("draft_" + Date.now() + "_" + Math.random())
                     win.resettingEditor = true
-                    noteEditor.clear()
+                    noteEditor.text = pending?.[1]?.text || ""
                     win.resettingEditor = false
+                    win.recoverOnNextOpen = false
                     win.saveError = ""
                     Qt.callLater(() => noteEditor.forceActiveFocus())
                 }
@@ -58,9 +104,11 @@ Scope {
                     if (isObviousNoise(content)) {
                         localSaveTimer.stop()
                         analysisTimer.stop()
+                        root.forgetDraft(win.draftSessionToken, content)
                         return
                     }
                     if (!content || content === win.lastSavedText && analyze !== true) return
+                    root.rememberDraft(win.draftSessionToken, win.draftNoteId, content)
                     Notes.saveDraft(win.draftNoteId, content, win.draftSessionToken, analyze === true)
                 }
 
@@ -192,6 +240,7 @@ Scope {
 
                 Connections {
                     function onDraftSaved(note, clientToken): void {
+                        root.forgetDraft(clientToken, note.raw_content || "")
                         if (clientToken !== win.draftSessionToken) return
                         win.draftNoteId = note.id || win.draftNoteId
                         win.lastSavedText = note.raw_content || ""
@@ -199,6 +248,7 @@ Scope {
                     }
 
                     function onDraftSaveFailed(message, clientToken): void {
+                        win.recoverOnNextOpen = true
                         if (clientToken !== win.draftSessionToken) return
                         win.saveError = message
                         Toaster.toast(qsTr("Note save failed"), message, "error")
@@ -263,6 +313,7 @@ Scope {
                                     analysisTimer.stop()
                                     return
                                 }
+                                root.rememberDraft(win.draftSessionToken, win.draftNoteId, text)
                                 localSaveTimer.restart()
                                 analysisTimer.restart()
                             }
