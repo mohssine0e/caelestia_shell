@@ -2607,6 +2607,105 @@ def set_concept_depth_rpc(payload: dict[str, Any]) -> dict[str, Any]:
     return {"success": True, "concept_id": cid, "preferred_depth": depth}
 
 
+def search_concepts_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    query = str(payload.get("query") or "").strip().lower()
+    if not query:
+        return {"success": True, "results": []}
+
+    needle = f"%{query}%"
+    with database() as db:
+        block_rows = db.execute(
+            """SELECT b.id AS block_id, b.concept_id, b.kind, b.content, b.label, b.explanation,
+                      c.title AS concept_title, c.topic, c.area
+               FROM blocks b
+               JOIN concepts c ON b.concept_id = c.id
+               WHERE c.deleted_at IS NULL
+                 AND (lower(b.content) LIKE ? OR lower(COALESCE(b.label, '')) LIKE ? OR lower(COALESCE(b.explanation, '')) LIKE ?)
+               ORDER BY c.topic ASC, c.area ASC, b.sort_order ASC
+               LIMIT 50""",
+            (needle, needle, needle),
+        ).fetchall()
+
+        results = []
+        for r in block_rows:
+            content = str(r["content"] or "")
+            match_idx = content.lower().find(query)
+            if match_idx != -1:
+                start = max(0, match_idx - 40)
+                if start <= 20:
+                    start = 0
+                else:
+                    space_idx = content.find(" ", start, match_idx)
+                    if space_idx != -1:
+                        start = space_idx + 1
+                end = min(len(content), match_idx + len(query) + 50)
+                if end >= len(content) - 20:
+                    end = len(content)
+                else:
+                    space_idx = content.find(" ", end, min(len(content), end + 20))
+                    if space_idx != -1:
+                        end = space_idx
+                snippet = ("..." if start > 0 else "") + content[start:end].strip() + ("..." if end < len(content) else "")
+            else:
+                snippet = content[:80]
+
+            results.append({
+                "concept_id": r["concept_id"],
+                "concept_title": r["concept_title"],
+                "topic": r["topic"],
+                "area": r["area"],
+                "block_id": r["block_id"],
+                "block_kind": r["kind"],
+                "match_snippet": snippet,
+                "label": r["label"] or "",
+            })
+
+        matched_cids = {r["concept_id"] for r in results}
+        concept_rows = db.execute(
+            """SELECT id, title, topic, area, definition
+               FROM concepts
+               WHERE deleted_at IS NULL
+                 AND (lower(title) LIKE ? OR lower(definition) LIKE ?)
+               ORDER BY topic ASC, area ASC
+               LIMIT 20""",
+            (needle, needle),
+        ).fetchall()
+
+        for cr in concept_rows:
+            if cr["id"] not in matched_cids:
+                results.append({
+                    "concept_id": cr["id"],
+                    "concept_title": cr["title"],
+                    "topic": cr["topic"],
+                    "area": cr["area"],
+                    "block_id": "",
+                    "block_kind": "title",
+                    "match_snippet": cr["definition"] or cr["title"],
+                    "label": "",
+                })
+
+        return {"success": True, "query": query, "results": results}
+
+
+def sync_legacy_notes_rpc(payload: dict[str, Any]) -> dict[str, Any]:
+    with database() as db:
+        rows = db.execute(
+            """SELECT * FROM notes
+               WHERE deleted_at IS NULL AND category IN ('technical', 'reference')
+                 AND id NOT IN (SELECT DISTINCT legacy_note_id FROM concepts WHERE legacy_note_id IS NOT NULL)"""
+        ).fetchall()
+        migrated_count = 0
+        for r in rows:
+            raw = str(r["raw_content"] or "").strip()
+            topic = str(r["topic"] or _infer_local_topic(raw) or "General").strip()
+            concepts = segment_text_to_concepts(raw, topic=topic)
+            for c in concepts:
+                _insert_concept_with_blocks(db, c, c["blocks"], source_note_id=r["id"])
+                migrated_count += 1
+        db.commit()
+        return {"success": True, "migrated_count": migrated_count}
+
+
 COMMANDS = {
     "smart-upsert": smart_upsert,
     "upsert": smart_upsert,
@@ -2636,6 +2735,8 @@ COMMANDS = {
     "list-concepts": list_concepts_rpc,
     "export-concept": export_concept_rpc,
     "set-concept-depth": set_concept_depth_rpc,
+    "search-concepts": search_concepts_rpc,
+    "sync-legacy-notes": sync_legacy_notes_rpc,
 }
 
 

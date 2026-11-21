@@ -63,6 +63,50 @@ Singleton {
     signal assistantSelectionSaved(var note, string clientToken)
     signal assistantSelectionSaveFailed(string message, string clientToken)
 
+    property var concepts: []
+    property var currentConceptView: null
+    property var searchResults: []
+    property bool searching: searchProc.running
+    property bool loadingConcept: conceptGetProc.running
+
+    signal conceptsLoaded(var concepts)
+    signal conceptViewLoaded(var view)
+    signal searchCompleted(var results)
+
+    property var _conceptsListInput: ({})
+    property var _conceptGetInput: ({})
+    property var _depthInput: ({})
+    property var _searchInput: ({})
+
+    function listConcepts(topic, area): void {
+        _conceptsListInput = { topic: topic || "", area: area || "" }
+        conceptsListProc.command = ["python3", root.backendPath, "list-concepts"]
+        conceptsListProc.running = true
+    }
+
+    function getConcept(conceptId, mode): void {
+        _conceptGetInput = { id: conceptId, mode: mode || "" }
+        conceptGetProc.command = ["python3", root.backendPath, "read-concept"]
+        conceptGetProc.running = true
+    }
+
+    function setConceptDepth(conceptId, depth): void {
+        _depthInput = { id: conceptId, depth: depth }
+        depthProc.command = ["python3", root.backendPath, "set-concept-depth"]
+        depthProc.running = true
+    }
+
+    function searchConcepts(query): void {
+        _searchInput = { query: query }
+        searchProc.command = ["python3", root.backendPath, "search-concepts"]
+        searchProc.running = true
+    }
+
+    function syncLegacyNotes(): void {
+        syncLegacyProc.command = ["python3", root.backendPath, "sync-legacy-notes"]
+        syncLegacyProc.running = true
+    }
+
     function parseResult(text): var {
         try {
             return JSON.parse(String(text || "").trim())
@@ -472,6 +516,68 @@ Singleton {
                 root.providerConfigured = result.success && result.configured === true
                 root.configuredProvider = result.provider || ""
                 root.fallbackProvider = result.fallback || ""
+            }
+        }
+    }
+
+    Process {
+        id: conceptsListProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._conceptsListInput) + "\n")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const res = root.parseResult(text)
+                if (res.success && Array.isArray(res.concepts)) {
+                    root.concepts = res.concepts
+                    root.conceptsLoaded(res.concepts)
+                }
+            }
+        }
+    }
+
+    Process {
+        id: conceptGetProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._conceptGetInput) + "\n")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const res = root.parseResult(text)
+                if (res.success) {
+                    root.currentConceptView = res
+                    root.conceptViewLoaded(res)
+                }
+            }
+        }
+    }
+
+    Process {
+        id: depthProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._depthInput) + "\n")
+    }
+
+    Process {
+        id: searchProc
+        stdinEnabled: true
+        onStarted: write(JSON.stringify(root._searchInput) + "\n")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const res = root.parseResult(text)
+                if (res.success && Array.isArray(res.results)) {
+                    root.searchResults = res.results
+                    root.searchCompleted(res.results)
+                }
+            }
+        }
+    }
+
+    Process {
+        id: syncLegacyProc
+        stdinEnabled: true
+        onStarted: write("{}\n")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.listConcepts("", "")
             }
         }
     }

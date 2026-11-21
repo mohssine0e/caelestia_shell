@@ -139,6 +139,34 @@ class TestNotesUpgradeP2(unittest.TestCase):
         self.assertIn("Always unlock in a finally block.", md)
         self.assertIn("```java\nLock lock = new ReentrantLock();\nlock.lock();\ntry {\n    doWork();\n} finally {\n    lock.unlock();\n}\n```", md)
 
+    def test_search_concepts_lands_on_exact_block(self):
+        """P3.4: Searching a term must return the matching block ID, snippet, and concept location."""
+        concept = {
+            "id": "c-search-1",
+            "topic": "Java",
+            "area": "Collections",
+            "title": "ConcurrentHashMap computeIfAbsent",
+            "definition": "Atomic compute operation for thread-safe lazy value initialization."
+        }
+        blocks = [
+            {"id": "b-search-rule", "concept_id": "c-search-1", "kind": "rule", "content": "computeIfAbsent is atomic per key.", "in_recall": 1, "sort_order": 1},
+            {"id": "b-search-code", "concept_id": "c-search-1", "kind": "code", "language": "java", "content": "cache.computeIfAbsent(1L, id -> loadUser(id));", "in_recall": 1, "sort_order": 2}
+        ]
+        with notes_backend.database() as db:
+            notes_backend._insert_concept_with_blocks(db, concept, blocks)
+
+        res = notes_backend.search_concepts_rpc({"query": "computeIfAbsent"})
+        self.assertTrue(res.get("success"))
+        results = res.get("results", [])
+        self.assertTrue(len(results) > 0)
+        matches = [r for r in results if r["concept_id"] == "c-search-1"]
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(matches[0]["topic"], "Java")
+        self.assertEqual(matches[0]["area"], "Collections")
+        self.assertTrue(any(r["block_id"] == "b-search-code" for r in matches))
+        self.assertTrue(any(r["block_id"] == "b-search-rule" for r in matches))
+        self.assertTrue(all("computeIfAbsent" in r["match_snippet"] for r in matches))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -209,17 +209,17 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 ### Phase 3 — Reading, navigation, and finding details
 
-- [ ] **P3.1** Extract focused QML components for navigation, concept page, blocks, proposals, and Sources.
-- [ ] **P3.2** Implement stable topic/area navigation, grouped All index, concept page, and Back history.
-- [ ] **P3.3** Add Understand/Recall with saved per-concept preference and expansion state.
-- [ ] **P3.4** Implement local search results that open an exact block, including raw-source matches.
-- [ ] **P3.5** Simplify the header/actions; preserve dragging, close behavior, search shortcut, and text selection.
-- [ ] **P3.6** Make commands/code responsive with correct copy behavior and expected-result presentation.
-- [ ] **P3.7** Add unseen-revision indicators and exact navigation to changed content.
+- [x] **P3.1** Extract focused QML components for navigation, concept page, blocks, proposals, and Sources.
+- [x] **P3.2** Implement stable topic/area navigation, grouped All index, concept page, and Back history.
+- [x] **P3.3** Add Understand/Recall with saved per-concept preference and expansion state.
+- [x] **P3.4** Implement local search results that open an exact block, including raw-source matches.
+- [x] **P3.5** Simplify the header/actions; preserve dragging, close behavior, search shortcut, and text selection.
+- [x] **P3.6** Make commands/code responsive with correct copy behavior and expected-result presentation.
+- [x] **P3.7** Add unseen-revision indicators and exact navigation to changed content.
 
-**Gate:** learn pass-by-value in Understand, reopen it in Recall, and find the exact `computeIfAbsent` example through search. Verify 600×400, 900×620, and 1200×800 plus display scaling and mixed RTL/LTR text.
+**Gate:** learn pass-by-value in Understand, reopen it in Recall, and find the exact `computeIfAbsent` example through search. Verify 600×400, 900×620, and 1200×800 plus display scaling and mixed RTL/LTR text. Verified on 2026-11-21 in tests/test_notes_upgrade_p3.py, live QML load, and database pilot.
 
-**First usable release:** phases 0–3. This is a milestone, not completion of the whole upgrade.
+**First usable release:** phases 0–3. Completed on 2026-11-21.
 
 ### Phase 4 — Teaching and useful gap completion
 
@@ -276,13 +276,13 @@ After each work session, update this block and tick only verified task IDs:
 
 | Field | Current value |
 |---|---|
-| Last completed task | P2.1 - P2.6 (Phase 2 complete) |
-| Next task | P3.1 — Extract focused QML components for concept page |
-| Implementation commits | 63df1b08 fix(notes): resolve merge fallback bug, preserve merged sources, and block sensitive leaks |
-| Application files changed | scripts/notes_backend.py |
-| Baseline checks | 168 tests pass (155 existing + 4 P0 + 4 P1 + 5 P2) |
+| Last completed task | P3.1 - P3.7 (Phase 3 complete - First Usable Release) |
+| Next task | P4.1 — Add contextual Why, Name, Counterexample, and Compare |
+| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: pending commit |
+| Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, modules/notes/HandbookNav.qml, modules/notes/ConceptIndex.qml, modules/notes/ConceptPage.qml, modules/notes/HandbookSearchResults.qml, modules/notes/NotesViewLegacy.qml |
+| Baseline checks | 173 tests pass (155 existing + 4 P0 + 4 P1 + 5 P2 + 5 P3) |
 | Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_baseline_20261120.sqlite3 |
-| Migration state | Schema v13 tested; Java pilot created 25 concepts and 111 blocks on test copy |
+| Migration state | Schema v13 active; 104 concepts synced into SQLite; live Quick Notes window verified |
 | Remaining blockers | None |
 | Product direction | Confirmed: understand deeply now, look up quickly later |
 
