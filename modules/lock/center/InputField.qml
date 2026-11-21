@@ -17,7 +17,6 @@ Item {
     readonly property alias placeholder: placeholder
     readonly property alias placeholderWidth: nonAnimPlaceholder.width
     property string buffer
-    property bool showPassword
     readonly property list<int> shapeQueue: {
         const shapes = [MaterialShape.Slanted, MaterialShape.Arch, MaterialShape.Fan, MaterialShape.Arrow, MaterialShape.SemiCircle, MaterialShape.Triangle, MaterialShape.Diamond, MaterialShape.ClamShell, MaterialShape.Pentagon, MaterialShape.Gem, MaterialShape.Sunny, MaterialShape.VerySunny, MaterialShape.Cookie4Sided, MaterialShape.Ghostish, MaterialShape.SoftBurst];
         for (let i = shapes.length - 1; i > 0; i--) {
@@ -36,7 +35,6 @@ Item {
             } else if (root.pam.buffer.length === 0) {
                 charList.implicitWidth = charList.implicitWidth;
                 placeholder.animate = true;
-                root.showPassword = false;
             }
 
             root.buffer = root.pam.buffer;
@@ -233,35 +231,8 @@ Item {
             shape: root.shapeQueue[char.index % root.shapeQueue.length] ?? MaterialShape.Circle
             color: Colours.palette.m3onSurface
 
-            opacity: root.showPassword ? 0 : 1
-
-            Behavior on opacity {
-                Anim {
-                    type: Anim.DefaultEffects
-                }
-            }
             Behavior on color {
                 CAnim {}
-            }
-        }
-
-        Loader {
-            id: textLoader
-
-            anchors.centerIn: parent
-
-            opacity: root.showPassword ? 1 : 0
-            active: opacity > 0
-            asynchronous: true
-
-            sourceComponent: StyledText {
-                text: root.buffer[char.index]
-            }
-
-            Behavior on opacity {
-                Anim {
-                    type: Anim.DefaultEffects
-                }
             }
         }
     }

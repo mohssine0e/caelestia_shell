@@ -216,8 +216,6 @@ StyledRect {
                 MaterialIcon {
                     animate: true
                     text: {
-                        if (inputField.showPassword)
-                            return "visibility";
                         if (root.lock.pam.fprint.tries >= GlobalConfig.lock.maxFprintTries) {
                             if (root.lock.pam.howdy.canAttempt)
                                 return "face";
@@ -231,24 +229,7 @@ StyledRect {
                     }
                     color: !root.lock.pam.howdy.canAttempt && root.lock.pam.fprint.tries >= GlobalConfig.lock.maxFprintTries ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
                     fontStyle: Tokens.font.icon.builders.medium.scale(root.centerScale).build()
-                    fill: text === "face" || text === "visibility"
-
-                    StateLayer {
-                        anchors.fill: undefined
-                        anchors.centerIn: parent
-                        implicitWidth: {
-                            const w = parent.implicitHeight + Tokens.padding.small * 2;
-                            return w + (w % 2);
-                        }
-                        implicitHeight: implicitWidth
-                        radius: Tokens.rounding.full
-
-                        onClicked: {
-                            parent.animate = false;
-                            inputField.showPassword = !inputField.showPassword;
-                            parent.animate = true;
-                        }
-                    }
+                    fill: text === "face"
                 }
             }
 
