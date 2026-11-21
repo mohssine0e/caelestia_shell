@@ -74,6 +74,7 @@ Column {
             root.opened = true
             root.errorMessage = ""
             root.message = ""
+            if (root.suggestions.length + root.accepted.length > 0) return
             if (!Notes.providerConfigured) {
                 root.errorMessage = qsTr("Configure an AI provider to look for gaps.")
                 return

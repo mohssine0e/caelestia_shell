@@ -280,7 +280,7 @@ After each work session, update this block and tick only verified task IDs:
 |---|---|
 | Last completed task | P4.4 persistent gap proposals with acceptance, dismissal, and undo; Phase 1/3 follow-up checks remain open |
 | Next task | P4.5 applicability and unsupported material; manually verify capture recovery and search destinations |
-| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: 75fc574d; P4.3: 7b58947f; P4.4: current commit |
+| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: 75fc574d; P4.3: 7b58947f; P4.4: 122f81f4, reopen fix: c8ae92c5 |
 | Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, HandbookNav.qml, ConceptIndex.qml, ConceptPage.qml, ConceptDetailActions.qml, GapSuggestions.qml, HandbookSearchResults.qml, QuickNote.qml |
 | Baseline checks | 194 tests pass, including persisted scope validation, accept-all, undo, and paging; isolated QML load at 900×620 (earlier handbook loads at 600×400 and 1200×800) |
 | Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_pre_repair_20261121T145050Z.sqlite3 (also the original 2026-11-20 baseline) |
