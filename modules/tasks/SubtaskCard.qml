@@ -440,47 +440,10 @@ Item {
                         }
                     }
 
-                    IconButton {
+                    ShakeDeleteButton {
                         id: subDeleteButton
                         visible: root.isSelected || root.isEditing
-                        type: IconButton.Text
-                        font: Tokens.font.icon.small
-                        icon: "delete_outline"
-
-                        property bool isShaking: false
-
-                        onClicked: {
-                            if (!isShaking) {
-                                isShaking = true
-                                shakeAnim.start()
-                            }
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            onClicked: subDeleteButton.clicked()
-                            onDoubleClicked: root.deleteRequested(root.taskIndex, root.subtaskIndex)
-                        }
-
-                        Timer {
-                            id: copyTimer
-                            interval: 2000
-                        }
-
-                        SequentialAnimation {
-                            id: shakeAnim
-                            onFinished: {
-                                subDeleteButton.isShaking = false
-                                subDeleteButton.rotation = 0
-                            }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -8; to: 8; duration: 80 }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 8; to: -8; duration: 80 }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -8; to: 8; duration: 80 }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 8; to: -8; duration: 80 }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: -4; to: 4; duration: 50 }
-                            PropertyAnimation { target: subDeleteButton; property: "rotation"; from: 4; to: 0; duration: 50 }
-                        }
+                        onConfirmed: root.deleteRequested(root.taskIndex, root.subtaskIndex)
                     }
                 }
             }

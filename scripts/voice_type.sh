@@ -48,7 +48,11 @@ if recorder_running; then
     if [[ "$START_TIME" =~ ^[0-9]+$ ]] && (( NOW - START_TIME < 200000000 )); then
         exit 0
     fi
-    TARGET_WINDOW=$(window_info)
+    TARGET_WINDOW=$(cat "$VOICE_DIR/target_window" 2>/dev/null || true)
+    CURRENT_WINDOW=$(window_info)
+    [[ -z "$TARGET_WINDOW" ]] && TARGET_WINDOW="$CURRENT_WINDOW"
+    TARGET_ADDR=$(printf '%s\n' "$TARGET_WINDOW" | head -n 1)
+    CURRENT_ADDR=$(printf '%s\n' "$CURRENT_WINDOW" | head -n 1)
     kill -INT "$PID" 2>/dev/null || true
     # The recorder belongs to the previous invocation: bash wait cannot wait for
     # it. Poll its exit instead, so libsndfile has finished the WAV header.
@@ -86,10 +90,16 @@ if recorder_running; then
         notify 'Could not insert text' 'The clipboard service is unavailable.'
         exit 1
     fi
-    if [[ -z "$TARGET_WINDOW" || "$TARGET_WINDOW" != "$(window_info)" ]]; then
+    CURRENT_WINDOW=$(window_info)
+    CURRENT_ADDR=$(printf '%s\n' "$CURRENT_WINDOW" | head -n 1)
+    if [[ -n "$TARGET_ADDR" && "$TARGET_ADDR" != "$CURRENT_ADDR" ]]; then
         notify 'Transcription copied' 'The focused window changed. Paste the text where you want it.'
         log 'Focus changed; transcript left on clipboard.'
         exit 0
+    fi
+    if [[ -n "$TARGET_ADDR" ]]; then
+        hyprctl dispatch "hl.dsp.focus({ window = \"address:${TARGET_ADDR}\" })" >/dev/null 2>&1 || true
+        sleep 0.05
     fi
     MODIFIERS=(-M ctrl)
     RELEASE=(-m ctrl)
@@ -97,25 +107,17 @@ if recorder_running; then
         *kitty*|*foot*|*alacritty*|*konsole*|*wezterm*|*ghostty*|*gnome-terminal*)
             MODIFIERS+=(-M shift); RELEASE=(-m shift -m ctrl) ;;
     esac
-    sleep 0.15
-    if [[ "$TARGET_WINDOW" != "$(window_info)" ]]; then
-        notify 'Transcription copied' 'The focused window changed. Paste the text where you want it.'
-        exit 0
-    fi
+    sleep 0.1
     if ! wtype "${MODIFIERS[@]}" -k v "${RELEASE[@]}" 2>"$VOICE_DIR/error"; then
         log 'Paste keystroke failed; transcript left on clipboard.'
         notify 'Transcription copied' 'Automatic paste failed. Press Ctrl+V to paste it.'
         exit 0
     fi
     sleep 0.6
-    # Do not overwrite something the user copied while the paste was occurring.
-    if wl-paste --no-newline --type 'text/plain;charset=utf-8' > "$VOICE_DIR/current" 2>/dev/null \
+    # If the user had a non-text clipboard (e.g. image), restore it so binary data isn't lost.
+    if $HAD_CLIP && [[ "$CLIP_TYPE" != text/* ]] && wl-paste --no-newline --type 'text/plain;charset=utf-8' > "$VOICE_DIR/current" 2>/dev/null \
             && cmp -s "$VOICE_DIR/current" "$VOICE_DIR/transcript"; then
-        if $HAD_CLIP; then
-            wl-copy --type "$CLIP_TYPE" 9>&- < "$VOICE_DIR/clipboard"
-        else
-            wl-copy --clear 9>&-
-        fi
+        wl-copy --type "$CLIP_TYPE" 9>&- < "$VOICE_DIR/clipboard"
     fi
     log 'Transcription completed; paste shortcut sent.'
     notify 'Voice typing finished' 'Text inserted.'
@@ -130,6 +132,8 @@ else
         notify 'Microphone is muted' 'Unmute it, then press Super+Alt+V again.'
         exit 1
     fi
+    TARGET_WINDOW=$(window_info)
+    printf '%s\n' "$TARGET_WINDOW" > "$VOICE_DIR/target_window"
     # Ten-minute cap prevents an abandoned recording from growing indefinitely.
     pw-record --channels 1 --rate 16000 --format s16 --sample-count 9600000 \
         "$AUDIO_FILE" > /dev/null 2>"$VOICE_DIR/recorder.log" 9>&- &

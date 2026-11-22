@@ -607,84 +607,11 @@ Item {
                         }
                     }
 
-                    IconButton {
+                    ShakeDeleteButton {
                         id: deleteButton
                         visible: root.isSelected || root.isEditing
-                        type: IconButton.Text
-                        font: Tokens.font.icon.small
-                        icon: "delete_outline"
-
-                        property bool isShaking: false
-
-                        onClicked: {
-                            if (!isShaking) {
-                                isShaking = true
-                                shakeAnim.start()
-                            }
-                            root.selectionRequested(root.taskIndex)
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            onClicked: deleteButton.clicked()
-                            onDoubleClicked: root.deleteRequested(root.taskIndex)
-                        }
-
-                        Timer {
-                            id: copyTimer
-                            interval: 2000
-                        }
-
-                        SequentialAnimation {
-                            id: shakeAnim
-                            onFinished: {
-                                deleteButton.isShaking = false
-                                deleteButton.rotation = 0
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: -8
-                                to: 8
-                                duration: 80
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: 8
-                                to: -8
-                                duration: 80
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: -8
-                                to: 8
-                                duration: 80
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: 8
-                                to: -8
-                                duration: 80
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: -4
-                                to: 4
-                                duration: 50
-                            }
-                            PropertyAnimation {
-                                target: deleteButton
-                                property: "rotation"
-                                from: 4
-                                to: 0
-                                duration: 50
-                            }
-                        }
+                        onClicked: root.selectionRequested(root.taskIndex)
+                        onConfirmed: root.deleteRequested(root.taskIndex)
                     }
                 }
             }       

@@ -20,7 +20,6 @@ StyledRect {
     property var groups: []
     property bool addingGroup: false
     property string editingGroupId: ""
-    property string deletingConfirmId: ""
     property bool isSyncing: false
 
     readonly property string dataPath: Paths.home + "/daily_focus.json"
@@ -139,7 +138,6 @@ StyledRect {
         if (idx !== -1) root.activeGroupIndex = idx
 
         root.editingGroupId = ""
-        root.deletingConfirmId = ""
 
         // 3. Atomically load new note text into editor with sync guard
         var newGrp = root.findGroup(targetId)
@@ -158,7 +156,6 @@ StyledRect {
             syncEditorText()
         } else {
             root.editingGroupId = ""
-            root.deletingConfirmId = ""
             root.addingGroup = false
         }
         requestSave()
@@ -232,26 +229,6 @@ StyledRect {
         root.editingGroupId = ""
     }
 
-    function requestRemoveGroup(id) {
-        if (root.groups.length <= 1) return
-        var grp = root.findGroup(id)
-        if (!grp) return
-
-        // If the note is empty, delete immediately without prompt
-        if (!grp.note || grp.note.trim().length === 0) {
-            removeGroup(id)
-            return
-        }
-
-        // If it has content, require confirmation click
-        if (root.deletingConfirmId === id) {
-            root.deletingConfirmId = ""
-            removeGroup(id)
-        } else {
-            root.deletingConfirmId = id
-        }
-    }
-
     function removeGroup(id) {
         if (root.groups.length <= 1) return
         var copy = root.groups.filter(g => g.id !== id)
@@ -266,7 +243,6 @@ StyledRect {
             root.activeGroupIndex = Math.max(0, root.groups.findIndex(g => g.id === root.activeNoteId))
         }
 
-        root.deletingConfirmId = ""
         root.editingGroupId = ""
         requestSave()
     }
@@ -291,18 +267,13 @@ StyledRect {
             Layout.preferredHeight: 28
             spacing: 8
 
-            // Notebook Icon (Style A)
-            MaterialIcon {
-                text: "edit_note"
-                fontStyle: Tokens.font.icon.small
-                color: Colours.palette.m3tertiary
-                fill: 1
-                Layout.alignment: Qt.AlignVCenter
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.isExpanded = !root.isExpanded
+            MouseArea {
+                anchors.fill: parent
+                z: -1
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.editingGroupId = ""
+                    root.isExpanded = !root.isExpanded
                 }
             }
 
@@ -324,7 +295,6 @@ StyledRect {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         root.editingGroupId = ""
-                        root.deletingConfirmId = ""
                         root.isExpanded = !root.isExpanded
                     }
                 }
@@ -435,7 +405,6 @@ StyledRect {
                             TapHandler {
                                 onTapped: {
                                     if (pillCard.isEditing) return
-                                    root.deletingConfirmId = ""
                                     if (root.activeNoteId === pillCard.modelData.id) {
                                         // Clicking active group toggles expand/shrink
                                         root.isExpanded = !root.isExpanded
@@ -458,7 +427,7 @@ StyledRect {
                                 acceptedButtons: Qt.MiddleButton | Qt.RightButton
                                 onTapped: {
                                     if (pillCard.canDelete) {
-                                        root.requestRemoveGroup(pillCard.modelData.id)
+                                        root.removeGroup(pillCard.modelData.id)
                                     }
                                 }
                             }
@@ -502,7 +471,6 @@ StyledRect {
                             onTapped: {
                                 root.addingGroup = true
                                 root.editingGroupId = ""
-                                root.deletingConfirmId = ""
                                 Qt.callLater(() => newGroupTitleInput.forceActiveFocus())
                             }
                         }
@@ -601,79 +569,14 @@ StyledRect {
             }
 
             // Delete active note button (Shown only when active note is custom / deletable)
-            StyledRect {
+            ShakeDeleteButton {
                 id: deleteNoteBtn
                 readonly property bool canDelete: root.groups.length > 1 && root.activeNoteId !== "today"
-                readonly property bool isConfirming: root.deletingConfirmId === root.activeNoteId
-
                 visible: canDelete
-                implicitWidth: isConfirming ? 74 : 26
-                implicitHeight: 26
-                radius: Tokens.rounding.full
-                Layout.alignment: Qt.AlignVCenter
-                color: isConfirming ? Qt.alpha(Colours.palette.m3error, 0.22) : "transparent"
-                border.width: isConfirming ? 1 : 0
-                border.color: Colours.palette.m3error
-
-                Behavior on implicitWidth { Anim { type: Anim.FastSpatial } }
-                Behavior on color { CAnim {} }
-
-                RowLayout {
-                    anchors.centerIn: parent
-                    spacing: 3
-
-                    MaterialIcon {
-                        text: deleteNoteBtn.isConfirming ? "delete_forever" : "delete_outline"
-                        fontStyle: Tokens.font.icon.small
-                        color: deleteNoteBtn.isConfirming ? Colours.palette.m3error : Qt.alpha(Colours.palette.m3onSurface, 0.55)
-                    }
-
-                    StyledText {
-                        visible: deleteNoteBtn.isConfirming
-                        text: qsTr("Delete?")
-                        font: Tokens.font.label.small
-                        color: Colours.palette.m3error
-                    }
-                }
-
-                TapHandler {
-                    onTapped: {
-                        root.requestRemoveGroup(root.activeNoteId)
-                    }
-                }
-            }
-
-            // Chevron toggle button (Smoothly rotates 180° when expanded)
-            StyledRect {
-                implicitWidth: 26
-                implicitHeight: 26
-                radius: Tokens.rounding.full
-                color: chevronHover.hovered ? Colours.tPalette.m3surfaceContainerHigh : "transparent"
                 Layout.alignment: Qt.AlignVCenter
 
-                Behavior on color { CAnim {} }
-
-                MaterialIcon {
-                    anchors.centerIn: parent
-                    text: "keyboard_arrow_down"
-                    fontStyle: Tokens.font.icon.small
-                    color: chevronHover.hovered ? Colours.palette.m3tertiary : Qt.alpha(Colours.palette.m3onSurface, 0.6)
-                    rotation: root.isExpanded ? 180 : 0
-
-                    Behavior on rotation {
-                        Anim { type: Anim.FastSpatial }
-                    }
-                    Behavior on color { CAnim {} }
-                }
-
-                HoverHandler { id: chevronHover }
-
-                TapHandler {
-                    onTapped: {
-                        root.editingGroupId = ""
-                        root.deletingConfirmId = ""
-                        root.isExpanded = !root.isExpanded
-                    }
+                onConfirmed: {
+                    root.removeGroup(root.activeNoteId)
                 }
             }
         }
