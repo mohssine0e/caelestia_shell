@@ -14,6 +14,7 @@ Scope {
     readonly property string recoveryPath: Quickshell.env("HOME") + "/.local/share/caelestia/notes/draft_recovery.json"
     property var recoverableDrafts: ({})
     property bool recoveryReadable: true
+    property bool recoveryLoaded: false
 
     FileView {
         id: recoveryFile
@@ -25,13 +26,28 @@ Scope {
                 if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid draft file")
                 root.recoverableDrafts = value
                 root.recoveryReadable = true
+                root.recoveryLoaded = true
+                if (root.captureStartPending) Qt.callLater(() => root.pendingCaptureWindow?.beginCapture())
             } catch (e) {
                 root.recoveryReadable = false
+                root.recoveryLoaded = true
                 Toaster.toast(qsTr("Notes recovery needs attention"),
                     qsTr("The saved draft file is unreadable; it was left untouched."), "warning")
             }
         }
+        onLoadFailed: err => {
+            root.recoveryLoaded = true
+            if (err === FileViewError.FileNotFound) {
+                root.recoverableDrafts = ({})
+                root.recoveryReadable = true
+            } else {
+                root.recoveryReadable = false
+            }
+            if (root.captureStartPending) Qt.callLater(() => root.pendingCaptureWindow?.beginCapture())
+        }
     }
+    property bool captureStartPending: false
+    property var pendingCaptureWindow: null
 
     function rememberDraft(token, noteId, content): void {
         if (!root.recoveryReadable || !token) return
@@ -83,6 +99,13 @@ Scope {
                 property bool recoverOnNextOpen: true
 
                 function beginCapture(): void {
+                    if (!root.recoveryLoaded) {
+                        root.captureStartPending = true
+                        root.pendingCaptureWindow = win
+                        return
+                    }
+                    root.captureStartPending = false
+                    root.pendingCaptureWindow = null
                     localSaveTimer.stop()
                     analysisTimer.stop()
                     const pending = win.recoverOnNextOpen

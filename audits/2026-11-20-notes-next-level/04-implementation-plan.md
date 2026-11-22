@@ -1,8 +1,6 @@
 # Implementation plan and continuation checklist
 
-> Superseded as the progress tracker by [MASTER_PLAN.md](MASTER_PLAN.md). This document retains the original architecture/phase outline for reference. Mark implementation progress only in the master plan; its scope and task IDs take precedence.
-
-**Only the audit and plan are complete. All application work below is pending.**
+> Archived architecture and acceptance checklist from the initial proposal. Implementation has since progressed; this is not a current status report. Use [MASTER_PLAN.md](MASTER_PLAN.md) for the active UI, completed work, and next tasks. The grouped concept-index UI in this original plan is not active.
 
 - [x] Inspect current UI and logic.
 - [x] Inspect real technical captures using read-only SQLite queries.
@@ -127,6 +125,6 @@ Do not normalize, delete, merge, or reclassify the user's existing notes merely 
 | Topic changed while generation runs | Result stored under its original scope; current reading view remains stable. |
 | Concurrent autosave, failure, and retry | No loss or cross-session overwrite; recoverable state. |
 
-## Resume here
+## Continuation
 
-Start with **Phase 1**. Record each completed task and the actual checks run in this file. Do not mark the whole feature complete after a single visual prototype. The decisive first product demonstration is the same Java concept viewed deeply once and recalled quickly later.
+Do not resume this archived checklist. Continue from the “Completion and continuation record” in `MASTER_PLAN.md`. Preserve the familiar grouped review layout and refine its content logic and information hierarchy.

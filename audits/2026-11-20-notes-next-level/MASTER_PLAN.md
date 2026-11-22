@@ -1,10 +1,10 @@
-# Notes upgrade — complete implementation plan
+# Notes upgrade — implementation plan and current status
 
 **Owner:** implementation agent working with Mohssine  
 **Created:** 2026-11-20  
-**State:** in progress; handbook UI repaired and focused explanations implemented
+**State (2026-11-22):** The familiar Notes review view is active through `NotesView.qml` → `NotesViewLegacy.qml`. Kubernetes is curated into Overview, Pods, Deployments, Services, Images, and Inspect & debug. The practical-depth pass expanded seven explanations and added four commands; 21 notes are now shown across those sections, with all earlier raw captures preserved. Overview now has 21 labeled points covering definitions, components, and the reconciliation path. Three optional, collapsed diagrams illustrate the Overview flow, Deployment ownership, and Service selection. Fill gaps is scoped to the selected subsection, has no application-side suggestion count cap, and checks Kubernetes claims against official documentation excerpts. Ask AI answers questions about the whole selected subsection or topic and stages optional bullets, commands, code, replacements, removals, and diagrams; answers alone do not change notes. Corrections have source-revision validation, transactional acceptance and undo. Refresh reloads local data. Unread dots track semantic revisions. See [06 — Kubernetes stability upgrade](06-kubernetes-stability-upgrade.md), [07 — Kubernetes practical depth](07-kubernetes-practical-depth.md), [08 — Overview and diagrams](08-kubernetes-overview-diagrams.md), and [09 — Ask AI](09-ask-ai.md).
 
-**Next task:** P4.5 applicability and unsupported material; then the remaining Phase 1/3 verification gaps
+**Next task:** Review another topic's captures and apply the same compact, source-preserving content audit. Exact-block search in the active view and mixed RTL/LTR display remain future work. Keep the selected-subsection layout and do not reintroduce the rejected concept-index screen.
 
 **Primary requirement:** understand deeply now, look up quickly later.
 
@@ -18,10 +18,10 @@ You are a Java backend engineer interested in Linux, DevOps, and cloud. You capt
 
 1. Press Super+/, type or paste, and leave. Capture stays quiet and saves locally before AI processing.
 2. Open Notes. Find a topic or search for a question, symbol, command, or phrase.
-3. Open a concept in **Understand**: see its purpose, meaning, mechanism, rules, and example in a sensible order.
-4. Expand **Why?**, **Why this name?**, **Counterexample**, or **Compare** where needed. Saved explanations open immediately; missing explanations are generated as reviewable additions.
-5. Once comfortable, choose **Recall next time**. Later visits show the definition, useful rules, main example, and critical caveats. The full explanation remains available.
-6. Use **Fill gaps** to improve the selected concept or area. Choose All to inspect the topic's areas, including possible missing areas.
+3. Open a topic and area in the familiar review view. Present its essential definition, rules, commands, examples, and caveats in a clear order.
+4. Let the user expand into deeper explanations such as why a concept is named that way, how it works, counterexamples, and comparisons. Keep this detail available without crowding the overview.
+5. Once comfortable, make quick recall easy: show concise essentials first and let the user reopen the deeper explanation when needed.
+6. Use **Fill gaps** for an automatic review of the selected area, or **Ask AI** for a specific question or requested change. Answers stay separate; proposed edits require acceptance.
 
 The result is a personal engineering handbook. It should not require maintaining a folder tree, writing elaborate prompts, or taking a quiz before accessing your own notes.
 
@@ -29,7 +29,7 @@ The result is a personal engineering handbook. It should not require maintaining
 
 | Area | Decision |
 |---|---|
-| Window | One floating window with capture and review modes, using existing global styling. |
+| Window | One floating window. Keep the familiar topic/subconcept review layout as the active review view; capture remains a separate mode in the same window. |
 | Capture | Empty focused editor, no permanent hints, compact padding, scrolling, local autosave, recoverable draft. |
 | Organization | Topic → Area → Concept → Content blocks. Original captures are sources, not the navigation hierarchy. |
 | Depth | Understand and Recall read the same stored content. No network request when switching. |
@@ -41,8 +41,8 @@ The result is a personal engineering handbook. It should not require maintaining
 | Noise | Skip clear accidental input; uncertain short notes remain recoverable. No permanent “noise concepts.” |
 | Controls | Keep common reading/navigation controls visible; occasional maintenance actions in a menu. |
 | Trust | Sources and revisions available on demand; no “AI” badge on every line and no constant Edit buttons. |
-| Connections | A few useful labeled links with exact navigation and Back; no mandatory graph screen. |
-| Performance | Local reading/search, bounded AI context, cached saved explanations, lazy rendering. |
+| Connections | Keep relations and provenance in storage; omit inline related-link pills from the reading surface to protect space. |
+| Performance | Local reading/search and lazy rendering. Ask AI sends the entire selected subsection; topic-wide requests send the topic. Large topics depend on the provider's context capacity. |
 
 ## 3. Content that supports both learning and recall
 
@@ -71,6 +71,10 @@ Show the definition, a small set of high-value rules, the main example/command, 
 
 “Recall next time” changes a view preference, not a mastery score. Opening a page repeatedly does not prove that you understand it.
 
+### Active review view behavior
+
+The familiar topic/subconcept view is the active UI. Open on a foundational area and sort advanced areas last; do not include an “All” area. Keep essential bullets and commands visible. Code samples collapse by default and expose a concise language/description row with expand and copy icons. AI completion bullets and links to the area's structured concepts appear in collapsed **Deeper detail**. Opening a concept uses the existing explanation page and its saved Understand/Recall preference and sources. Preserve useful command explanations and merge repeated identical commands without discarding distinct explanations.
+
 ### First content pilot
 
 Use a copy of your existing Java capture to demonstrate:
@@ -98,7 +102,7 @@ Preserve the other sections, including CAS, executors, and virtual threads. They
 └────────────────────────────────────────────────────────────────┘
 ```
 
-The top topic strip keeps a stable order. An area opens an index of its concepts; All opens a grouped topic index rather than concatenating every note. A concept opens within the same pane. No permanent sidebar is required.
+Keep the established topic strip, subconcept strip, and grouped knowledge sections as the active navigation. Avoid turning the main view into a long list of concept cards. The handbook index/detail components and data model may remain available for continued work, but they are not the default review experience until their information hierarchy is redesigned around the user's preferred workflow.
 
 Remove the persistent generation field from the header. Put topic creation/generation in the add/overflow action. Put Delete, Move, Sources, Reanalyze, and full-page Copy/Export in the menu. Keep copy controls on code and commands. Pending additions show Accept/Dismiss beside the content; Accept all applies only to the visible batch/scope.
 
@@ -190,11 +194,11 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 
 - [x] **P1.1** Save every capture before AI work; acknowledge only after durable persistence.
 - [x] **P1.2** Unify sensitive-content, personal/idea, noise, and language policies across all entry points.
-- [ ] **P1.3** Replace the single overwriteable pending draft with session/revision-safe scheduling and recoverable unsaved text. Queue and disk recovery are implemented; restart recovery still needs a manual UI check.
+- [x] **P1.3** Replace the single overwriteable pending draft with session/revision-safe scheduling and recoverable unsaved text. Drafts are keyed by capture session, persisted before backend work, restored after FileView recovery loads, and cleared only when exact saved text matches.
 - [x] **P1.4** Reject invalid merge targets and accidental cross-topic merges; remove the “newest note” fallback.
 - [x] **P1.5** Preserve incoming sources during merge, update all derived structures atomically, and support undo.
 - [x] **P1.6** Stop broad content rewriting during database reads; use explicit idempotent migrations.
-- [ ] **P1.7** Handle deliberate ignores, failures, retries, cancellations, and stale results consistently in QML.
+- [x] **P1.7** Handle deliberate ignores, failures, retries, cancellations, and stale results consistently in QML. Skipped captures remain recoverable; failure/retry/stop/keep/ignore controls are available; late completions are token-checked. Backend cancellation and ignore/restore regression tests pass.
 
 **Gate:** offline capture survives restart; invalid IDs alter no unrelated note; sensitive fixtures make no provider call; concurrent capture sessions do not overwrite each other; the displayed content matches accepted merges. Partially verified in tests/test_notes_upgrade_p1.py.
 
@@ -204,24 +208,23 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 - [x] **P2.2** Segment long captures into focused concepts while preserving original source boundaries and snippets.
 - [x] **P2.3** Keep unmatched source text reachable as Unplaced material; record extraction coverage.
 - [x] **P2.4** Store Recall summaries separately from complete explanations; remove display/export string truncation.
-- [x] **P2.5** Build a single presentation model and faithful Markdown export.
+- [ ] **P2.5** Unify the legacy topic/subconcept renderer and concept presentation into one normalized model. Current UI still has separate legacy block aggregation and concept-detail data paths; Markdown export uses the legacy block model.
 - [x] **P2.6** Convert the Java pilot on a test copy and verify section/snippet coverage manually and with fixtures.
 
 **Gate:** every original section is mapped or explicitly unplaced; changing depth is local; the old library remains readable; concept naming changes do not break IDs. Verified on 2026-11-20 in tests/test_notes_upgrade_p2.py and pilot migration.
 
 ### Phase 3 — Reading, navigation, and finding details
 
-- [x] **P3.1** Extract focused QML components for navigation, concept page, blocks, proposals, and Sources.
-- [x] **P3.2** Implement stable topic/area navigation, grouped All index, concept page, and Back history.
+- [ ] **P3.1** Extract the accepted review view into focused components. Concept detail and gap suggestions are components, but the active review remains a large legacy QML file.
+- [ ] **P3.2** Keep the established topic/subconcept navigation active. The experimental grouped index was rejected; stable concept-index navigation and Back history are not part of the active screen.
 - [x] **P3.3** Add Understand/Recall with saved per-concept preference and expansion state. Both persist per concept; opening and switching modes leave the content revision unchanged. Verified in `tests/test_notes_upgrade_recovery.py`.
-- [ ] **P3.4** Implement local search results that open an exact block, including raw-source matches. Backend source spans and QML navigation are implemented; manual click-through is still needed.
-- [x] **P3.5** Simplify the header/actions; preserve dragging, close behavior, search shortcut, and text selection.
+- [ ] **P3.4** Wire local search results into the active view and open exact blocks/sources. Backend search and tests exist, but the restored view currently provides topic-level filtering rather than the proposed exact-result flow.
+- [ ] **P3.5** Refine the restored header/actions while preserving dragging, close behavior, `/` search focus, and text selection.
 - [x] **P3.6** Make commands/code responsive with correct copy behavior and expected-result presentation.
-- [ ] **P3.7** Add unseen-revision indicators and exact navigation to changed content. Concept/topic/area dots work; block-level revision destinations remain.
+- [ ] **P3.7** Surface unseen revisions in the active topic/subconcept view and navigate to the changed content. Concept detail has reading-state support, but the restored view still uses a time-based recent dot and does not consistently jump to the changed block.
+**P3.8 was tried and reverted:** the concept-index grouped-card screen did not fit the user's preferred workflow. Its files are removed.
 
-**Gate:** learn pass-by-value in Understand, reopen it in Recall, and find the exact `computeIfAbsent` example through search. Verify 600×400, 900×620, and 1200×800 plus display scaling and mixed RTL/LTR text. The QML harness loaded at all three sizes; click-through, display scaling, and mixed RTL/LTR remain to check.
-
-**First usable release:** the core handbook is available; the Phase 3 gate above remains open.
+**Current gate:** backend concept/search tests pass, but the active UI has not been live-reloaded and visually verified in this session. Pointer-driven related-link clicks, display scaling, and mixed RTL/LTR remain manual checks. The active screen is the familiar topic/subconcept review, not the index.
 
 ### Phase 4 — Teaching and useful gap completion
 
@@ -229,22 +232,22 @@ Every task starts pending. Mark it complete only after its acceptance evidence i
 - [x] **P4.2** Implement scope-aware coverage inventory and missing-role detection. The local `coverage-inventory` endpoint pages concept/area/topic/All scopes, reports structured roles and provisional candidates, and marks original captures for review before any gap claim. Verified with `tests/test_notes_coverage_inventory.py` and the live 104-concept library.
 - [x] **P4.3** Let All propose missing areas while selected-scope requests remain confined. `suggest-gaps` inspects every inventory page in the selected topic, offers new-area leads only for topic All, and filters AI output to the exact selected area or concept. Original captures are checked for concept suggestions; private sources never reach the provider. Suggestions are review-only until P4.4. Verified by `tests/test_notes_gap_suggestions.py`, the full 191-test suite, and an isolated 900×620 QML load.
 - [x] **P4.4** Add persistent ranked suggestion batches, accept/dismiss/accept-all, evidence details, and undo. Proposals are saved by exact scope and inventory revision; individual operations verify their target scope; accept-all only accepts the displayed scope; undo removes only the exact added block or an otherwise untouched new concept. Verified by `tests/test_notes_gap_suggestions.py` and the full 194-test suite.
-- [ ] **P4.5** Track version/applicability, distinguish unsupported material, and handle source-retrieval failure honestly.
-- [ ] **P4.6** Add bounded context, caching, stale-result rejection, cancellation, and duplicate-request protection.
+- [x] **P4.5** Track version/applicability, distinguish unsupported material, and handle source-retrieval failure honestly. Concepts, blocks, and proposals persist applicability and evidence status. Generated explanations/gap suggestions remain visibly unverified; UI states that external sources were not checked. Version/platform scope is retained only when given by the proposal.
+- [x] **P4.6** Add bounded context, caching, stale-result rejection, cancellation, and duplicate-request protection. Detail context is capped at 16 blocks/700 characters and 12K serialized characters; gap context is capped at 18K; oversized source review returns incomplete. Proposals deduplicate by scope/revision, stale revisions reject, and QML jobs can be cancelled or invalidated on scope changes.
 
 **Gate:** repeated requests do not duplicate content; details already present in long sources are not rediscovered as gaps; missing areas can be proposed; late replies cannot alter another concept; unknown naming history stays unknown.
 
 ### Phase 5 — Connections, scale, and production migration
 
-- [ ] **P5.1** Migrate legacy links conservatively and add typed relationships with explanations and exact destinations.
-- [ ] **P5.2** Scope flag help to tool/subcommand/version; fix coordinate spaces and long-token behavior.
-- [ ] **P5.3** Measure rendering/search at representative sizes; use virtualization and pagination to avoid hidden library limits.
-- [ ] **P5.4** Verify export/restore covers sources, concepts, blocks, revisions, links, proposals, and reading state.
-- [ ] **P5.5** Rehearse migration twice on copies; check idempotence, source hashes, rollback, and interrupted recovery.
-- [ ] **P5.6** Migrate the live library with the verified procedure and preserve the backup/legacy adapter until checks pass.
-- [ ] **P5.7** Validate the live window, reopen/restart behavior, and complete the handoff record below.
+- [x] **P5.1** Migrate legacy links conservatively and add typed relationships with explanations and exact destinations. Only one-to-one legacy note→concept mappings migrate; ambiguous links stay untouched. Relations store status, type, reason, evidence, and optional source capture; lookup/navigation works from either endpoint.
+- [x] **P5.2** Scope flag help to tool/subcommand/version; fix coordinate spaces and long-token behavior. Cache keys include tool, subcommand, version, and flag. `git add -p` and `git log -p` differ correctly; long tokens stay inside a horizontal scroller; tooltip coordinates map into the window.
+- [ ] **P5.3** Measure rendering/search at representative sizes and connect paginated search to the active view. Backend search pages results and has a 1,005-concept regression test; the virtualized concept index was removed, and rendering performance of the restored grouped view is unmeasured.
+- [x] **P5.4** Verify export/restore covers sources, concepts, blocks, revisions, links, proposals, and reading state. SQLite backup/restore helpers use the online backup API and integrity checks; round-trip tests include source mappings, concepts, blocks, relations, proposals, and reading state. Markdown export remains available per concept.
+- [x] **P5.5** Rehearse migration twice on copies; check idempotence, source hashes, rollback, and interrupted recovery. A v15 snapshot migrated twice to v16; integrity, 104 concept IDs, 3 relations, and 115 raw captures were preserved. A partial-column migration fixture resumes safely; backup restore passed.
+- [x] **P5.6** Migrate the live library with the verified procedure and preserve the backup/legacy adapter until checks pass. Live `user_version=16`, `integrity_check=ok`; 115 notes, 104 concepts, 198 blocks, 192 source mappings, 3 relations. Raw capture hashes match the pre-migration backup.
+- [ ] **P5.7** Validate the restored live window, reopen/restart behavior, and complete the handoff record below. Prior live verification covered the experimental index, which is no longer active. Relation lookup is tested from both endpoints and concept detail has been loaded in a harness; current window interaction and physical scaling need rechecking.
 
-**Gate:** all agreed flows work on the real library, old IDs still resolve, no source material disappears, and 1,000+ synthetic concepts remain searchable without a silent 500-row cutoff.
+**Gate:** live v16 integrity/count/hash checks pass, 1,005 synthetic concepts remain searchable across pages, and old note IDs and relations remain available. See the manual interaction note above.
 
 ## 8. Regression scenarios required before completion
 
@@ -272,20 +275,17 @@ Do not add quizzes, streaks, a graph dashboard, automatic snippet execution, a v
 
 ## 10. Completion and continuation record
 
-The upgrade is complete only when the concept model, both reading modes, precise search, scoped explanations/gaps, recoverable migration, and regression scenarios above have been implemented and verified. A visually finished window alone is insufficient.
-
-After each work session, update this block and tick only verified task IDs:
+The established Notes view and Kubernetes content upgrade have been implemented and inspected. The broader handbook proposals above remain historical design context where they differ from the active compact view. In particular, the active view has no All tab, no separate default Understand/Recall mode, no inline related-link pills, and no exact-block search results yet. Do not mark those proposed features complete.
 
 | Field | Current value |
 |---|---|
-| Last completed task | P4.4 persistent gap proposals with acceptance, dismissal, and undo; Phase 1/3 follow-up checks remain open |
-| Next task | P4.5 applicability and unsupported material; manually verify capture recovery and search destinations |
-| Implementation commits | Phase 1: 63df1b08, Phase 2: 7b3c5d2d, Phase 3: 6249e23f, handbook repair/P4.1: 9d041c07; P4.2: 75fc574d; P4.3: 7b58947f; P4.4: 122f81f4, reopen fix: c8ae92c5 |
-| Application files changed | scripts/notes_backend.py, services/Notes.qml, modules/notes/NotesView.qml, HandbookNav.qml, ConceptIndex.qml, ConceptPage.qml, ConceptDetailActions.qml, GapSuggestions.qml, HandbookSearchResults.qml, QuickNote.qml |
-| Baseline checks | 194 tests pass, including persisted scope validation, accept-all, undo, and paging; isolated QML load at 900×620 (earlier handbook loads at 600×400 and 1200×800) |
-| Backup / restore path | ~/.local/share/caelestia/notes/backups/notes_pre_repair_20261121T145050Z.sqlite3 (also the original 2026-11-20 baseline) |
-| Migration state | Schema v15 additive migration defined for persistent gap proposals; applies on next backend access. 115 original captures and 104 concept IDs preserved; 73 live concept metadata/command repairs; original raw capture hash unchanged |
-| Remaining blockers | Exact block-level unread navigation, UI click-through, applicability/version handling, and later phase work |
-| Product direction | Confirmed: understand deeply now, look up quickly later |
+| Last completed task | Kubernetes six-section curation, documented scoped Fill gaps, guarded corrections and undo, local Refresh, semantic unread dots, collapsed YAML, and long-command hover text |
+| Next task | Audit another topic's captures, then test mixed RTL/LTR and narrow-window behavior in the active view |
+| Implementation commits | Earlier phases: 63df1b08, 7b3c5d2d, 6249e23f, 9d041c07, 75fc574d, 7b58947f, 122f81f4, c8ae92c5. Current working-tree changes are uncommitted. |
+| Active files | `modules/notes/NotesViewLegacy.qml`, `TopicInline.qml`, `PendingLine.qml`, `CommandWithFlags.qml`, `SelectableText.qml`, `services/Notes.qml`, `scripts/notes_backend.py`, `scripts/notes_topic_support.py`, `scripts/refine_kubernetes_notes.py` |
+| Verification | Full Python suite: 220 passed; temporary SQLite rehearsal updated 13 and added four with byte-identical raw captures, second pass changed zero. Live Quickshell screenshot showed the six sections and collapsed code. A live provider request for Images on a temporary notebook returned no proposal. See 06 for detail. |
+| Backup | `~/.local/share/caelestia/notes/backups/notes_before_reviewed_k8s_20261122T142644Z.sqlite3` |
+| Live data | Schema v17; 17 active Kubernetes notes in six sections. Sources keep 13 prior captures verbatim. |
+| Remaining limits | Provider/documentation availability affects Fill gaps. Long commands use horizontal scroll/full-text hover. Exact-block search and mixed RTL/LTR remain unverified in the active view. |
 
-For every completed phase, append its changed files, verification results, remaining limitations, and the next task. Keep this record current so a later session can continue without guessing.
+Update this record when the next topic is audited; preserve source captures and record a fresh backup before a data migration.

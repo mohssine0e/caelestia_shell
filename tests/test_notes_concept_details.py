@@ -38,19 +38,26 @@ class ConceptDetailsTest(unittest.TestCase):
         self.assertEqual(answer["block_id"], "existing-why")
 
     def test_proposal_requires_acceptance_and_retry_is_idempotent(self):
-        response = json.dumps({"content": "The copied reference reaches the same object, but rebinding does not change the caller's variable."})
+        response = json.dumps({"content": "The copied reference reaches the same object, but rebinding does not change the caller's variable.",
+                               "applicability": "Java language semantics"})
         with patch.object(backend, "_run_provider", return_value=(response, "mock")) as provider:
             first = backend.concept_detail_rpc({"id": "java-ref", "kind": "why"})
             second = backend.concept_detail_rpc({"id": "java-ref", "kind": "why"})
         provider.assert_called_once()
         self.assertEqual(first["proposal_id"], second["proposal_id"])
+        self.assertEqual(first["evidence_status"], "unverified")
+        self.assertEqual(first["applicability"], "Java language semantics")
         with backend.database() as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM blocks WHERE kind = 'why'").fetchone()[0], 0)
+            proposal = connection.execute("SELECT evidence_status, applicability FROM concept_detail_proposals").fetchone()
+            self.assertEqual(tuple(proposal), ("unverified", "Java language semantics"))
         accepted = backend.accept_concept_detail_rpc({"proposal_id": first["proposal_id"]})
         again = backend.accept_concept_detail_rpc({"proposal_id": first["proposal_id"]})
         self.assertEqual(accepted["block_id"], again["block_id"])
         with backend.database() as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM blocks WHERE kind = 'why'").fetchone()[0], 1)
+            block = connection.execute("SELECT evidence_status, applicability FROM blocks WHERE kind='why'").fetchone()
+            self.assertEqual(tuple(block), ("unverified", "Java language semantics"))
 
     def test_stale_proposal_cannot_change_newer_concept(self):
         with patch.object(backend, "_run_provider", return_value=(json.dumps({"content": "A comparison."}), "mock")):

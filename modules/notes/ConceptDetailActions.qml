@@ -15,6 +15,7 @@ Column {
     property string content: ""
     property string proposalId: ""
     property string errorMessage: ""
+    property string applicability: ""
     property var request: ({})
     property string output: ""
     signal explanationAccepted()
@@ -33,6 +34,7 @@ Column {
         root.content = ""
         root.proposalId = ""
         root.errorMessage = ""
+        root.applicability = ""
         root.run("concept-detail", { id: root.conceptId, kind: kind })
     }
     function run(action, payload): void {
@@ -43,11 +45,13 @@ Column {
         worker.running = true
     }
     onConceptIdChanged: {
+        if (worker.running) worker.running = false
         root.question = ""
         root.state = ""
         root.content = ""
         root.proposalId = ""
         root.errorMessage = ""
+        root.applicability = ""
     }
 
     Row {
@@ -95,6 +99,15 @@ Column {
                         ? qsTr("I don't have enough reliable information to answer this yet.") : root.content)
                 color: root.errorMessage ? Colours.palette.m3error : Colours.palette.m3onSurface
                 font: Tokens.font.body.small
+                wrapMode: Text.WordWrap
+            }
+            StyledText {
+                width: parent.width
+                visible: root.state === "suggested" && !worker.running
+                text: qsTr("AI suggestion · Unverified; no external sources were checked.")
+                    + (root.applicability ? "  ·  " + root.applicability : "")
+                color: Colours.palette.m3onSurfaceVariant
+                font: Tokens.font.label.small
                 wrapMode: Text.WordWrap
             }
             Row {
@@ -145,6 +158,7 @@ Column {
             root.state = result.state || ""
             root.content = result.content || ""
             root.proposalId = result.proposal_id || ""
+            root.applicability = result.applicability || ""
             if (root.state === "stale")
                 root.errorMessage = qsTr("The concept changed while this was being prepared. Try again.")
         }

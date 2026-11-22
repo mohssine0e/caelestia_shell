@@ -16,7 +16,7 @@ TextEdit {
     selectionColor: Qt.alpha(Colours.palette.m3primary, 0.4)
     selectedTextColor: Colours.palette.m3onSurface
     textFormat: markdown ? TextEdit.MarkdownText : TextEdit.PlainText
-    wrapMode: TextEdit.WrapAnywhere
+    wrapMode: TextEdit.Wrap
     color: Colours.palette.m3onSurface
     font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 15 })
 }

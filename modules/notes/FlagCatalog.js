@@ -101,21 +101,52 @@ var CATALOG = {
     }
 };
 
-function getExplanation(tool, flag) {
+var CONTEXTUAL = {
+    "git": {
+        "log": { "-p": "Show the patch introduced by each commit.", "--patch": "Show the patch introduced by each commit." },
+        "add": { "-p": "Interactively choose which changes to stage.", "--patch": "Interactively choose which changes to stage." },
+        "push": { "-f": "Overwrite the remote branch; this can discard others' published commits.", "--force": "Overwrite the remote branch; this can discard others' published commits." },
+        "branch": { "-d": "Delete a branch only when Git considers it merged.", "-D": "Force-delete a branch even if it is not merged." },
+        "commit": { "-a": "Stage tracked modifications and deletions before committing." }
+    },
+    "docker": {
+        "ps": { "-a": "Include stopped containers in the container list.", "--all": "Include stopped containers in the container list." },
+        "run": { "-d": "Start the container in the background and print its ID." },
+        "logs": { "--tail": "Show only the requested number of final log lines." },
+        "build": { "--no-cache": "Build without reusing cached layers." }
+    },
+    "kubectl": {
+        "get": { "-o": "Choose the output format for the selected Kubernetes resources." },
+        "apply": { "-f": "Read desired resources from the specified file or URL." },
+        "logs": { "-f": "Stream new log lines as they are written." }
+    }
+};
+
+var KNOWN_SUBCOMMANDS = {
+    "git": ["add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "pull", "push", "rebase", "reset", "restore", "show", "status", "switch", "tag"],
+    "docker": ["build", "compose", "exec", "images", "inspect", "logs", "ps", "pull", "rm", "rmi", "run", "start", "stop", "volume"],
+    "kubectl": ["apply", "config", "create", "delete", "describe", "exec", "get", "logs", "port-forward", "rollout", "scale", "set", "top"],
+    "podman": ["build", "exec", "images", "inspect", "logs", "ps", "pull", "rm", "run", "start", "stop"],
+    "cargo": ["add", "build", "check", "clippy", "fmt", "install", "run", "test", "update"],
+    "gh": ["auth", "issue", "pr", "release", "repo", "run", "workflow"]
+};
+
+function getExplanation(tool, flag, subcommand) {
     if (!flag) return "";
     var cleanTool = String(tool || "").trim().toLowerCase();
     var cleanFlag = String(flag || "").trim();
 
-    // 1. Direct tool match
-    if (CATALOG[cleanTool] && CATALOG[cleanTool][cleanFlag]) {
-        return CATALOG[cleanTool][cleanFlag];
+    var cleanSubcommand = String(subcommand || "").trim().toLowerCase();
+
+    // 1. The most specific command context wins.
+    if (CONTEXTUAL[cleanTool] && CONTEXTUAL[cleanTool][cleanSubcommand]
+            && CONTEXTUAL[cleanTool][cleanSubcommand][cleanFlag]) {
+        return CONTEXTUAL[cleanTool][cleanSubcommand][cleanFlag];
     }
 
-    // 2. Generic fallback across tools for standard flags
-    for (var t in CATALOG) {
-        if (CATALOG[t][cleanFlag]) {
-            return CATALOG[t][cleanFlag];
-        }
+    // 2. Direct tool match
+    if (CATALOG[cleanTool] && CATALOG[cleanTool][cleanFlag]) {
+        return CATALOG[cleanTool][cleanFlag];
     }
 
     // 3. Fallback for compound short flags like -am, -it, -fd
@@ -134,8 +165,20 @@ function getExplanation(tool, flag) {
 
 function parseTokens(cmd) {
     var raw = String(cmd || "").trim().replace(/^\$\s*/, "");
-    var parts = raw.split(/\s+/);
-    var tool = parts.length > 0 ? parts[0] : "";
+    var parts = raw.split(/\s+/).filter(function(part) { return !!part; });
+    var wrappers = ["sudo", "doas", "command", "exec", "time", "nice", "env"];
+    var toolIndex = 0;
+    while (toolIndex < parts.length && wrappers.indexOf(parts[toolIndex]) >= 0) toolIndex++;
+    while (toolIndex < parts.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(parts[toolIndex])) toolIndex++;
+    var tool = toolIndex < parts.length ? parts[toolIndex].split("/").pop().toLowerCase() : "";
+    var subcommand = "";
+    var allowed = KNOWN_SUBCOMMANDS[tool] || [];
+    for (var commandIndex = toolIndex + 1; commandIndex < parts.length; commandIndex++) {
+        if (allowed.indexOf(parts[commandIndex]) >= 0) {
+            subcommand = parts[commandIndex];
+            break;
+        }
+    }
     var tokens = [];
 
     for (var i = 0; i < parts.length; i++) {
@@ -145,7 +188,8 @@ function parseTokens(cmd) {
         tokens.push({
             text: p,
             isFlag: isFlag,
-            tool: tool
+            tool: tool,
+            subcommand: subcommand
         });
     }
     return tokens;

@@ -1,4 +1,6 @@
-# Current implementation audit
+# Baseline implementation audit
+
+> Historical audit from 2026-11-20. It describes the state at audit time; use [README](README.md) and [MASTER_PLAN](MASTER_PLAN.md) for current behavior. Findings below are not all still open.
 
 Priority describes implementation order. “Reproduced” means a temporary database with mocked provider responses; production data was not mutated for the test.
 
@@ -36,7 +38,7 @@ The live review screenshot shows a readable themed window, useful topic/subsecti
 | `navigateToNote()` changes topic/subsection, then scrolls to the top. | “Related” does not reliably locate the referenced material. | Exact concept/block anchor, brief highlight, and Back history. |
 | Recency uses a 24-hour timestamp test, not last-seen state. | A dot cannot tell you what you have not read; time does not necessarily cause a reactive reevaluation. | Track changed revision versus last-seen revision at block/concept level. |
 | `conciseExplanation()` cuts at 110 characters and removes everything after “along with”. | Details can vanish during rendering/export. | Keep full text; use deliberate summaries plus expansion, never string surgery. |
-| `buildKnowledge()` and `buildSubconceptBlocks()` are competing transformations. | Section names, export, links, and displayed content can diverge. | One normalized presentation model for both UI and Markdown export. |
+| **Resolved 2026-11-21:** the active view used both `buildKnowledge()` and `buildSubconceptBlocks()`. | The unused duplicate aggregator was removed; the active topic/subconcept blocks now drive display and Markdown export. Related-link data remains stored, while inline relation pills were removed from the reading pages. The concept-detail page still has its own backend presentation contract. |
 | A Flickable/Column with nested Repeaters eagerly creates the content. | Scaling risk as notes and examples grow; no measured slowdown claimed yet. | Flatten the visible blocks into a ListView, lazy-load expanded details, and measure. |
 
 Relevant files: [NotesView.qml](../../modules/notes/NotesView.qml), [QuickNote.qml](../../modules/notes/QuickNote.qml), [Notes.qml](../../services/Notes.qml), [TopicInline.qml](../../modules/notes/TopicInline.qml).
@@ -50,3 +52,10 @@ Relevant files: [NotesView.qml](../../modules/notes/NotesView.qml), [QuickNote.q
 ## Scope limits
 
 No claim that every saved technical statement is wrong or right. The source review found uneven preservation and presentation. Existing `docker run -d` examples lack an image argument; existing snippets also include shell-invalid comment syntax such as `//`. A future system should retain these originals while offering a clearly inspectable correction, instead of presenting every copied string as a ready-to-run command.
+
+## Status after implementation work (2026-11-21)
+
+- **Addressed in backend work:** invalid merge targets, local-first capture/eligibility, recoverable merge/source handling, and explicit migration behavior received implementation and regression coverage. See the current master plan and `tests/test_notes_upgrade_p1.py`.
+- **Addressed in presentation:** arbitrary explanation truncation was removed; repeated commands retain distinct explanations; completion bullets and structured concepts are reachable from the restored view's collapsed Deeper detail section.
+- **Still open:** one capture mapping to several concepts is not uniformly reflected in the legacy topic/subconcept presentation; classification quality and broad retrieval still need review against real examples; exact-block search is not wired into the active view; performance is not yet measured in the restored view.
+- **Baseline data:** the counts and SQLite snapshot details below describe the audit snapshot only; do not treat them as current measurements.

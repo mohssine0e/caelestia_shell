@@ -28,6 +28,35 @@ class GapSuggestionTest(unittest.TestCase):
         self.db_patch.stop()
         self.tmp.cleanup()
 
+    def test_semantic_duplicate_filter_keeps_policy_contrasts(self):
+        saved = "Defaults to Always when the image tag is :latest or omitted, and IfNotPresent for all other tags."
+        paraphrase = "If the image tag is omitted or set to latest, imagePullPolicy defaults to Always; for any other tag, it defaults to IfNotPresent."
+        reordered_paraphrase = "When the image tag is explicitly set to :latest or is completely omitted, imagePullPolicy defaults to Always. For any other explicit tag, it defaults to IfNotPresent."
+        partial = "When using the :latest image tag or omitting the tag entirely, imagePullPolicy defaults to Always."
+        contrast = "Use Never when the image must only come from the node's local cache."
+        self.assertTrue(backend._is_duplicate_knowledge(paraphrase, [saved]))
+        self.assertTrue(backend._is_duplicate_knowledge(reordered_paraphrase, [saved]))
+        self.assertTrue(backend._is_duplicate_knowledge(partial, [saved]))
+        self.assertFalse(backend._is_duplicate_knowledge(contrast, [saved]))
+
+    def test_gap_endpoint_does_not_persist_semantic_duplicate(self):
+        saved = "Defaults to Always when the image tag is :latest or omitted, and IfNotPresent for all other tags."
+        paraphrase = "When the image tag is explicitly set to :latest or is completely omitted, imagePullPolicy defaults to Always. For any other explicit tag, it defaults to IfNotPresent."
+        with backend.database() as db:
+            backend._insert_concept_with_blocks(db, {
+                "id": "k8s-image-policy", "topic": "Kubernetes", "area": "Images",
+                "title": "imagePullPolicy", "definition": "Controls image pull behavior."
+            }, [{"kind": "rule", "content": saved}])
+        suggestion = {"kind": "block", "area": "Images", "title": "Default image pull behavior",
+                      "content": paraphrase, "reason": "Explains the default policy.",
+                      "related_concept_id": "k8s-image-policy", "block_kind": "rule"}
+        partial = dict(suggestion, title="Latest tag default",
+                       content="When using the :latest image tag or omitting the tag entirely, imagePullPolicy defaults to Always.")
+        result, _ = self._suggest({"scope": "concept", "id": "k8s-image-policy"}, [suggestion, partial])
+        self.assertEqual(result["suggestions"], [])
+        self.assertEqual(backend.list_gap_proposals_rpc(
+            {"scope": "concept", "id": "k8s-image-policy"})["proposals"], [])
+
     def _suggest(self, payload, items):
         response = json.dumps({"suggestions": items})
         with patch.object(backend, "_run_provider", return_value=(response, "mock")) as provider:
@@ -44,6 +73,7 @@ class GapSuggestionTest(unittest.TestCase):
         result, provider = self._suggest({"scope": "concept", "id": "java-ref"}, items)
         self.assertEqual(len(result["suggestions"]), 1)
         self.assertEqual(result["suggestions"][0]["related_concept_id"], "java-ref")
+        self.assertEqual(result["suggestions"][0]["evidence_status"], "unverified")
         self.assertTrue(result["source_review_complete"])
         self.assertIn('"concept_id": "java-ref"', provider.call_args.args[1])
 
@@ -112,6 +142,7 @@ class GapSuggestionTest(unittest.TestCase):
         stored = backend.list_gap_proposals_rpc({"scope": "concept", "id": "java-ref"})
         self.assertEqual(stored["proposals"][0]["id"], proposal_id)
         self.assertEqual(stored["proposals"][0]["proposal_id"], proposal_id)
+        self.assertEqual(stored["proposals"][0]["evidence_status"], "unverified")
         with self.assertRaisesRegex(ValueError, "different concept"):
             backend.accept_gap_proposal_rpc({"proposal_id": proposal_id,
                 "scope": "concept", "id": "java-list"})
@@ -127,7 +158,8 @@ class GapSuggestionTest(unittest.TestCase):
     def test_topic_proposal_adds_concept_in_suggested_new_area_and_undoes(self):
         item = {"kind": "new_area", "area": "Errors", "title": "Exception handling",
                 "content": "Java exceptions represent failures that callers can handle or propagate.",
-                "reason": "Important for backend development.", "related_concept_id": "", "block_kind": ""}
+                "reason": "Important for backend development.", "related_concept_id": "", "block_kind": "",
+                "applicability": "Java 21+"}
         generated, _ = self._suggest({"scope": "topic", "topic": "Java"}, [item])
         proposal_id = generated["suggestions"][0]["proposal_id"]
         listed = backend.list_gap_proposals_rpc({"scope": "topic", "topic": "Java"})
@@ -136,8 +168,10 @@ class GapSuggestionTest(unittest.TestCase):
         scoped = {"proposal_id": proposal_id, "scope": "topic", "topic": "Java"}
         added = backend.accept_gap_proposal_rpc(scoped)
         with backend.database() as db:
-            concept = db.execute("SELECT topic, area, title FROM concepts WHERE id=?", (added["concept_id"],)).fetchone()
-            self.assertEqual(tuple(concept), ("Java", "Errors", "Exception handling"))
+            concept = db.execute("SELECT topic, area, title, applicability FROM concepts WHERE id=?", (added["concept_id"],)).fetchone()
+            self.assertEqual(tuple(concept), ("Java", "Errors", "Exception handling", "Java 21+"))
+            block = db.execute("SELECT applicability, evidence_status FROM blocks WHERE id=?", (added["block_id"],)).fetchone()
+            self.assertEqual(tuple(block), ("Java 21+", "unverified"))
         backend.undo_gap_proposal_rpc(scoped)
         with backend.database() as db:
             self.assertIsNone(db.execute("SELECT id FROM concepts WHERE id=?", (added["concept_id"],)).fetchone())

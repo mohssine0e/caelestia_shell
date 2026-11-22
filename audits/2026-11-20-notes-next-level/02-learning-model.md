@@ -1,4 +1,6 @@
-# A learning model that fits your use
+# Learning model and product goals
+
+> This document defines the intended learning experience. It is not a claim that all listed controls are implemented. The active UI remains the established topic/subconcept view; concept detail opens from its Deeper detail section. See [current state](README.md).
 
 ## One concept, different amounts of detail
 
@@ -102,11 +104,11 @@ A compact comparison can help choose between mechanisms already in your notes: `
 | Two similar alternatives | Decision criteria and a contrasting example. |
 | A familiar concept already well covered | Return no additions. |
 
-For a selected concept/area, stay within that scope. For All, inspect every area's inventory and propose both incomplete concepts and genuinely missing areas. Present a small prioritized batch; clearly distinguish “missing section proposed” from “new fact in existing section.” Never imply a topic is complete merely because one request returned no suggestions.
+For a selected concept/area, stay within that scope. Area review is explicit; do not add an All scope that mixes unrelated sections. Present a small prioritized batch; clearly distinguish “missing section proposed” from “new fact in existing section.” Never imply a topic is complete merely because one request returned no suggestions.
 
 ## Connections that teach
 
-Replace generic Related pills with a few explanatory links: **Requires**, **Example of**, **Compare with**, **Used by**, or **Contradicts**. For a contradiction, check whether the two claims concern different versions or contexts before treating them as incompatible.
+Keep useful concept relations and their evidence in storage, but omit related-link pills from the reading surface so they do not take space from the notes. If a future connection control is introduced, it should use a specific relation such as **Requires**, **Example of**, **Compare with**, **Used by**, or **Contradicts** and navigate to the exact concept/block. For a contradiction, check whether the claims concern different versions or contexts before treating them as incompatible.
 
 Navigate to the exact concept/block and preserve a Back path. Start with two or three useful connections; a full graph is optional later.
 

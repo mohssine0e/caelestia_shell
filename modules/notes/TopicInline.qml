@@ -13,7 +13,7 @@ Item {
     property string errorMessage: ""
     property string notice: ""
     property var pending: ({})
-    property string output: ""
+    property var lastAcceptedIds: []
     readonly property bool busy: worker.running
     readonly property string busyAction: busy ? pending.action || "" : ""
     readonly property var available: suggestions.filter(item => item.state === "suggested" && item.content)
@@ -23,7 +23,6 @@ Item {
         errorMessage = ""
         notice = ""
         pending = Object.assign({ topic: topic, action: action, subconcept: subconcept }, fields)
-        output = ""
         worker.command = ["python3", Notes.backendPath, action]
         worker.running = true
         return true
@@ -32,6 +31,16 @@ Item {
         const target = String(section || "").toLowerCase().trim()
         return available.filter(item => String(item.section || "").toLowerCase().trim() === target)
     }
+    function pendingByKind(kind): var {
+        return available.filter(item => {
+            const target = item.action === "replace" ? Notes.notes.find(n => n.id === item.target_note_id) : null
+            const targetKind = target?.technical_type === "command" ? "command"
+                : ((target?.exact_excerpts || []).length ? "code" : "bullet")
+            return (target ? targetKind : (item.kind || "bullet")) === kind
+        })
+    }
+    function reload(): void { request("learning-list") }
+    function undo(): void { request("undo-topic-lines", { ids: lastAcceptedIds }) }
     readonly property var pendingSections: {
         const list = []
         const seen = new Set()
@@ -49,14 +58,45 @@ Item {
     function discard(id): void { request("dismiss-gap", { id: id }) }
     function acceptAll(): void { request("accept-all-topic-lines") }
 
+    function finishRequest(output): void {
+        const result = Notes.parseResult(output)
+        const completedRequest = root.pending
+        if (result.note) Notes.refresh()
+        if (completedRequest.topic !== root.topic || completedRequest.subconcept !== root.subconcept) {
+            if (root.topic) Qt.callLater(() => root.request("learning-list"))
+            return
+        }
+        if (!result.success) {
+            root.errorMessage = result.error || qsTr("Could not update this topic.")
+            return
+        }
+        root.suggestions = result.suggestions || []
+        if (completedRequest.action === "accept-topic-line" || completedRequest.action === "accept-all-topic-lines") {
+            Notes.refresh()
+            root.lastAcceptedIds = result.changed_ids || []
+            root.notice = qsTr("Saved.")
+            noticeTimer.restart()
+        } else if (completedRequest.action === "undo-topic-lines") {
+            Notes.refresh()
+            root.lastAcceptedIds = []
+            root.notice = qsTr("Changes undone.")
+            noticeTimer.restart()
+        } else if (completedRequest.action === "fill-topic" && root.available.length === 0) {
+            root.notice = qsTr("No useful additions found for this subsection.")
+            noticeTimer.restart()
+        }
+    }
+
     onTopicChanged: {
         suggestions = []
+        lastAcceptedIds = []
         errorMessage = ""
         notice = ""
         if (topic && !busy) request("learning-list")
     }
     onSubconceptChanged: {
         suggestions = []
+        lastAcceptedIds = []
         errorMessage = ""
         notice = ""
         if (topic && !busy) request("learning-list")
@@ -74,28 +114,7 @@ Item {
 
         stdinEnabled: true
         onStarted: write(JSON.stringify(root.pending) + "\n")
-        stdout: SplitParser { onRead: data => root.output += data }
-        onExited: exitCode => {
-            const result = Notes.parseResult(root.output)
-            const request = root.pending
-            if (result.note) Notes.refresh()
-            if (request.topic !== root.topic || request.subconcept !== root.subconcept) {
-                if (root.topic) Qt.callLater(() => root.request("learning-list"))
-                return
-            }
-            if (!result.success) {
-                root.errorMessage = result.error || qsTr("Could not update this topic.")
-                return
-            }
-            root.suggestions = result.suggestions || []
-            if (request.action === "accept-topic-line" || request.action === "accept-all-topic-lines") {
-                Notes.refresh()
-                root.notice = qsTr("Added to topic.")
-                noticeTimer.restart()
-            } else if (request.action === "fill-topic" && root.available.length === 0) {
-                root.notice = qsTr("No new gaps found.")
-                noticeTimer.restart()
-            }
-        }
+        stdout: StdioCollector { id: responseCollector }
+        onExited: root.finishRequest(responseCollector.text)
     }
 }

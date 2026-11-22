@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Layouts
 import Quickshell.Io
 import Caelestia.Config
 import qs.components
@@ -23,10 +24,11 @@ Column {
 
     readonly property string scopeKey: scope + "|" + topic + "|" + area + "|" + conceptId
     width: parent?.width ?? 0
-    spacing: 8
+    spacing: 5
 
     Component.onCompleted: loadPending()
     onScopeKeyChanged: {
+        if (worker.running) worker.running = false
         opened = false
         suggestions = []
         accepted = []
@@ -59,35 +61,49 @@ Column {
         Qt.callLater(() => loadPending())
     }
 
-    TextButton {
-        text: worker.running && root.request.key === root.scopeKey ? qsTr("Working…") : qsTr("Fill gaps")
-        type: root.opened ? ButtonBase.Tonal : ButtonBase.Text
-        horizontalPadding: 9
-        verticalPadding: 5
-        enabled: !worker.running && (root.scope === "concept"
-            ? !!root.conceptId : !!root.topic && root.topic !== "All")
-        onClicked: {
-            if (root.opened) {
-                root.opened = false
-                return
+    Row {
+        spacing: 2
+        TextButton {
+            text: worker.running && root.request.key === root.scopeKey ? qsTr("Working…") : qsTr("Fill gaps")
+            type: root.opened ? ButtonBase.Tonal : ButtonBase.Text
+            horizontalPadding: 9
+            verticalPadding: 5
+            enabled: !worker.running && (root.scope === "concept"
+                ? !!root.conceptId : !!root.topic && root.topic !== "All")
+            onClicked: {
+                if (root.opened) {
+                    root.opened = false
+                    return
+                }
+                root.opened = true
+                root.errorMessage = ""
+                root.message = ""
+                if (root.suggestions.length + root.accepted.length > 0) return
+                if (!Notes.providerConfigured) {
+                    root.errorMessage = qsTr("Configure an AI provider to look for gaps.")
+                    return
+                }
+                root.run("suggest-gaps", { scope: root.scope, topic: root.topic,
+                    area: root.area, id: root.conceptId }, true)
             }
-            root.opened = true
-            root.errorMessage = ""
-            root.message = ""
-            if (root.suggestions.length + root.accepted.length > 0) return
-            if (!Notes.providerConfigured) {
-                root.errorMessage = qsTr("Configure an AI provider to look for gaps.")
-                return
+        }
+        TextButton {
+            visible: worker.running && root.request.key === root.scopeKey
+            text: qsTr("Stop")
+            type: ButtonBase.Text
+            horizontalPadding: 7
+            verticalPadding: 5
+            onClicked: {
+                root.request = { key: "cancelled", action: "cancel", payload: {} }
+                worker.running = false
             }
-            root.run("suggest-gaps", { scope: root.scope, topic: root.topic,
-                area: root.area, id: root.conceptId }, true)
         }
     }
 
     Column {
         width: parent.width
         visible: root.opened
-        spacing: 8
+        spacing: 5
         StyledText {
             width: parent.width
             visible: worker.running && root.request.key === root.scopeKey || !!root.message
@@ -96,7 +112,8 @@ Column {
                 ? qsTr("Reviewing this %1…").arg(root.scope)
                 : root.errorMessage || root.message || qsTr("No clear gaps suggested for this %1.").arg(root.scope)
             color: root.errorMessage ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
-            font: Tokens.font.body.small
+            font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 12,
+                weight: Tokens.font.body.small.weight })
             wrapMode: Text.WordWrap
         }
         Repeater {
@@ -105,48 +122,58 @@ Column {
                 id: suggestionCard
                 required property var modelData
                 width: parent.width
-                implicitHeight: suggestionContent.implicitHeight + 20
+                implicitHeight: suggestionRow.implicitHeight + 12
                 radius: Tokens.rounding.small
                 color: Colours.palette.m3surfaceContainerLow
-                border.width: 1
-                border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.55)
-                Column {
-                    id: suggestionContent
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 10
-                    spacing: 4
-                    StyledText {
-                        width: parent.width
-                        text: suggestionCard.modelData.title
-                        color: Colours.palette.m3onSurface
-                        font: Tokens.font.title.small
-                        wrapMode: Text.WordWrap
+                RowLayout {
+                    id: suggestionRow
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    spacing: 10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 2
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: suggestionCard.modelData.title
+                            color: Colours.palette.m3onSurface
+                            font: Qt.font({ family: Tokens.font.title.small.family, pixelSize: 14,
+                                weight: Font.DemiBold })
+                            elide: Text.ElideRight
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: suggestionCard.modelData.content
+                            color: Colours.palette.m3onSurface
+                            font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 12,
+                                weight: Tokens.font.body.small.weight })
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: qsTr("Unverified · no external sources checked%1 · %2")
+                                .arg(suggestionCard.modelData.applicability
+                                    ? " · " + suggestionCard.modelData.applicability : "")
+                                .arg(suggestionCard.modelData.reason || suggestionCard.modelData.evidence || "")
+                            color: Colours.palette.m3onSurfaceVariant
+                            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11,
+                                weight: Tokens.font.label.small.weight })
+                            elide: Text.ElideRight
+                        }
                     }
-                    StyledText {
-                        width: parent.width
-                        text: suggestionCard.modelData.content
-                        color: Colours.palette.m3onSurface
-                        font: Tokens.font.body.small
-                        wrapMode: Text.WordWrap
-                    }
-                    StyledText {
-                        width: parent.width
-                        text: qsTr("%1 · %2").arg(suggestionCard.modelData.evidence || suggestionCard.modelData.area)
-                            .arg(suggestionCard.modelData.reason || "")
-                        color: Colours.palette.m3onSurfaceVariant
-                        font: Tokens.font.label.small
-                        wrapMode: Text.WordWrap
-                    }
-                    Row {
-                        spacing: 6
+                    Column {
+                        spacing: 1
                         TextButton {
                             visible: suggestionCard.modelData.state !== "accepted"
                             text: qsTr("Add")
                             type: ButtonBase.Tonal
-                            horizontalPadding: 8
-                            verticalPadding: 4
+                            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11,
+                                weight: Tokens.font.label.small.weight })
+                            horizontalPadding: 6
+                            verticalPadding: 2
                             onClicked: root.run("accept-gap-proposal",
                                 root.proposalPayload(suggestionCard.modelData.proposal_id), true)
                         }
@@ -154,8 +181,10 @@ Column {
                             visible: suggestionCard.modelData.state !== "accepted"
                             text: qsTr("Dismiss")
                             type: ButtonBase.Text
-                            horizontalPadding: 8
-                            verticalPadding: 4
+                            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11,
+                                weight: Tokens.font.label.small.weight })
+                            horizontalPadding: 6
+                            verticalPadding: 2
                             onClicked: root.run("dismiss-gap-proposal",
                                 root.proposalPayload(suggestionCard.modelData.proposal_id), true)
                         }
@@ -163,8 +192,10 @@ Column {
                             visible: suggestionCard.modelData.state === "accepted"
                             text: qsTr("Undo")
                             type: ButtonBase.Text
-                            horizontalPadding: 8
-                            verticalPadding: 4
+                            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 11,
+                                weight: Tokens.font.label.small.weight })
+                            horizontalPadding: 6
+                            verticalPadding: 2
                             onClicked: root.run("undo-gap-proposal",
                                 root.proposalPayload(suggestionCard.modelData.proposal_id), true)
                         }
@@ -176,6 +207,8 @@ Column {
             visible: root.suggestions.length > 0
             text: qsTr("Accept all (%1)").arg(root.suggestions.length)
             type: ButtonBase.Tonal
+            font: Qt.font({ family: Tokens.font.label.small.family, pixelSize: 12,
+                weight: Tokens.font.label.small.weight })
             horizontalPadding: 9
             verticalPadding: 5
             onClicked: root.run("accept-all-gap-proposals", Object.assign(

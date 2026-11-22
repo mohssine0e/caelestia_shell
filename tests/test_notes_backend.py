@@ -87,6 +87,26 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(stored["status"], "format_failed")
         self.assertEqual(stored["format_error"], "offline")
 
+    def test_cancel_triage_invalidates_the_writer_and_preserves_capture(self):
+        note = notes.create_note({"raw_content": "A note that is safe to cancel."})["note"]
+        with notes.database() as db:
+            db.execute("UPDATE notes SET status='formatting', triage_token='active-token' WHERE id=?", (note["id"],))
+        result = notes.cancel_triage({"id": note["id"]})
+        self.assertTrue(result["cancelled"])
+        saved = notes.get_note({"id": note["id"]})["note"]
+        self.assertEqual(saved["status"], "inbox")
+        self.assertEqual(saved["raw_content"], "A note that is safe to cancel.")
+        with notes.database() as db:
+            self.assertIsNone(db.execute("SELECT triage_token FROM notes WHERE id=?", (note["id"],)).fetchone()[0])
+
+    def test_user_can_ignore_and_restore_a_note_from_skipped_state(self):
+        note = notes.create_note({"raw_content": "A short but meaningful thought."})["note"]
+        ignored = notes.set_keep_decision({"id": note["id"], "decision": "skip"})["note"]
+        self.assertEqual(ignored["keep_decision"], "skip")
+        restored = notes.set_keep_decision({"id": note["id"], "decision": "pending"})["note"]
+        self.assertEqual(restored["keep_decision"], "pending")
+        self.assertEqual(restored["raw_content"], note["raw_content"])
+
     def test_triage_keeps_personal_thought_verbatim(self):
         original = "I focus better when I start with one small task."
         note = notes.create_note({"raw_content": original})["note"]
@@ -219,7 +239,7 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(lines[1]["command"], "docker logs <container>")
         self.assertEqual(len(notes.list_notes({})["notes"]), 1)
 
-    def test_fill_topic_requests_overview_when_first_reply_has_only_commands(self):
+    def test_fill_topic_does_not_force_overview_or_second_request(self):
         notes.create_note({"raw_content": "docker ps lists running containers"})
         command = json.dumps([{"section": "commands", "content": "Lists images.", "command": "docker images"}])
         overview = json.dumps([{"section": "overview", "content": "Docker runs applications in containers.",
@@ -227,8 +247,8 @@ class NotesBackendTest(unittest.TestCase):
         with mock.patch.object(notes, "_run_provider", side_effect=[(command, "gemini"),
                                                                       (overview, "gemini")]) as provider:
             lines = notes.fill_topic({"topic": "Docker"})["suggestions"]
-        self.assertEqual(provider.call_count, 2)
-        self.assertEqual({item["section"] for item in lines}, {"overview", "commands"})
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual({item["section"] for item in lines}, {"commands"})
 
     def test_accept_line_organizes_command_and_is_idempotent(self):
         lines = self._fill_lines()
@@ -593,9 +613,11 @@ class NotesBackendTest(unittest.TestCase):
         self.assertEqual(notes.infer_subconcept("Java", "Stream filter and collect", "", "Collectors.toList()"), "Stream API & Lambdas")
         self.assertEqual(notes.infer_subconcept("Java", "Try with resources", "", "BufferedReader reader"), "Exception Handling")
         self.assertEqual(notes.infer_subconcept("Java", "Spring Transactional Service", "", "@RestController @Service"), "Spring & Framework")
-        self.assertEqual(notes.infer_subconcept("Kubernetes", "Deploy pod replicas", "", "deployment spec"), "Workloads & Traffic")
-        self.assertEqual(notes.infer_subconcept("Kubernetes", "ConfigMap and secrets", "", "volumeMounts"), "Config & Storage")
-        self.assertEqual(notes.infer_subconcept("Kubernetes", "kubectl rollout restart", "", "kubectl drain"), "CLI & Operations")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "Deploy pod replicas", "", "deployment spec"), "Deployments")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "ConfigMap and secrets", "", "volumeMounts"), "Configuration & Storage")
+        self.assertEqual(notes.infer_subconcept("Kubernetes", "kubectl rollout restart", "", "kubectl drain"), "Deployments")
+        self.assertEqual(notes.infer_subconcept("Java", "Object identity overview"), "Basics")
+        self.assertEqual(notes.infer_subconcept("Terraform", "Provider basics"), "Basics")
 
     def test_smart_upsert_developer_note_with_snippets_and_mechanics(self):
         raw = (

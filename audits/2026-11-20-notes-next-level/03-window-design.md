@@ -1,5 +1,7 @@
 # Window and interaction proposal
 
+> Proposal, not the current screen specification. The concept-index layout described here was tried, rejected, and removed. Keep the established review view as the default and apply compatible improvements within it. Current behavior is documented in [README](README.md).
+
 ## Preserve the useful shape
 
 Keep one floating, draggable review window and the separate capture mode of that same window. Use the existing global theme. The first design should work at the observed **900×620** size, then at **600×400** and larger sizes. This is a content/navigation redesign, not another palette project.
@@ -7,7 +9,7 @@ Keep one floating, draggable review window and the separate capture mode of that
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ Java   Git   Docker   RabbitMQ…           Search /           ×   │
-│ Memory & References   Collections   Concurrency   All…            │
+│ Basics   Memory & References   Collections   Concurrency …       │
 ├──────────────────────────────────────────────────────────────────┤
 │ ←  Pass-by-value                    Understand | Recall      ⋯  │
 │ A method receives a copy of each argument value.                 │
@@ -32,7 +34,7 @@ The wireframe illustrates navigation and hierarchy, not final pixel placement. S
 
 ## Finding a concept
 
-Topic pills retain stable positions. The second strip groups areas. Clicking an area opens a compact concept index in the main pane: title plus one-line description. Clicking a concept opens its page. **All is an index of concepts grouped by area**, not every fact in a single endless scroll.
+Topic pills retain stable positions. The second strip groups areas with Basics/foundations first and advanced areas last. There is no All tab: select an area to read its grouped notes and use Fill gaps within that area. The concept-index interaction described in the original proposal was rejected; keep the familiar review view active.
 
 Use breadcrumbs/Back within the same pane. No permanent left sidebar. Remember the last concept, view mode, and anchored scroll position per topic. A newly saved concept should not steal focus from the page being read.
 
@@ -43,7 +45,7 @@ At large widths, an optional narrow “On this page” outline can appear; colla
 - Keep topic navigation, search, and close in the top bar. Leave an explicit empty drag region; dragging must not steal text selection or pill clicks.
 - Move permanent “AI generate topic…” into the topic-overflow/add action.
 - Keep Understand/Recall visible on a concept page. Put Copy page, Sources, Reanalyze, Move, and Delete in the overflow menu.
-- Offer one contextual “Fill gaps” action for the current scope. Show accept/dismiss controls next to pending additions, with Accept all only while reviewing that batch.
+- Offer one contextual “Fill gaps” action for the selected area. Show accept/dismiss controls next to pending additions, with Accept all only while reviewing that batch.
 - Rename “Sync” to “Reanalyze capture” where that is its actual behavior; it is not remote synchronization.
 
 ## Search should answer “where is the detail?”
@@ -58,7 +60,7 @@ Use global typography tokens: approximately 15–16px body, 24–28px concept ti
 
 Prose wraps by word. Code preserves indentation and supports horizontal scrolling; optionally offer wrapping without changing copied text. On narrow windows, stack a command's explanation below it. Long tokens, references, and pills must not force the window wider or disappear under adjacent controls.
 
-One copy affordance per command or code block. Explain flags in their subcommand context. Distinguish a complete example from a fragment with placeholders. Keep an important state-changing effect beside a command; put secondary details in expansion.
+One copy affordance per command or code block. Code samples start collapsed; place a language badge, a brief one-line description, expand control, and icon-only copy action together in the header. Keep code text and copied bytes exact; put short explanations beside the snippet rather than inserting generated comments into source code. Explain flags in their subcommand context. Distinguish a complete example from a fragment with placeholders. Keep an important state-changing effect beside a command; put secondary details in expansion.
 
 ## Updates and suggestions
 

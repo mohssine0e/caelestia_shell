@@ -31,6 +31,10 @@ Item {
     readonly property var expandableBlocks: conceptView?.expandable_blocks || []
     readonly property var sources: conceptView?.sources || []
 
+    function displayArea(value): string {
+        return String(value || "").trim()
+    }
+
     function sectionFor(kind): string {
         if (kind === "command") return qsTr("COMMANDS")
         if (kind === "code") return qsTr("CODE & EXAMPLES")
@@ -42,6 +46,23 @@ Item {
         if (kind === "why") return qsTr("WHY IT MATTERS")
         if (kind === "unplaced") return qsTr("FROM THE SOURCE")
         return qsTr("KEY POINTS")
+    }
+
+    component SectionHeading: RowLayout {
+        id: sectionHeading
+        required property string text
+        width: parent ? parent.width : implicitWidth
+        spacing: 9
+        StyledText {
+            text: sectionHeading.text
+            color: Colours.palette.m3onSurfaceVariant
+            font: Tokens.font.label.small
+        }
+        Rectangle {
+            Layout.fillWidth: true
+            height: 1
+            color: Qt.alpha(Colours.palette.m3outlineVariant, 0.42)
+        }
     }
     function scrollToHighlight(): void {
         if (!root.highlightBlockId) return
@@ -65,17 +86,17 @@ Item {
     }
 
     ColumnLayout {
-        width: Math.min(Math.max(0, parent.width - 52), 900)
+        width: Math.min(Math.max(0, parent.width - 44), 1120)
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.topMargin: 18
-        anchors.bottomMargin: 16
-        spacing: 14
+        anchors.topMargin: 12
+        anchors.bottomMargin: 12
+        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 6
             IconButton {
                 icon: "arrow_back"
                 type: ButtonBase.Text
@@ -83,7 +104,7 @@ Item {
             }
             StyledText {
                 Layout.fillWidth: true
-                text: (root.concept.topic || "") + "  /  " + (root.concept.area || "")
+                text: (root.concept.topic || "") + "  /  " + root.displayArea(root.concept.area)
                 color: Colours.palette.m3onSurfaceVariant
                 font: Tokens.font.label.small
                 elide: Text.ElideRight
@@ -124,17 +145,18 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: 3
+            spacing: 2
             model: root.blocks
 
             header: Column {
                 width: blocksList.width
-                spacing: 9
+                    spacing: 7
                 StyledText {
                     width: parent.width
                     text: root.concept.title || qsTr("Untitled concept")
                     color: Colours.palette.m3onSurface
-                    font: Tokens.font.title.large
+                    font: Qt.font({ family: Tokens.font.title.large.family, pixelSize: 24,
+                        weight: Font.DemiBold })
                     wrapMode: Text.WordWrap
                 }
                 SelectableText {
@@ -142,7 +164,8 @@ Item {
                     visible: !!root.concept.definition
                     text: root.concept.definition || ""
                     color: Colours.palette.m3onSurfaceVariant
-                    font: Tokens.font.body.medium
+                    font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 14,
+                        weight: Tokens.font.body.medium.weight })
                     wrapMode: TextEdit.WordWrap
                 }
                 Row {
@@ -191,8 +214,13 @@ Item {
                 readonly property bool firstInSection: index === 0 ||
                     root.sectionFor(root.blocks[index - 1].kind || "rule") !== section
                 readonly property bool highlighted: root.highlightBlockId === modelData.id
+                property bool codeExpanded: false
+                property bool copied: false
                 width: blocksList.width
                 height: blockColumn.implicitHeight + 9
+                onHighlightedChanged: {
+                    if (highlighted && kind === "code") codeExpanded = true
+                }
 
                 Rectangle {
                     anchors.fill: parent
@@ -211,53 +239,95 @@ Item {
                     anchors.rightMargin: blockRow.highlighted ? 7 : 0
                     spacing: 8
 
-                    StyledText {
+                    SectionHeading {
                         visible: blockRow.firstInSection
                         text: blockRow.section
-                        color: Colours.palette.m3primary
-                        font: Tokens.font.label.small
                     }
 
                     Rectangle {
                         visible: blockRow.kind === "code" || blockRow.kind === "command"
                         width: parent.width
-                        height: visible ? Math.min(260, codeColumn.implicitHeight + 20) : 0
-                        radius: Tokens.rounding.small
+                        height: visible ? codeColumn.implicitHeight + 14 : 0
+                        radius: 7
                         color: Colours.palette.m3surfaceContainerLow
-                        border.width: 1
-                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.5)
                         Column {
                             id: codeColumn
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 10
-                            spacing: 8
+                            anchors.margins: 7
+                            spacing: 4
                             RowLayout {
+                                id: snippetHeader
                                 width: parent.width
-                                spacing: 6
-                                StyledText {
+                                spacing: 7
+                                Rectangle {
+                                    visible: !!blockRow.modelData.language
+                                    radius: 4
+                                    color: Qt.alpha(Colours.palette.m3primary, 0.15)
+                                    implicitWidth: codeLanguage.implicitWidth + 10
+                                    implicitHeight: 20
+                                    StyledText {
+                                        id: codeLanguage
+                                        anchors.centerIn: parent
+                                        text: String(blockRow.modelData.language || "").toUpperCase()
+                                        color: Colours.palette.m3primary
+                                        font: Qt.font({ family: Tokens.font.mono.small.family, pixelSize: 10,
+                                            weight: Font.Bold })
+                                    }
+                                }
+                                SelectableText {
                                     Layout.fillWidth: true
-                                    text: blockRow.modelData.label || blockRow.modelData.explanation
+                                    Layout.minimumWidth: 0
+                                    text: blockRow.modelData.explanation || blockRow.modelData.label
                                         || (blockRow.kind === "command" ? qsTr("Command") : qsTr("Example"))
                                     color: Colours.palette.m3onSurfaceVariant
-                                    font: Tokens.font.label.small
-                                    elide: Text.ElideRight
+                                    font: Qt.font({ family: Tokens.font.body.small.family, pixelSize: 12,
+                                        weight: Tokens.font.body.small.weight })
+                                    wrapMode: TextEdit.NoWrap
                                 }
-                                StyledText {
-                                    text: String(blockRow.modelData.language || "").toUpperCase()
-                                    color: Colours.palette.m3onSurfaceVariant
-                                    font: Tokens.font.label.small
+                                Item {
+                                    id: snippetCopy
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    opacity: snippetCopyMouse.containsMouse || blockRow.copied ? 1 : 0.45
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                    MaterialIcon {
+                                        anchors.centerIn: parent
+                                        text: blockRow.copied ? "check" : "content_copy"
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        fill: 0
+                                        fontStyle: Tokens.font.icon.size(12).build()
+                                    }
+                                    MouseArea {
+                                        id: snippetCopyMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            Quickshell.clipboardText = blockRow.modelData.content || ""
+                                            blockRow.copied = true
+                                        }
+                                    }
+                                    Timer {
+                                        interval: 1200
+                                        running: blockRow.copied
+                                        onTriggered: blockRow.copied = false
+                                    }
                                 }
-                                IconButton {
-                                    icon: "content_copy"
-                                    type: ButtonBase.Text
-                                    onClicked: Quickshell.clipboardText = blockRow.modelData.content || ""
+                                TapHandler {
+                                    target: null
+                                    enabled: blockRow.kind === "code"
+                                    onTapped: point => {
+                                        if (point.position.x < snippetHeader.width - snippetCopy.width - 7)
+                                            blockRow.codeExpanded = !blockRow.codeExpanded
+                                    }
                                 }
                             }
                             Flickable {
+                                visible: blockRow.kind !== "code" || blockRow.codeExpanded
                                 width: parent.width
-                                height: Math.min(198, codeText.implicitHeight)
+                                height: visible ? Math.min(198, codeText.implicitHeight) : 0
                                 contentWidth: Math.max(width, codeText.implicitWidth)
                                 contentHeight: codeText.implicitHeight
                                 clip: true
@@ -291,9 +361,23 @@ Item {
                             width: Math.max(0, parent.width - 15)
                             text: blockRow.modelData.content || ""
                             color: Colours.palette.m3onSurface
-                            font: Tokens.font.body.medium
+                            font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 14,
+                                weight: Tokens.font.body.medium.weight })
                             wrapMode: TextEdit.WordWrap
                         }
+                    }
+                    StyledText {
+                        width: parent.width
+                        visible: blockRow.modelData.evidence_status === "unverified"
+                            || !!blockRow.modelData.applicability
+                        text: (blockRow.modelData.evidence_status === "unverified"
+                            ? qsTr("Unverified") : "")
+                            + (blockRow.modelData.applicability
+                                ? (blockRow.modelData.evidence_status === "unverified" ? " · " : "")
+                                    + blockRow.modelData.applicability : "")
+                        color: Colours.palette.m3onSurfaceVariant
+                        font: Tokens.font.label.small
+                        wrapMode: Text.WordWrap
                     }
                 }
             }
@@ -319,7 +403,8 @@ Item {
                         width: blocksList.width
                         text: "•  " + (modelData.content || "")
                         color: Colours.palette.m3onSurfaceVariant
-                        font: Tokens.font.body.medium
+                        font: Qt.font({ family: Tokens.font.body.medium.family, pixelSize: 14,
+                            weight: Tokens.font.body.medium.weight })
                         wrapMode: TextEdit.WordWrap
                     }
                 }

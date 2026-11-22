@@ -3,6 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Caelestia
 import qs.services
 
 Singleton {
@@ -35,6 +36,9 @@ Singleton {
     property var _organizeQueue: []
     property string _activeOrganizeId: ""
     property string _rerunOrganizeId: ""
+    property var _cancelledOrganizeIds: []
+    property var _cancelTriageQueue: []
+    property string _activeCancelTriageId: ""
     property var _activeDraftRequest: ({})
     property var _draftQueue: []
     property var _draftIds: ({})
@@ -43,6 +47,7 @@ Singleton {
     property string _listOutput: ""
     property string _mutationOutput: ""
     property string _organizeOutput: ""
+    property string _cancelOutput: ""
     readonly property bool generatingTopic: generateTopicProc.running
     property var _generateTopicInput: ({})
     property string _generateTopicOutput: ""
@@ -67,6 +72,9 @@ Singleton {
     property var concepts: []
     property var currentConceptView: null
     property var searchResults: []
+    property int searchTotal: 0
+    property int searchNextOffset: 0
+    property bool searchHasMore: false
     property bool searching: searchProc.running
     property bool loadingConcept: conceptGetProc.running
 
@@ -82,7 +90,8 @@ Singleton {
     property var _exportInput: ({})
     property var _seenQueue: []
     property string _activeSeenId: ""
-    property bool _pendingSync: false
+    property var _pendingSyncIds: []
+    property var _syncInput: ({})
     property bool _pendingRefresh: false
 
     function listConcepts(topic, area): void {
@@ -111,8 +120,16 @@ Singleton {
         expansionProc.running = true
     }
 
-    function searchConcepts(query): void {
-        _searchInput = { query: query }
+    function searchConcepts(query, offset): void {
+        const value = String(query || "")
+        const start = offset === undefined ? 0 : Math.max(0, Number(offset) || 0)
+        _searchInput = { query: value, offset: start, limit: 50 }
+        if (start === 0) {
+            root.searchResults = []
+            root.searchTotal = 0
+            root.searchNextOffset = 0
+            root.searchHasMore = false
+        }
         if (searchProc.running) return
         searchProc.command = ["python3", root.backendPath, "search-concepts"]
         searchProc.running = true
@@ -124,11 +141,15 @@ Singleton {
         exportProc.running = true
     }
 
-    function syncLegacyNotes(): void {
+    function syncLegacyNotes(noteId): void {
+        const targetId = String(noteId || "")
         if (syncLegacyProc.running) {
-            root._pendingSync = true
+            const pending = root._pendingSyncIds.slice()
+            if (!pending.includes(targetId)) pending.push(targetId)
+            root._pendingSyncIds = pending
             return
         }
+        root._syncInput = targetId ? { id: targetId } : {}
         syncLegacyProc.command = ["python3", root.backendPath, "sync-legacy-notes"]
         syncLegacyProc.running = true
     }
@@ -152,9 +173,20 @@ Singleton {
     }
 
     function parseResult(text): var {
+        const output = String(text || "").replace(/^\uFEFF/, "").trim()
         try {
-            return JSON.parse(String(text || "").trim())
+            return JSON.parse(output)
         } catch (e) {
+            // Process stdout can include a warning before the backend's JSON line.
+            // Parse the last standalone JSON object so that noise does not break note loading.
+            const lines = output.split(/\r?\n/)
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i].trim()
+                if (!line.startsWith("{") || !line.endsWith("}")) continue
+                try {
+                    return JSON.parse(line)
+                } catch (ignored) {}
+            }
             return { success: false, error: qsTr("The notes backend returned an invalid response.") }
         }
     }
@@ -313,6 +345,38 @@ Singleton {
         return id === root._activeOrganizeId || root._organizeQueue.indexOf(id) >= 0
     }
 
+    function cancelOrganization(noteId): bool {
+        const id = String(noteId || "")
+        if (!id) return false
+        const queued = root._organizeQueue.slice()
+        const queuedIndex = queued.indexOf(id)
+        if (queuedIndex >= 0) {
+            queued.splice(queuedIndex, 1)
+            root._organizeQueue = queued
+            return true
+        }
+        if (root._activeOrganizeId !== id || !organizeProc.running) return false
+        if (root._cancelledOrganizeIds.indexOf(id) < 0)
+            root._cancelledOrganizeIds = root._cancelledOrganizeIds.concat([id])
+        root._rerunOrganizeId = root._rerunOrganizeId === id ? "" : root._rerunOrganizeId
+        root._cancelTriageQueue = root._cancelTriageQueue.concat([id])
+        organizeProc.running = false
+        root._startNextTriageCancellation()
+        return true
+    }
+
+    function _startNextTriageCancellation(): void {
+        if (cancelTriageProc.running || !root._cancelTriageQueue.length) return
+        const queue = root._cancelTriageQueue.slice()
+        root._activeCancelTriageId = queue.shift()
+        root._cancelTriageQueue = queue
+        cancelTriageProc.running = true
+    }
+
+    function setKeepDecision(noteId, decision): bool {
+        return root._mutate("set-keep-decision", { id: String(noteId || ""), decision: String(decision || "") })
+    }
+
     function update(noteId, rawContent, tags): bool {
         return root._mutate("update", {
             id: String(noteId || ""),
@@ -350,6 +414,41 @@ Singleton {
         mutationProc.command = ["python3", root.backendPath, action]
         mutationProc.running = true
         return true
+    }
+
+    property var _readQueue: []
+    property var _readInput: []
+
+    function markNotesSeen(entries): void {
+        const pending = root._readQueue.slice()
+        for (const entry of entries) {
+            if (!pending.some(item => item.id === entry.id && item.revision === entry.revision)) pending.push(entry)
+        }
+        root._readQueue = pending
+        root._flushReadQueue()
+    }
+    function _flushReadQueue(): void {
+        if (noteReadProc.running || !root._readQueue.length) return
+        root._readInput = root._readQueue.slice(0, 100)
+        root._readQueue = root._readQueue.slice(100)
+        noteReadProc.running = true
+    }
+    Process {
+        id: noteReadProc
+        command: ["python3", root.backendPath, "mark-notes-seen"]
+        stdinEnabled: true
+        onStarted: write(JSON.stringify({ notes: root._readInput }) + "\n")
+        stdout: StdioCollector { id: readResult }
+        onExited: {
+            const result = root.parseResult(readResult.text)
+            if (result.success) {
+                const revisions = ({})
+                for (const entry of result.marked || []) revisions[entry.id] = entry.revision
+                root.notes = root.notes.map(note => revisions[note.id] === note.content_revision
+                    ? Object.assign({}, note, { unread: false, seen_revision: revisions[note.id] }) : note)
+            }
+            Qt.callLater(() => root._flushReadQueue())
+        }
     }
 
     function refreshProviderStatus(): void {
@@ -411,6 +510,7 @@ Singleton {
             const result = root.parseResult(root._listOutput)
             root._listOutput = ""
             if (result.success) {
+                root.errorMessage = ""
                 root.notes = result.notes || []
             } else {
                 root.errorMessage = result.error || qsTr("Notes could not be loaded.")
@@ -518,13 +618,17 @@ Singleton {
         onExited: exitCode => {
             const noteId = root._activeOrganizeId
             const rerun = root._rerunOrganizeId === noteId
+            const cancelled = root._cancelledOrganizeIds.indexOf(noteId) >= 0
             const result = root.parseResult(root._organizeOutput)
             root._organizeOutput = ""
             root._activeOrganizeId = ""
             if (rerun) root._rerunOrganizeId = ""
-            if (result.success) {
+            if (cancelled) {
+                const pending = root._cancelledOrganizeIds.filter(id => id !== noteId)
+                root._cancelledOrganizeIds = pending
+            } else if (result.success) {
                 root.organizationFinished(noteId, true, "")
-                root.syncLegacyNotes()
+                root.syncLegacyNotes(noteId)
             } else if (!result.stale) {
                 const message = result.error || qsTr("Note analysis failed. Your raw note is safe.")
                 root.organizationFinished(noteId, false, message)
@@ -534,6 +638,22 @@ Singleton {
             if (rerun) root.queueOrganization(noteId)
             else root._startNextOrganization()
         }
+    }
+
+    Process {
+        id: cancelTriageProc
+        command: ["python3", root.backendPath, "cancel-triage"]
+        stdinEnabled: true
+        onStarted: write(JSON.stringify({ id: root._activeCancelTriageId }) + "\n")
+        onExited: exitCode => {
+            const result = root.parseResult(root._cancelOutput)
+            root._cancelOutput = ""
+            if (exitCode !== 0 || !result.success)
+                Toaster.toast(qsTr("Could not cancel analysis"), result.error || qsTr("The note is still safe."), "warning")
+            root.refresh()
+            Qt.callLater(() => root._startNextTriageCancellation())
+        }
+        stdout: SplitParser { onRead: data => root._cancelOutput += data }
     }
 
     Process {
@@ -675,15 +795,21 @@ Singleton {
             onStreamFinished: {
                 const res = root.parseResult(text)
                 if (res.success && Array.isArray(res.results)
-                        && searchProc.sentInput.query === root._searchInput.query) {
-                    root.searchResults = res.results
-                    root.searchCompleted(res.results)
+                        && searchProc.sentInput.query === root._searchInput.query
+                        && searchProc.sentInput.offset === root._searchInput.offset) {
+                    const prior = searchProc.sentInput.offset > 0 ? root.searchResults : []
+                    const seen = new Set(prior.map(item => item.result_key))
+                    root.searchResults = prior.concat(res.results.filter(item => !seen.has(item.result_key)))
+                    root.searchTotal = Number(res.total || 0)
+                    root.searchHasMore = res.next_offset !== null && res.next_offset !== undefined
+                    root.searchNextOffset = root.searchHasMore ? Number(res.next_offset) : root.searchResults.length
+                    root.searchCompleted(root.searchResults)
                 }
             }
         }
         onExited: {
-            if (sentInput.query !== root._searchInput.query)
-                Qt.callLater(() => root.searchConcepts(root._searchInput.query))
+            if (sentInput.query !== root._searchInput.query || sentInput.offset !== root._searchInput.offset)
+                Qt.callLater(() => root.searchConcepts(root._searchInput.query, root._searchInput.offset))
         }
     }
 
@@ -725,17 +851,23 @@ Singleton {
     Process {
         id: syncLegacyProc
         stdinEnabled: true
-        onStarted: write("{}\n")
+        onStarted: write(JSON.stringify(root._syncInput) + "\n")
         stdout: StdioCollector {
             onStreamFinished: {
                 const res = root.parseResult(text)
-                if (res.success) root.listConcepts("", "")
+                if (!res.success) return
+                root.listConcepts("", "")
+                const view = root.currentConceptView
+                const targetId = String(root._syncInput.id || "")
+                if (targetId && view?.concept?.legacy_note_id === targetId)
+                    root.getConcept(view.concept.id, view.mode || "")
             }
         }
         onExited: {
-            if (root._pendingSync) {
-                root._pendingSync = false
-                Qt.callLater(() => root.syncLegacyNotes())
+            const pending = root._pendingSyncIds.slice()
+            if (pending.length) {
+                root._pendingSyncIds = pending.slice(1)
+                Qt.callLater(() => root.syncLegacyNotes(pending[0]))
             }
         }
     }
