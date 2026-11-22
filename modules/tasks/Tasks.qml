@@ -84,7 +84,7 @@ FocusScope {
         })
     }
 
-    property string activePage: "commands"
+    property string activePage: "tasks"
     property string statusFilter: "all"
     property string searchQuery: ""
     property string commandSearchQuery: ""
@@ -284,6 +284,13 @@ FocusScope {
         DailyFocusBanner {
             id: dailyFocusBanner
             visible: root.activePage === "tasks"
+        }
+
+        // ── Today's Focus Hero Card ──────────────────────────────
+        TodayHeroCard {
+            id: todayHeroCard
+            visible: root.activePage === "tasks" && hasTask
+            taskList: taskList
         }
 
         // ── Task list ────────────────────────────────────────────

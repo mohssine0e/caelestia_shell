@@ -326,6 +326,26 @@ FocusScope {
     }
 
     // ── Controller (filtering, selection, navigation) ──
+    function toggleTodayFocus(absIdx) {
+        if (absIdx < 0 || absIdx >= list.tasks.length) return;
+        var targetTask = list.tasks[absIdx];
+        var isCurrentToday = targetTask.todayFocus || false;
+        var newTasks = list.tasks.slice();
+        for (var i = 0; i < newTasks.length; i++) {
+            var t = newTasks[i];
+            if (i === absIdx) {
+                newTasks[i] = dataManager.copyTask(t, { todayFocus: !isCurrentToday });
+            } else if (t.todayFocus) {
+                newTasks[i] = dataManager.copyTask(t, { todayFocus: false });
+            }
+        }
+        dataManager.tasks = newTasks;
+        list.tasks = newTasks;
+        list.updateMaps();
+        list.updateFilteredModel();
+        list.requestSave();
+    }
+
     function updateMaps() {
         taskMap = dataManager.getTaskMap();
         taskIndexMap = dataManager.getTaskIndexMap();
@@ -745,6 +765,19 @@ FocusScope {
                 var absIdx = list.taskIndexMap[tid];
                 if (absIdx !== undefined && absIdx >= 0) {
                     dataManager.togglePin(absIdx);
+                    event.accepted = true;
+                    return;
+                }
+            }
+        }
+
+        // T key to toggle Today's Focus for selected task
+        if (event.key === Qt.Key_T && !event.modifiers) {
+            if (navController.selectedIndex >= 0 && navController.selectedIndex < filteredModel.count) {
+                var tid = filteredModel.get(navController.selectedIndex).todoId;
+                var absIdx = list.taskIndexMap[tid];
+                if (absIdx !== undefined && absIdx >= 0) {
+                    list.toggleTodayFocus(absIdx);
                     event.accepted = true;
                     return;
                 }
