@@ -38,8 +38,14 @@ Item {
     }
     function accept(id): void { request("accept-topic-line", { id: id, subconcept: "" }) }
     function discard(id): void { request("dismiss-gap", { id: id, subconcept: "" }) }
-    function acceptAll(): void { request("accept-all-topic-lines") }
+    function acceptAll(): void { request("accept-all-topic-lines", { subconcept: "" }) }
     function undo(): void { request("undo-topic-lines", { ids: lastAcceptedIds, subconcept: "" }) }
+    function cancel(): void {
+        if (worker.running) {
+            worker.kill()
+            errorMessage = qsTr("Query cancelled.")
+        }
+    }
 
     function finishRequest(text): void {
         const result = Notes.parseResult(text)

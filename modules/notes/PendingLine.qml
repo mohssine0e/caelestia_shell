@@ -31,7 +31,7 @@ Rectangle {
 
         StyledText {
             Layout.fillWidth: true
-            visible: root.controller.subconcept === "" && !!root.suggestion.subconcept
+            visible: !!root.suggestion.subconcept && (root.controller.subconcept === "" || root.controller.subconcept.toLowerCase() !== root.suggestion.subconcept.toLowerCase())
             text: root.suggestion.subconcept + " · " + (root.suggestion.section || qsTr("Notes"))
             font: Tokens.font.label.small
             color: Colours.palette.m3onSurfaceVariant

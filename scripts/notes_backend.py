@@ -2026,6 +2026,7 @@ def ask_topic(payload: dict[str, Any]) -> dict[str, Any]:
         candidates.append(dict(
             id=str(uuid.uuid4()), topic=topic, title=f'ask:{request_id}:{index}',
             reason=str(item.get('reason') or '')[:300], explanation='', provider=provider,
+            state='suggested',
             section=section, content=content, command=command, kind=kind, code=code,
             language=str(item.get('language') or '')[:30], subconcept=subsection, action=action,
             target_note_id=target_id, target_key=target_key, previous_content=previous,
@@ -2172,7 +2173,7 @@ def accept_all_topic_lines(payload: dict[str, Any]) -> dict[str, Any]:
         rows = db.execute("SELECT * FROM topic_suggestions WHERE topic=? AND state='suggested' AND content!='' ORDER BY rowid", (topic,)).fetchall()
         source = str(payload.get('source') or 'fill')
         request_id = str(payload.get('request_id') or '')
-        items = [dict(r) for r in rows if (not scope or r['subconcept'].casefold() == scope.casefold())
+        items = [dict(r) for r in rows if (source == 'ask' or not scope or r['subconcept'].casefold() == scope.casefold())
                  and r['source'] == source and (source != 'ask' or r['request_id'] == request_id)]
         # Validate the entire batch against its starting revision before applying any edit.
         for item in items: _validate_topic_line(db, item, scope)

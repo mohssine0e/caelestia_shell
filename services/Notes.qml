@@ -467,32 +467,30 @@ Singleton {
 
         stdinEnabled: true
         onStarted: write(JSON.stringify(root._createInput) + "\n")
-        stdout: SplitParser {
-            onRead: data => root._createOutput += data
-        }
-        onExited: exitCode => {
-            root.saving = false
-            const result = root.parseResult(root._createOutput)
-            root._createOutput = ""
-            if (!result.success || (!result.note && result.action !== "ignore")) {
-                root.errorMessage = result.error || qsTr("The note could not be saved.")
-                root.saveFailed(root.errorMessage)
-                return
-            }
-            if (result.action === "ignore") {
-                Toaster.toast(qsTr("Duplicate Note"), qsTr("Already covered, duplicate ignored."), "check_circle")
-                return
-            }
-            const shouldOrganize = root._createInput.organize === true
-            root.noteCreated(result.note, shouldOrganize)
-            root.refresh()
-            if (result.action === "merge") {
-                Toaster.toast(qsTr("Note merged"), qsTr("Merged into note (%1)").arg(result.subconcept || ""), "call_merge")
-            } else if (shouldOrganize) {
-                root.queueOrganization(result.note.id)
-                Toaster.toast(qsTr("Note saved"), qsTr("Formatting in the background…"), "auto_awesome")
-            } else {
-                Toaster.toast(qsTr("Note saved"), qsTr("Added to %1 / %2").arg(result.domain || result.note.topic || "Inbox").arg(result.subconcept || "Core"), "note_add")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.saving = false
+                const result = root.parseResult(text)
+                if (!result.success || (!result.note && result.action !== "ignore")) {
+                    root.errorMessage = result.error || qsTr("The note could not be saved.")
+                    root.saveFailed(root.errorMessage)
+                    return
+                }
+                if (result.action === "ignore") {
+                    Toaster.toast(qsTr("Duplicate Note"), qsTr("Already covered, duplicate ignored."), "check_circle")
+                    return
+                }
+                const shouldOrganize = root._createInput.organize === true
+                root.noteCreated(result.note, shouldOrganize)
+                root.refresh()
+                if (result.action === "merge") {
+                    Toaster.toast(qsTr("Note merged"), qsTr("Merged into note (%1)").arg(result.subconcept || ""), "call_merge")
+                } else if (shouldOrganize) {
+                    root.queueOrganization(result.note.id)
+                    Toaster.toast(qsTr("Note saved"), qsTr("Formatting in the background…"), "auto_awesome")
+                } else {
+                    Toaster.toast(qsTr("Note saved"), qsTr("Added to %1 / %2").arg(result.domain || result.note.topic || "Inbox").arg(result.subconcept || "Core"), "note_add")
+                }
             }
         }
     }
@@ -502,22 +500,20 @@ Singleton {
 
         stdinEnabled: true
         onStarted: write("{}\n")
-        stdout: SplitParser {
-            onRead: data => root._listOutput += data
-        }
-        onExited: exitCode => {
-            root.loading = false
-            const result = root.parseResult(root._listOutput)
-            root._listOutput = ""
-            if (result.success) {
-                root.errorMessage = ""
-                root.notes = result.notes || []
-            } else {
-                root.errorMessage = result.error || qsTr("Notes could not be loaded.")
-            }
-            if (root._pendingRefresh) {
-                root._pendingRefresh = false
-                Qt.callLater(() => root.refresh())
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.loading = false
+                const result = root.parseResult(text)
+                if (result.success) {
+                    root.errorMessage = ""
+                    root.notes = result.notes || []
+                } else {
+                    root.errorMessage = result.error || qsTr("Notes could not be loaded.")
+                }
+                if (root._pendingRefresh) {
+                    root._pendingRefresh = false
+                    Qt.callLater(() => root.refresh())
+                }
             }
         }
     }
@@ -581,29 +577,27 @@ Singleton {
 
         stdinEnabled: true
         onStarted: write(JSON.stringify(root._mutationInput) + "\n")
-        stdout: SplitParser {
-            onRead: data => root._mutationOutput += data
-        }
-        onExited: exitCode => {
-            root.mutating = false
-            const result = root.parseResult(root._mutationOutput)
-            root._mutationOutput = ""
-            if (!result.success) {
-                root.errorMessage = result.error || qsTr("The note change could not be saved.")
-                Toaster.toast(qsTr("Notes"), root.errorMessage, "error")
-                return
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.mutating = false
+                const result = root.parseResult(text)
+                if (!result.success) {
+                    root.errorMessage = result.error || qsTr("The note change could not be saved.")
+                    Toaster.toast(qsTr("Notes"), root.errorMessage, "error")
+                    return
+                }
+                if (root._mutationAction === "delete") {
+                    root.noteDeleted(result.id || root._mutationInput.id)
+                    Toaster.toast(qsTr("Note moved to trash"), qsTr("The note can be restored from storage."), "delete")
+                } else if (root._mutationAction === "delete-topic") {
+                    root.topicDeleted(result.topic || root._mutationInput.topic, result.deleted_count || 0)
+                } else if (root._mutationAction === "restore-topic") {
+                    root.topicRestored(result.topic || root._mutationInput.topic, result.restored_count || 0)
+                } else if (result.note) {
+                    root.noteChanged(result.note)
+                }
+                root.refresh()
             }
-            if (root._mutationAction === "delete") {
-                root.noteDeleted(result.id || root._mutationInput.id)
-                Toaster.toast(qsTr("Note moved to trash"), qsTr("The note can be restored from storage."), "delete")
-            } else if (root._mutationAction === "delete-topic") {
-                root.topicDeleted(result.topic || root._mutationInput.topic, result.deleted_count || 0)
-            } else if (root._mutationAction === "restore-topic") {
-                root.topicRestored(result.topic || root._mutationInput.topic, result.restored_count || 0)
-            } else if (result.note) {
-                root.noteChanged(result.note)
-            }
-            root.refresh()
         }
     }
 
@@ -661,30 +655,28 @@ Singleton {
 
         stdinEnabled: true
         onStarted: write(JSON.stringify(root._generateTopicInput) + "\n")
-        stdout: SplitParser {
-            onRead: data => root._generateTopicOutput += data
-        }
-        onExited: exitCode => {
-            const result = root.parseResult(root._generateTopicOutput)
-            root._generateTopicOutput = ""
-            if (result.success) {
-                root.refresh()
-                const action = result.action || "created"
-                const count = result.count || 0
-                const topic = result.topic || ""
-                const message = result.message || ""
-                root.topicGenerated(topic, count, action, message)
-                if (action === "already_covered") {
-                    Toaster.toast(qsTr("Already covered"), message || qsTr("Topic \"%1\" is already covered.").arg(topic), "check_circle")
-                } else if (action === "merged") {
-                    Toaster.toast(qsTr("Merged into topic"), message || qsTr("Merged %1 notes into \"%2\"").arg(count).arg(topic), "call_merge")
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = root.parseResult(text)
+                if (result.success) {
+                    root.refresh()
+                    const action = result.action || "created"
+                    const count = result.count || 0
+                    const topic = result.topic || ""
+                    const message = result.message || ""
+                    root.topicGenerated(topic, count, action, message)
+                    if (action === "already_covered") {
+                        Toaster.toast(qsTr("Already covered"), message || qsTr("Topic \"%1\" is already covered.").arg(topic), "check_circle")
+                    } else if (action === "merged") {
+                        Toaster.toast(qsTr("Merged into topic"), message || qsTr("Merged %1 notes into \"%2\"").arg(count).arg(topic), "call_merge")
+                    } else {
+                        Toaster.toast(qsTr("Topic created"), message || qsTr("Created dedicated topic \"%1\" with %2 notes").arg(topic).arg(count), "auto_awesome")
+                    }
                 } else {
-                    Toaster.toast(qsTr("Topic created"), message || qsTr("Created dedicated topic \"%1\" with %2 notes").arg(topic).arg(count), "auto_awesome")
+                    const msg = result.error || qsTr("Failed to generate notes for this topic.")
+                    root.topicGenerateFailed(msg)
+                    Toaster.toast(qsTr("Generation failed"), msg, "error")
                 }
-            } else {
-                const msg = result.error || qsTr("Failed to generate notes for this topic.")
-                root.topicGenerateFailed(msg)
-                Toaster.toast(qsTr("Generation failed"), msg, "error")
             }
         }
     }

@@ -1325,6 +1325,11 @@ Item {
                                     color: Colours.palette.m3primary
                                     font: Tokens.font.body.small
                                 }
+                                TextButton {
+                                    text: qsTr("Cancel")
+                                    type: TextButton.Text
+                                    onClicked: askOps.cancel()
+                                }
                             }
                             Item { Layout.fillWidth: true }
                             TextButton {
@@ -1367,6 +1372,14 @@ Item {
                                 color: Colours.palette.m3onSurfaceVariant
                                 font: Tokens.font.label.medium
                                 wrapMode: Text.Wrap
+                            }
+                            TextButton {
+                                text: qsTr("Copy")
+                                type: TextButton.Text
+                                onClicked: {
+                                    Quickshell.clipboardText = askOps.answer
+                                    Toaster.toast(qsTr("Copied"), qsTr("Answer copied to clipboard."), "content_copy")
+                                }
                             }
                         }
                         SelectableText {

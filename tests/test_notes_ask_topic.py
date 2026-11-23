@@ -207,6 +207,23 @@ class AskTopicTest(unittest.TestCase):
         self.assertEqual(len(undone['suggestions']), 1)
         self.assertEqual(undone['suggestions'][0]['state'], 'dismissed')
 
+    def test_accept_all_suggestions_across_subconcepts(self):
+        suggestions = [
+            {'action': 'add', 'kind': 'bullet', 'subconcept': 'CLI', 'section': 'notes',
+             'content': 'CLI item.'},
+            {'action': 'add', 'kind': 'bullet', 'subconcept': 'Architecture', 'section': 'notes',
+             'content': 'Architecture item.'}
+        ]
+        reply = json.dumps({'answer': 'Here are two items.', 'suggestions': suggestions})
+        with mock.patch.object(notes, '_run_provider', return_value=(reply, 'gemini')):
+            result = notes.ask_topic({'topic': 'Docker', 'subconcept': 'Overview',
+                                      'question': 'Give me items.'})
+        self.assertEqual(len(result['suggestions']), 2)
+        payload = {'topic': 'Docker', 'subconcept': 'Overview', 'source': 'ask',
+                   'request_id': result['request_id']}
+        accepted = notes.accept_all_topic_lines(payload)
+        self.assertEqual(len(accepted['changed_ids']), 2)
+
 
 if __name__ == '__main__':
     unittest.main()
