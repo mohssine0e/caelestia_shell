@@ -16,12 +16,14 @@ Item {
     property var suggestions: []
     property var lastAcceptedIds: []
     property var pending: ({})
+    property string output: ""
     readonly property bool busy: worker.running
     readonly property var available: suggestions.filter(item => item.state === "suggested")
 
     function request(action, fields = ({})): bool {
         if (busy || !topic) return false
         errorMessage = ""
+        output = ""
         pending = Object.assign({ topic: topic, subconcept: subconcept, source: "ask",
             request_id: requestId, action: action }, fields)
         worker.command = ["python3", Notes.backendPath, action]
@@ -34,15 +36,15 @@ Item {
         question = value
         return request("ask-topic", { question: value })
     }
-    function accept(id): void { request("accept-topic-line", { id: id }) }
-    function discard(id): void { request("dismiss-gap", { id: id }) }
+    function accept(id): void { request("accept-topic-line", { id: id, subconcept: "" }) }
+    function discard(id): void { request("dismiss-gap", { id: id, subconcept: "" }) }
     function acceptAll(): void { request("accept-all-topic-lines") }
-    function undo(): void { request("undo-topic-lines", { ids: lastAcceptedIds }) }
+    function undo(): void { request("undo-topic-lines", { ids: lastAcceptedIds, subconcept: "" }) }
 
-    function finishRequest(output): void {
-        const result = Notes.parseResult(output)
+    function finishRequest(text): void {
+        const result = Notes.parseResult(text)
         const completed = root.pending
-        if (completed.topic !== root.topic || completed.subconcept !== root.subconcept) return
+        if (completed.topic !== root.topic) return
         if (!result.success) {
             root.errorMessage = result.error || qsTr("Could not answer this question.")
             return
@@ -72,19 +74,17 @@ Item {
         errorMessage = ""
     }
     onSubconceptChanged: {
-        question = ""
-        answer = ""
-        suggestions = []
-        requestId = ""
-        lastAcceptedIds = []
-        errorMessage = ""
+        if (!busy) {
+            errorMessage = ""
+        }
     }
 
     Process {
         id: worker
         stdinEnabled: true
         onStarted: write(JSON.stringify(root.pending) + "\n")
-        stdout: StdioCollector { id: responseCollector }
-        onExited: root.finishRequest(responseCollector.text)
+        stdout: StdioCollector {
+            onStreamFinished: root.finishRequest(text)
+        }
     }
 }

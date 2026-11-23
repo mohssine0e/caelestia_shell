@@ -158,6 +158,55 @@ class AskTopicTest(unittest.TestCase):
         request = json.loads(provider.call_args.args[1])
         self.assertIn(extra, request['notes'][0]['content'])
 
+    def test_ask_empty_subsection_falls_back_to_topic_notes(self):
+        reply = json.dumps({'answer': 'Networking connects containers.', 'suggestions': []})
+        with mock.patch.object(notes, '_run_provider', return_value=(reply, 'gemini')) as provider:
+            result = notes.ask_topic({'topic': 'Docker', 'subconcept': 'Networking',
+                                      'question': 'How does networking work?'})
+        self.assertEqual(result['answer'], 'Networking connects containers.')
+        request = json.loads(provider.call_args.args[1])
+        self.assertEqual(request['subconcept_scope'], 'Networking')
+        self.assertTrue(len(request['notes']) > 0)
+
+    def test_ask_empty_topic_answers_without_crashing(self):
+        reply = json.dumps({'answer': 'Rust is a systems language.', 'suggestions': [
+            {'action': 'add', 'kind': 'bullet', 'subconcept': 'Basics', 'section': 'notes',
+             'content': 'Rust enforces memory safety via ownership.'}
+        ]})
+        with mock.patch.object(notes, '_run_provider', return_value=(reply, 'gemini')):
+            result = notes.ask_topic({'topic': 'Rust', 'subconcept': '',
+                                      'question': 'What is Rust?'})
+        self.assertEqual(result['answer'], 'Rust is a systems language.')
+        self.assertEqual(len(result['suggestions']), 1)
+        self.assertEqual(result['suggestions'][0]['subconcept'], 'Basics')
+
+    def test_conversational_fenced_json_is_parsed_correctly(self):
+        raw = "Here is the response:\n```json\n{\"answer\": \"Clean answer.\", \"suggestions\": []}\n```\nHope that helps!"
+        with mock.patch.object(notes, '_run_provider', return_value=(raw, 'gemini')):
+            result = notes.ask_topic({'topic': 'Docker', 'subconcept': 'Overview',
+                                      'question': 'Explain clean answer.'})
+        self.assertEqual(result['answer'], 'Clean answer.')
+        self.assertEqual(result['suggestions'], [])
+
+    def test_accept_and_undo_suggestion_with_different_subconcept_succeeds(self):
+        suggestions = [
+            {'action': 'add', 'kind': 'command', 'subconcept': 'CLI', 'section': 'commands',
+             'command': 'docker ps', 'content': 'List containers.', 'reason': 'Useful command.'}
+        ]
+        reply = json.dumps({'answer': 'Here is a command.', 'suggestions': suggestions})
+        with mock.patch.object(notes, '_run_provider', return_value=(reply, 'gemini')):
+            result = notes.ask_topic({'topic': 'Docker', 'subconcept': 'Overview',
+                                      'question': 'Show me CLI command.'})
+        self.assertEqual(len(result['suggestions']), 1)
+        sug_id = result['suggestions'][0]['id']
+        payload = {'topic': 'Docker', 'subconcept': 'Overview', 'source': 'ask',
+                   'request_id': result['request_id'], 'id': sug_id}
+        accepted = notes.accept_topic_line(payload)
+        self.assertIn(sug_id, accepted['changed_ids'])
+        undone = notes.undo_topic_lines(dict(payload, ids=[sug_id]))
+        self.assertEqual(len(undone['suggestions']), 1)
+        self.assertEqual(undone['suggestions'][0]['state'], 'dismissed')
+
 
 if __name__ == '__main__':
     unittest.main()

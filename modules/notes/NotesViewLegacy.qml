@@ -661,8 +661,12 @@ Item {
         property bool running: false
         signal triggered()
 
-        implicitWidth: actionContent.implicitWidth
+        width: implicitWidth
+        height: implicitHeight
+        implicitWidth: actionContent.implicitWidth + 8
         implicitHeight: 28
+        Layout.preferredWidth: implicitWidth
+        Layout.preferredHeight: implicitHeight
         opacity: enabled ? (actionMouse.containsMouse ? 1 : 0.72) : 0.38
         Behavior on opacity { NumberAnimation { duration: 120 } }
 
@@ -1163,11 +1167,12 @@ Item {
                             spacing: topicHeader.compact ? 10 : 18
                             HeaderAction {
                                 actionIcon: "auto_awesome"
-                                label: qsTr("Ask AI")
+                                label: askOps.busy ? qsTr("Thinking…") : qsTr("Ask AI")
+                                running: askOps.busy
                                 enabled: !!askOps.topic && Notes.providerConfigured
                                 onTriggered: {
                                     win.askOpen = !win.askOpen
-                                    if (win.askOpen) askInput.forceActiveFocus()
+                                    if (win.askOpen) Qt.callLater(() => askInput.forceActiveFocus())
                                 }
                             }
                             HeaderAction {
@@ -1238,6 +1243,7 @@ Item {
                     id: askPanel
                     width: parent.width
                     visible: win.askOpen && !!askOps.topic
+                    height: visible ? askColumn.implicitHeight + 24 : 0
                     implicitHeight: askColumn.implicitHeight + 24
                     radius: Tokens.rounding.small
                     color: Colours.palette.m3surfaceContainerLow
@@ -1255,12 +1261,12 @@ Item {
                             Layout.fillWidth: true
                             StyledText {
                                 Layout.fillWidth: true
-                                text: qsTr("Ask about %1").arg(win.askWholeTopic ? askOps.topic : win.activeSubconcept)
+                                text: qsTr("Ask about %1").arg((!win.askWholeTopic && win.activeSubconcept) ? win.activeSubconcept : askOps.topic)
                                 color: Colours.palette.m3onSurface
                                 font: Tokens.font.label.medium
                             }
                             TextButton {
-                                text: win.askWholeTopic ? qsTr("Whole topic") : qsTr("This subsection")
+                                text: win.askWholeTopic ? qsTr("Whole topic") : (win.activeSubconcept ? qsTr("Subsection: %1").arg(win.activeSubconcept) : qsTr("This subsection"))
                                 type: TextButton.Text
                                 enabled: !askOps.busy
                                 onClicked: win.askWholeTopic = !win.askWholeTopic
@@ -1284,7 +1290,7 @@ Item {
                             }
                             TextArea {
                                 id: askInput
-                                placeholderText: qsTr("Ask, explain, add commands, make a diagram…")
+                                placeholderText: qsTr("Ask, explain, add commands, make a diagram… (Ctrl+Enter)")
                                 wrapMode: TextEdit.Wrap
                                 color: Colours.palette.m3onSurface
                                 placeholderTextColor: Colours.palette.m3onSurfaceVariant
@@ -1307,6 +1313,19 @@ Item {
                         }
                         RowLayout {
                             Layout.fillWidth: true
+                            RowLayout {
+                                visible: askOps.busy
+                                spacing: 8
+                                CircularIndicator {
+                                    running: askOps.busy
+                                    implicitSize: 16
+                                }
+                                StyledText {
+                                    text: qsTr("Thinking…")
+                                    color: Colours.palette.m3primary
+                                    font: Tokens.font.body.small
+                                }
+                            }
                             Item { Layout.fillWidth: true }
                             TextButton {
                                 text: askOps.busy ? qsTr("Thinking…") : qsTr("Ask")
@@ -1315,13 +1334,40 @@ Item {
                                 onClicked: if (askOps.ask(askInput.text)) askInput.text = ""
                             }
                         }
-                        StyledText {
+                        RowLayout {
                             Layout.fillWidth: true
                             visible: !!askOps.errorMessage
-                            text: askOps.errorMessage
-                            color: Colours.palette.m3error
-                            font: Tokens.font.body.small
-                            wrapMode: Text.Wrap
+                            spacing: 8
+                            StyledText {
+                                Layout.fillWidth: true
+                                text: askOps.errorMessage
+                                color: Colours.palette.m3error
+                                font: Tokens.font.body.small
+                                wrapMode: Text.Wrap
+                            }
+                            TextButton {
+                                text: qsTr("Restore question")
+                                type: TextButton.Text
+                                visible: !askInput.text.trim() && !!askOps.question
+                                onClicked: askInput.text = askOps.question
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: !!askOps.answer && !!askOps.question
+                            spacing: 6
+                            MaterialIcon {
+                                text: "help_outline"
+                                color: Colours.palette.m3primary
+                                fontStyle: Tokens.font.icon.size(14).build()
+                            }
+                            StyledText {
+                                Layout.fillWidth: true
+                                text: askOps.question
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Tokens.font.label.medium
+                                wrapMode: Text.Wrap
+                            }
                         }
                         SelectableText {
                             Layout.fillWidth: true

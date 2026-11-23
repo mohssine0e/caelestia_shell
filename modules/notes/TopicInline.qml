@@ -14,6 +14,7 @@ Item {
     property string notice: ""
     property var pending: ({})
     property var lastAcceptedIds: []
+    property string output: ""
     readonly property bool busy: worker.running
     readonly property string busyAction: busy ? pending.action || "" : ""
     readonly property var available: suggestions.filter(item => item.state === "suggested" && item.content)
@@ -22,6 +23,7 @@ Item {
         if (busy || !topic) return false
         errorMessage = ""
         notice = ""
+        output = ""
         pending = Object.assign({ topic: topic, action: action, subconcept: subconcept }, fields)
         worker.command = ["python3", Notes.backendPath, action]
         worker.running = true
@@ -114,7 +116,8 @@ Item {
 
         stdinEnabled: true
         onStarted: write(JSON.stringify(root.pending) + "\n")
-        stdout: StdioCollector { id: responseCollector }
-        onExited: root.finishRequest(responseCollector.text)
+        stdout: StdioCollector {
+            onStreamFinished: root.finishRequest(text)
+        }
     }
 }
