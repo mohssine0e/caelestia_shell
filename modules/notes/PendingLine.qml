@@ -90,7 +90,7 @@ Rectangle {
                 onClicked: root.controller.accept(root.suggestion.id)
             }
             TextButton {
-                text: qsTr("Dismiss")
+                text: qsTr("Cancel")
                 type: TextButton.Text
                 enabled: !root.controller.busy
                 onClicked: root.controller.discard(root.suggestion.id)

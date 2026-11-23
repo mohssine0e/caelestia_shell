@@ -1381,12 +1381,27 @@ Item {
                                     Toaster.toast(qsTr("Copied"), qsTr("Answer copied to clipboard."), "content_copy")
                                 }
                             }
+                            TextButton {
+                                text: qsTr("Clear")
+                                type: TextButton.Text
+                                onClicked: {
+                                    askOps.answer = ""
+                                    askOps.suggestions = []
+                                }
+                            }
                         }
                         SelectableText {
                             Layout.fillWidth: true
                             visible: !!askOps.answer
                             text: askOps.answer
                             markdown: true
+                            font: Tokens.font.body.small
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            visible: !!askOps.answer && !askOps.busy && askOps.available.length === 0 && askOps.lastAcceptedIds.length === 0
+                            text: qsTr("No note edits suggested for this question.")
+                            color: Colours.palette.m3onSurfaceVariant
                             font: Tokens.font.body.small
                         }
                         RowLayout {
