@@ -27,6 +27,7 @@ Singleton {
             .replace(/&quot;/g, "\"")
             .replace(/&#39;/g, "'")
             .replace(/&nbsp;/g, " ")
+            .replace(/^(?:https?:\/\/)?(?:web\.)?[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?\s+/i, "")
             .replace(/\s+/g, " ")
             .trim();
     }

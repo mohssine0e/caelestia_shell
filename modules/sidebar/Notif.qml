@@ -49,6 +49,12 @@ StyledRect {
         }
     }
 
+    readonly property bool isRedundantSummary: {
+        const sum = (root.modelData?.summary ?? "").trim().toLowerCase();
+        const app = (root.modelData?.appName ?? "").trim().toLowerCase();
+        return sum.length === 0 || sum === app;
+    }
+
     TextMetrics {
         id: summaryHeightMetrics
 
@@ -62,8 +68,9 @@ StyledRect {
         anchors.top: parent.top
         anchors.left: parent.left
 
+        visible: !root.isRedundantSummary || root.expanded
         width: parent.width
-        text: root.modelData?.summary ?? ""
+        text: root.isRedundantSummary ? (root.expanded ? (root.modelData?.appName ?? "") : "") : (root.modelData?.summary ?? "")
         color: root.modelData?.urgency === "critical" ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
         elide: Text.ElideRight
         wrapMode: Text.WordWrap
@@ -77,7 +84,7 @@ StyledRect {
         anchors.left: parent.left
 
         visible: false
-        text: root.modelData?.summary ?? ""
+        text: summary.visible ? summary.text : ""
     }
 
     WrappedLoader {
@@ -87,7 +94,7 @@ StyledRect {
         anchors.top: parent.top
         anchors.left: dummySummary.right
         anchors.right: parent.right
-        anchors.leftMargin: Tokens.spacing.small
+        anchors.leftMargin: dummySummary.text.length > 0 ? Tokens.spacing.small : 0
 
         sourceComponent: StyledText {
             text: Strings.stripHtml(root.modelData?.body ?? "")

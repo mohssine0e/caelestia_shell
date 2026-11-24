@@ -18,8 +18,19 @@ StyledRect {
     required property NotifData modelData
     property bool imageFailed: false
     property bool appIconFailed: false
-    readonly property bool hasImage: modelData.image.length > 0 && !imageFailed
-    readonly property bool hasAppIcon: modelData.appIcon.length > 0 && !appIconFailed
+    readonly property bool hasImage: {
+        if (!modelData.image || imageFailed) return false;
+        if (modelData.image.startsWith("image://icon/")) {
+            const name = modelData.image.slice(13).split("?")[0];
+            return Quickshell.hasThemeIcon(name);
+        }
+        return true;
+    }
+    readonly property bool hasAppIcon: {
+        if (!modelData.appIcon || appIconFailed) return false;
+        if (modelData.appIcon.startsWith("/") || modelData.appIcon.startsWith("file:")) return true;
+        return Quickshell.hasThemeIcon(modelData.appIcon);
+    }
     readonly property int bodyTextFormat: /<[a-z][\s\S]*>/i.test(modelData.body) ? Text.RichText : (/[<*_`#\[\]]/.test(modelData.body) ? Text.MarkdownText : Text.PlainText)
     readonly property int nonAnimHeight: summary.implicitHeight + (root.expanded ? Tokens.spacing.extraSmall * 2 + appName.height + body.height + actions.height + actions.anchors.topMargin : bodyPreview.height) + inner.anchors.margins * 2
     property bool expanded: Config.notifs.openExpanded
@@ -171,7 +182,7 @@ StyledRect {
 
                         sourceComponent: ColouredIcon {
                             anchors.fill: parent
-                            source: Quickshell.iconPath(root.modelData.appIcon)
+                            source: (root.modelData.appIcon.startsWith("/") || root.modelData.appIcon.startsWith("file:")) ? Qt.resolvedUrl(root.modelData.appIcon) : Quickshell.iconPath(root.modelData.appIcon, true)
                             colour: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : root.modelData.urgency === NotificationUrgency.Low ? Colours.palette.m3onSurface : Colours.palette.m3onSecondaryContainer
                             layer.enabled: root.modelData.appIcon.endsWith("symbolic")
                             onStatusChanged: {

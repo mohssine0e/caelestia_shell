@@ -39,6 +39,19 @@ StyledRect {
     readonly property bool expanded: props.expandedNotifs.includes(modelData)
     property bool imageFailed: false
     property bool appIconFailed: false
+    readonly property bool hasValidImage: {
+        if (!image || imageFailed) return false;
+        if (image.startsWith("image://icon/")) {
+            const name = image.slice(13).split("?")[0];
+            return Quickshell.hasThemeIcon(name);
+        }
+        return true;
+    }
+    readonly property bool hasValidAppIcon: {
+        if (!appIcon || appIconFailed) return false;
+        if (appIcon.startsWith("/") || appIcon.startsWith("file:")) return true;
+        return Quickshell.hasThemeIcon(appIcon);
+    }
 
     function toggleExpand(expand: bool): void {
         if (expand) {
@@ -107,7 +120,7 @@ StyledRect {
 
                 ColouredIcon {
                     implicitSize: Math.round(TokenConfig.sizes.notifs.image * 0.6)
-                    source: Quickshell.iconPath(root.appIcon)
+                    source: (root.appIcon.startsWith("/") || root.appIcon.startsWith("file:")) ? Qt.resolvedUrl(root.appIcon) : Quickshell.iconPath(root.appIcon, true)
                     colour: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : root.urgency === NotificationUrgency.Low ? Colours.palette.m3onSurface : Colours.palette.m3onSecondaryContainer
                     layer.enabled: root.appIcon.endsWith("symbolic")
                     onStatusChanged: {
@@ -136,7 +149,7 @@ StyledRect {
                     asynchronous: true
                     anchors.centerIn: parent
                     anchors.verticalCenterOffset: sourceComponent === materialIconComp ? 1 : 0
-                    sourceComponent: (root.image && !root.imageFailed) ? imageComp : (root.appIcon && !root.appIconFailed) ? appIconComp : materialIconComp
+                    sourceComponent: root.hasValidImage ? imageComp : root.hasValidAppIcon ? appIconComp : materialIconComp
                 }
             }
 
@@ -144,7 +157,7 @@ StyledRect {
                 asynchronous: true
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                active: root.appIcon && !root.appIconFailed && root.image && !root.imageFailed
+                active: root.hasValidAppIcon && root.hasValidImage
 
                 sourceComponent: StyledRect {
                     implicitWidth: Tokens.sizes.notifs.badge
@@ -156,7 +169,7 @@ StyledRect {
                     ColouredIcon {
                         anchors.centerIn: parent
                         implicitSize: Math.round(Tokens.sizes.notifs.badge * 0.6)
-                        source: Quickshell.iconPath(root.appIcon)
+                        source: (root.appIcon.startsWith("/") || root.appIcon.startsWith("file:")) ? Qt.resolvedUrl(root.appIcon) : Quickshell.iconPath(root.appIcon, true)
                         colour: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : root.urgency === NotificationUrgency.Low ? Colours.palette.m3onSurface : Colours.palette.m3onSecondaryContainer
                         layer.enabled: root.appIcon.endsWith("symbolic")
                     }

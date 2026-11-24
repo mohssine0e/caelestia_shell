@@ -80,7 +80,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
             visible: root.notifCount > 0
-            icon: "clear_all"
+            icon: "delete_sweep"
             font: Tokens.font.icon.medium
             inactiveColour: "transparent"
             inactiveOnColour: Colours.palette.m3outline
