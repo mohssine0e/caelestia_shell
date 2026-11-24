@@ -57,6 +57,14 @@ ClipRect {
         }
     }
 
+    StyledRect {
+        anchors.fill: parent
+        radius: root.radius
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
+    }
+
     component Contents: ColumnLayout {
         id: contents
 

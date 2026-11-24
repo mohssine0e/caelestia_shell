@@ -186,8 +186,8 @@ Item {
              : Colours.tPalette.m3surfaceContainerLow
 
         // ── Border ──
-        border.width: root.isSelected ? 1 : 0
-        border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
+        border.width: 1
+        border.color: root.isSelected ? Qt.alpha(Colours.palette.m3primary, 0.45) : Qt.alpha(Colours.palette.m3outlineVariant, 0.45)
 
         // ── Pinned visual indicator ──
         StyledRect {

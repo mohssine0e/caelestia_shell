@@ -12,6 +12,8 @@ StyledRect {
 
     color: Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.extraLarge
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
     implicitWidth: Tokens.sizes.dashboard.perfNetworkCardWidth
     implicitHeight: Tokens.sizes.dashboard.perfNetworkCardHeight

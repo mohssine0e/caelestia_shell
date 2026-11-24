@@ -543,6 +543,8 @@ CustomMouseArea {
                     visible: root.isAddingEvent
                     radius: Tokens.rounding.medium
                     color: Colours.palette.m3surfaceContainerHigh
+                    border.width: 1
+                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
                     implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
 
                     onVisibleChanged: {

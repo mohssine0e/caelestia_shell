@@ -156,6 +156,8 @@ Column {
 
         color: Colours.tPalette.m3surfaceContainer
         radius: Tokens.rounding.full
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
         StyledRect {
             id: indicator

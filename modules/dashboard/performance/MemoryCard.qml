@@ -15,6 +15,8 @@ StyledRect {
 
     color: Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.medium
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
     implicitWidth: layout.implicitWidth + Tokens.padding.extraLargeIncreased * 2
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
