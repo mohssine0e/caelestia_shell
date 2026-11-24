@@ -47,8 +47,8 @@ Item {
             opacity: root.notifCount > 0 ? 1 : 0
 
             text: root.notifCount
-            color: Colours.palette.m3onSurface
-            font: Tokens.font.label.large
+            color: Colours.palette.m3onSurfaceVariant
+            font: Tokens.font.body.medium
 
             Behavior on anchors.leftMargin {
                 Anim {}
@@ -72,8 +72,8 @@ Item {
 
             // TRANSLATORS: the count itself is rendered separately, immediately to the left
             text: root.notifCount > 0 ? Tr.trCtxN("notification", "notifications", root.notifCount, "notification count label, number shown separately") : Tr.tr("Notifications")
-            color: Colours.palette.m3onSurface
-            font: Tokens.font.label.large
+            color: Colours.palette.m3onSurfaceVariant
+            font: Tokens.font.body.medium
             elide: Text.ElideRight
         }
 
