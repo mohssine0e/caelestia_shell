@@ -568,6 +568,11 @@ Item {
                             Quickshell.clipboardText = root.taskTitle
                             copyTimer.restart()
                         }
+
+                        Timer {
+                            id: copyTimer
+                            interval: 2000
+                        }
                     }
 
                     // Open the row's link in the browser. Hidden when unset.

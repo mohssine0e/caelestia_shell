@@ -87,6 +87,10 @@ LazyListView {
                 else if (event.button === Qt.MiddleButton)
                     modelData?.close();
             }
+            onClicked: event => {
+                if (event.button === Qt.LeftButton && !root.expanded)
+                    root.requestToggleExpand(true);
+            }
             onPositionChanged: event => {
                 if (pressed && !root.expanded) {
                     const diffY = event.y - startY;

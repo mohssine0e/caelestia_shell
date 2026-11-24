@@ -267,11 +267,11 @@ StyledRect {
             Layout.preferredHeight: 28
             spacing: 8
 
-            MouseArea {
-                anchors.fill: parent
-                z: -1
+            HoverHandler {
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
+            }
+            TapHandler {
+                onTapped: {
                     root.editingGroupId = ""
                     root.isExpanded = !root.isExpanded
                 }

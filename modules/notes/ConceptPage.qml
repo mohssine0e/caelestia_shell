@@ -250,6 +250,8 @@ Item {
                         height: visible ? codeColumn.implicitHeight + 14 : 0
                         radius: 7
                         color: Colours.palette.m3surfaceContainerLow
+                        border.width: 1
+                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.55)
                         Column {
                             id: codeColumn
                             anchors.left: parent.left

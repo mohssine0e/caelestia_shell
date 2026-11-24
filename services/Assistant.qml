@@ -656,7 +656,7 @@ Singleton {
             // A stopped/superseded process can exit after a new request has begun.
             // The API's tagged terminal event owns normal completion; only handle
             // an exit as failure if the current request still has no terminal state.
-            if (root.apiProc.running || (root.requestState !== "waiting" && root.requestState !== "streaming")) return
+            if (apiProc.running || (root.requestState !== "waiting" && root.requestState !== "streaming")) return
             streamBatchTimer.stop()
             if (root._streamBuffer && root._streamBuffer.length > 0) {
                 root.rawResultText += root._streamBuffer

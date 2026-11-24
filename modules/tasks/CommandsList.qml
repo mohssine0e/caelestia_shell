@@ -522,10 +522,11 @@ FocusScope {
                                 radius: 1
                                 color: root.activeSubTab === "commands" ? Colours.palette.m3primary : "transparent"
                             }
-                            MouseArea {
-                                anchors.fill: parent
+                            HoverHandler {
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
+                            }
+                            TapHandler {
+                                onTapped: {
                                     root.activeSubTab = "commands"
                                     if (root.selectedCategory === "starred") root.selectedCategory = "all"
                                     root.selectedIndex = 0
@@ -555,10 +556,11 @@ FocusScope {
                                 radius: 1
                                 color: root.activeSubTab === "favorites" ? Colours.palette.m3primary : "transparent"
                             }
-                            MouseArea {
-                                anchors.fill: parent
+                            HoverHandler {
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
+                            }
+                            TapHandler {
+                                onTapped: {
                                     root.activeSubTab = "favorites"
                                     root.selectedIndex = 0
                                 }

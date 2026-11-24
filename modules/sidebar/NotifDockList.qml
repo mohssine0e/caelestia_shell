@@ -84,6 +84,10 @@ LazyListView {
                 else if (event.button === Qt.MiddleButton)
                     closeAll();
             }
+            onClicked: event => {
+                if (event.button === Qt.LeftButton && Math.abs(x) < 4 && Math.abs(event.y - startY) < 8)
+                    notifInner.toggleExpand(!notifInner.expanded);
+            }
             onPositionChanged: event => {
                 if (pressed) {
                     const diffY = event.y - startY;

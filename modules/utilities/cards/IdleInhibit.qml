@@ -10,12 +10,14 @@ import qs.services
 StyledRect {
     id: root
 
-    readonly property real nonAnimHeight: layout.implicitHeight + (RuntimeState.inhibitIdle ? activeChip.implicitHeight + activeChip.anchors.topMargin : 0) + Tokens.padding.extraLargeIncreased
+    readonly property real nonAnimHeight: layout.implicitHeight + (RuntimeState.inhibitIdle ? activeChip.implicitHeight + activeChip.anchors.topMargin : 0) + Tokens.padding.medium * 2
 
     implicitHeight: nonAnimHeight
 
     radius: Tokens.rounding.large
     color: Colours.tPalette.m3surfaceContainer
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
     clip: true
 
     RowLayout {
@@ -24,7 +26,7 @@ StyledRect {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: Tokens.padding.large
+        anchors.margins: Tokens.padding.medium
         spacing: Tokens.spacing.medium
 
         StyledRect {
@@ -76,9 +78,9 @@ StyledRect {
         asynchronous: true
         anchors.bottom: parent.bottom
         anchors.left: parent.left
-        anchors.topMargin: Tokens.spacing.large
-        anchors.bottomMargin: RuntimeState.inhibitIdle ? Tokens.padding.large : -implicitHeight
-        anchors.leftMargin: Tokens.padding.large
+        anchors.topMargin: Tokens.spacing.medium
+        anchors.bottomMargin: RuntimeState.inhibitIdle ? Tokens.padding.medium : -implicitHeight
+        anchors.leftMargin: Tokens.padding.medium
 
         opacity: RuntimeState.inhibitIdle ? 1 : 0
         scale: RuntimeState.inhibitIdle ? 1 : 0.5

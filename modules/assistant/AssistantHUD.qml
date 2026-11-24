@@ -2018,9 +2018,9 @@ FocusScope {
                         contentWidth: availableWidth
                         background: StyledRect {
                             radius: Tokens.rounding.small
-                            color: Colours.palette.m3surfaceContainerLow
-                            border.width: customQuestionInput.activeFocus ? 1 : 0
-                            border.color: Colours.palette.m3primary
+                            color: Colours.palette.m3surfaceContainerHigh
+                            border.width: 1
+                            border.color: customQuestionInput.activeFocus ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
                         }
 
                         QQC.TextArea {

@@ -21,6 +21,8 @@ StyledRect {
 
     radius: Tokens.rounding.large
     color: Colours.tPalette.m3surfaceContainer
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
     Ref {
         service: Recorder
@@ -30,13 +32,13 @@ StyledRect {
         id: layout
 
         anchors.fill: parent
-        anchors.margins: Tokens.padding.large
+        anchors.margins: Tokens.padding.medium
         spacing: Tokens.spacing.medium
 
         RowLayout {
             id: btnLayout
 
-            spacing: Tokens.spacing.medium
+            spacing: Tokens.spacing.small
 
             StyledRect {
                 implicitWidth: implicitHeight
@@ -66,7 +68,7 @@ StyledRect {
                 StyledText {
                     Layout.fillWidth: true
                     text: Tr.tr("Screen recorder")
-                    font: Tokens.font.body.medium
+                    font: Tokens.font.body.small
                     elide: Text.ElideRight
                 }
 
@@ -82,6 +84,7 @@ StyledRect {
 
             SplitButton {
                 disabled: Recorder.running
+                horizontalPadding: Tokens.padding.small
 
                 active: menuItems.find(m => root.props.recordingMode === m.icon + m.text) ?? menuItems[0]
                 menu.onItemSelected: item => root.props.recordingMode = item.icon + item.text

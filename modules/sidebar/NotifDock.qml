@@ -6,6 +6,7 @@ import Quickshell
 import Quickshell.Widgets
 import Caelestia.Config
 import Caelestia.I18n
+import Caelestia.State
 import qs.components
 import qs.components.containers
 import qs.components.controls
@@ -63,7 +64,7 @@ Item {
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: count.right
-            anchors.right: clearBtn.left
+            anchors.right: dndBtn.left
             anchors.leftMargin: Tokens.spacing.extraSmall
             anchors.rightMargin: Tokens.spacing.extraSmall
 
@@ -75,18 +76,49 @@ Item {
         }
 
         IconButton {
+            id: dndBtn
+
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: clearBtn.visible ? clearBtn.left : parent.right
+            anchors.rightMargin: clearBtn.visible ? Tokens.spacing.extraSmall : Tokens.padding.extraSmall
+            isToggle: true
+            checked: PersistentState.doNotDisturb
+            icon: PersistentState.doNotDisturb ? "notifications_off" : "notifications"
+            font: Tokens.font.icon.medium
+            padding: Tokens.padding.extraSmall
+            inactiveColour: "transparent"
+            inactiveOnColour: Colours.palette.m3onSurfaceVariant
+            activeColour: Qt.alpha(Colours.palette.m3secondaryContainer, 0.85)
+            activeOnColour: Colours.palette.m3onSecondaryContainer
+            onClicked: PersistentState.doNotDisturb = !PersistentState.doNotDisturb
+        }
+
+        IconButton {
             id: clearBtn
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
             anchors.rightMargin: Tokens.padding.extraSmall
             visible: root.notifCount > 0
-            icon: "delete_sweep"
+            icon: clearConfirmTimer.running ? "delete_forever" : "delete_sweep"
             font: Tokens.font.icon.medium
             padding: Tokens.padding.extraSmall
-            inactiveColour: "transparent"
-            inactiveOnColour: Colours.palette.m3onSurfaceVariant
-            onClicked: clearTimer.start()
+            inactiveColour: clearConfirmTimer.running ? Qt.alpha(Colours.palette.m3errorContainer, 0.85) : "transparent"
+            inactiveOnColour: clearConfirmTimer.running ? Colours.palette.m3onErrorContainer : Colours.palette.m3onSurfaceVariant
+            onClicked: {
+                if (clearConfirmTimer.running) {
+                    clearConfirmTimer.stop();
+                    clearTimer.start();
+                } else {
+                    clearConfirmTimer.restart();
+                }
+            }
+
+            Timer {
+                id: clearConfirmTimer
+
+                interval: 3000
+            }
         }
     }
 

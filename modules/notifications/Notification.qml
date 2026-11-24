@@ -38,6 +38,8 @@ StyledRect {
 
     color: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.large
+    border.width: 1
+    border.color: root.modelData.urgency === NotificationUrgency.Critical ? Qt.alpha(Colours.palette.m3error, 0.5) : Qt.alpha(Colours.palette.m3outlineVariant, 0.65)
 
     implicitHeight: inner.implicitHeight
 

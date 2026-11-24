@@ -38,17 +38,19 @@ StyledRect {
     readonly property int splitIndex: Math.ceil(quickToggles.length / 2)
     readonly property bool needExtraRow: quickToggles.length > 6
 
-    implicitHeight: layout.implicitHeight + Tokens.padding.extraLargeIncreased
+    implicitHeight: layout.implicitHeight + Tokens.padding.medium * 2
 
     radius: Tokens.rounding.large
     color: Colours.tPalette.m3surfaceContainer
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
     ColumnLayout {
         id: layout
 
         anchors.fill: parent
-        anchors.margins: Tokens.padding.large
-        spacing: Tokens.spacing.medium
+        anchors.margins: Tokens.padding.medium
+        spacing: Tokens.spacing.small
 
         StyledText {
             text: Tr.tr("Quick toggles")
