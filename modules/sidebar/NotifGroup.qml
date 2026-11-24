@@ -6,6 +6,8 @@ import Quickshell
 import Quickshell.Services.Notifications
 import Caelestia.Config
 import qs.components
+import qs.components.containers
+import qs.components.controls
 import qs.components.effects
 import qs.services
 import qs.utils
@@ -31,11 +33,17 @@ StyledRect {
         return NotificationUrgency.Low;
     }
 
+    readonly property int maxExpandedListHeight: {
+        const headerTotal = Math.max(TokenConfig.sizes.notifs.image, header.implicitHeight) + Tokens.spacing.small + 20;
+        return Math.max(180, (root.container?.height ?? 500) - headerTotal);
+    }
+    readonly property int expandedListHeight: Math.min(notifList.layoutHeight, maxExpandedListHeight)
     readonly property int nonAnimHeight: {
         const topHeight = root.expanded
             ? Math.max(TokenConfig.sizes.notifs.image, header.implicitHeight) + Tokens.spacing.small
             : header.implicitHeight;
-        const totalHeight = topHeight + notifList.layoutHeight;
+        const listHeight = root.expanded ? expandedListHeight : notifList.layoutHeight;
+        const totalHeight = topHeight + listHeight;
         return Math.round((root.expanded ? totalHeight : Math.max(TokenConfig.sizes.notifs.image, totalHeight)) + 20);
     }
     readonly property bool hasRedundantTopSummary: {
@@ -75,6 +83,11 @@ StyledRect {
     Component.onDestruction: {
         if (notifCount === 0 && expanded)
             props.expandedNotifs.splice(props.expandedNotifs.indexOf(modelData), 1);
+    }
+
+    onExpandedChanged: {
+        if (!expanded)
+            notifScroll.contentY = 0;
     }
 
     anchors.left: parent?.left
@@ -260,21 +273,39 @@ StyledRect {
             }
         }
 
-        NotifGroupList {
-            id: notifList
+        StyledFlickable {
+            id: notifScroll
 
             anchors.top: parent.top
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.topMargin: root.expanded ? Math.max(iconBox.height, header.implicitHeight) + Tokens.spacing.small : header.implicitHeight
             anchors.leftMargin: root.expanded ? 0 : iconBox.width + 10
+            clip: true
 
-            props: root.props
-            notifs: root.notifs
-            expanded: root.expanded
-            container: root.container
-            screenState: root.screenState
-            onRequestToggleExpand: expand => root.toggleExpand(expand)
+            interactive: root.expanded && notifList.layoutHeight > height
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            contentWidth: width
+            contentHeight: notifList.implicitHeight
+
+            StyledScrollBar.vertical: StyledScrollBar {
+                flickable: notifScroll
+                visible: notifScroll.interactive
+            }
+
+            NotifGroupList {
+                id: notifList
+
+                width: notifScroll.width
+                props: root.props
+                notifs: root.notifs
+                expanded: root.expanded
+                container: root.expanded ? notifScroll : root.container
+                screenState: root.screenState
+                onRequestToggleExpand: expand => root.toggleExpand(expand)
+            }
 
             Behavior on anchors.leftMargin {
                 Anim {}
