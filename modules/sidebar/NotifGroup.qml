@@ -37,6 +37,8 @@ StyledRect {
         return Math.round(Math.max(TokenConfig.sizes.notifs.image, columnHeight) + Tokens.padding.medium * 2);
     }
     readonly property bool expanded: props.expandedNotifs.includes(modelData)
+    property bool imageFailed: false
+    property bool appIconFailed: false
 
     function toggleExpand(expand: bool): void {
         if (expand) {
@@ -93,6 +95,10 @@ StyledRect {
                     asynchronous: true
                     width: TokenConfig.sizes.notifs.image
                     height: TokenConfig.sizes.notifs.image
+                    onStatusChanged: {
+                        if (status === Image.Error)
+                            root.imageFailed = true;
+                    }
                 }
             }
 
@@ -104,6 +110,10 @@ StyledRect {
                     source: Quickshell.iconPath(root.appIcon)
                     colour: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : root.urgency === NotificationUrgency.Low ? Colours.palette.m3onSurface : Colours.palette.m3onSecondaryContainer
                     layer.enabled: root.appIcon.endsWith("symbolic")
+                    onStatusChanged: {
+                        if (status === Image.Error)
+                            root.appIconFailed = true;
+                    }
                 }
             }
 
@@ -126,7 +136,7 @@ StyledRect {
                     asynchronous: true
                     anchors.centerIn: parent
                     anchors.verticalCenterOffset: sourceComponent === materialIconComp ? 1 : 0
-                    sourceComponent: root.image ? imageComp : root.appIcon ? appIconComp : materialIconComp
+                    sourceComponent: (root.image && !root.imageFailed) ? imageComp : (root.appIcon && !root.appIconFailed) ? appIconComp : materialIconComp
                 }
             }
 
@@ -134,7 +144,7 @@ StyledRect {
                 asynchronous: true
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                active: root.appIcon && root.image
+                active: root.appIcon && !root.appIconFailed && root.image && !root.imageFailed
 
                 sourceComponent: StyledRect {
                     implicitWidth: Tokens.sizes.notifs.badge

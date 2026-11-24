@@ -6,6 +6,7 @@ import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.services
+import qs.utils
 
 StyledRect {
     id: root
@@ -89,7 +90,7 @@ StyledRect {
         anchors.leftMargin: Tokens.spacing.small
 
         sourceComponent: StyledText {
-            text: String(root.modelData?.body ?? "").replace(/\n/g, " ")
+            text: Strings.stripHtml(root.modelData?.body ?? "")
             color: root.modelData?.urgency === "critical" ? Colours.palette.m3secondary : Colours.palette.m3outline
             elide: Text.ElideRight
         }
@@ -135,8 +136,8 @@ StyledRect {
             id: bodyText
 
             Layout.fillWidth: true
-            textFormat: Text.MarkdownText
-            text: String(root.modelData?.body ?? "").replace(/(.)\n(?!\n)/g, "$1\n\n") || Tr.tr("No body here! :/")
+            textFormat: /<[a-z][\s\S]*>/i.test(root.modelData?.body ?? "") ? Text.RichText : Text.MarkdownText
+            text: /<[a-z][\s\S]*>/i.test(root.modelData?.body ?? "") ? (root.modelData?.body ?? "") : String(root.modelData?.body ?? "").replace(/(.)\n(?!\n)/g, "$1\n\n") || Tr.tr("No body here! :/")
             color: root.modelData?.urgency === "critical" ? Colours.palette.m3secondary : Colours.palette.m3outline
             wrapMode: Text.WordWrap
 

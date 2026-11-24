@@ -15,6 +15,22 @@ Singleton {
         return percent(Math.round(value * 100));
     }
 
+    function stripHtml(raw: string): string {
+        if (!raw)
+            return "";
+        return String(raw)
+            .replace(/<br\s*\/?>/gi, " ")
+            .replace(/<[^>]*>/g, "")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, "\"")
+            .replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     function testRegexList(filterList: list<string>, target: string): bool {
         const regexChecker = /^\^.*\$$/;
         for (const filter of filterList) {

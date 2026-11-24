@@ -63,14 +63,28 @@ Item {
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: count.right
-            anchors.right: parent.right
+            anchors.right: clearBtn.left
             anchors.leftMargin: Tokens.spacing.extraSmall
+            anchors.rightMargin: Tokens.spacing.extraSmall
 
             // TRANSLATORS: the count itself is rendered separately, immediately to the left
             text: root.notifCount > 0 ? Tr.trCtxN("notification", "notifications", root.notifCount, "notification count label, number shown separately") : Tr.tr("Notifications")
             color: Colours.palette.m3outline
             font: Tokens.font.label.large
             elide: Text.ElideRight
+        }
+
+        IconButton {
+            id: clearBtn
+
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            visible: root.notifCount > 0
+            icon: "clear_all"
+            font: Tokens.font.icon.medium
+            inactiveColour: "transparent"
+            inactiveOnColour: Colours.palette.m3outline
+            onClicked: clearTimer.start()
         }
     }
 
@@ -172,41 +186,5 @@ Item {
         }
     }
 
-    Loader {
-        asynchronous: true
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: Tokens.padding.medium
 
-        scale: root.notifCount > 0 ? 1 : 0.5
-        opacity: root.notifCount > 0 ? 1 : 0
-        active: opacity > 0
-
-        sourceComponent: IconButton {
-            id: clearBtn
-
-            icon: "clear_all"
-            font: Tokens.font.icon.large
-            onClicked: clearTimer.start()
-
-            Elevation {
-                anchors.fill: parent
-                radius: parent.radius
-                z: -1
-                level: clearBtn.stateLayer.containsMouse ? 4 : 3
-            }
-        }
-
-        Behavior on scale {
-            Anim {
-                type: Anim.FastSpatial
-            }
-        }
-
-        Behavior on opacity {
-            Anim {
-                type: Anim.DefaultEffects
-            }
-        }
-    }
 }

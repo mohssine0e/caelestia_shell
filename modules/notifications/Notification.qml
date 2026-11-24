@@ -16,9 +16,11 @@ StyledRect {
     id: root
 
     required property NotifData modelData
-    readonly property bool hasImage: modelData.image.length > 0
-    readonly property bool hasAppIcon: modelData.appIcon.length > 0
-    readonly property int bodyTextFormat: /[<*_`#\[\]]/.test(modelData.body) ? Text.MarkdownText : Text.PlainText
+    property bool imageFailed: false
+    property bool appIconFailed: false
+    readonly property bool hasImage: modelData.image.length > 0 && !imageFailed
+    readonly property bool hasAppIcon: modelData.appIcon.length > 0 && !appIconFailed
+    readonly property int bodyTextFormat: /<[a-z][\s\S]*>/i.test(modelData.body) ? Text.RichText : (/[<*_`#\[\]]/.test(modelData.body) ? Text.MarkdownText : Text.PlainText)
     readonly property int nonAnimHeight: summary.implicitHeight + (root.expanded ? Tokens.spacing.extraSmall * 2 + appName.height + body.height + actions.height + actions.anchors.topMargin : bodyPreview.height) + inner.anchors.margins * 2
     property bool expanded: Config.notifs.openExpanded
 
@@ -131,6 +133,10 @@ StyledRect {
                         }
                         cache: false
                         asynchronous: true
+                        onStatusChanged: {
+                            if (status === Image.Error)
+                                root.imageFailed = true;
+                        }
                     }
                 }
             }
@@ -168,6 +174,10 @@ StyledRect {
                             source: Quickshell.iconPath(root.modelData.appIcon)
                             colour: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : root.modelData.urgency === NotificationUrgency.Low ? Colours.palette.m3onSurface : Colours.palette.m3onSecondaryContainer
                             layer.enabled: root.modelData.appIcon.endsWith("symbolic")
+                            onStatusChanged: {
+                                if (status === Image.Error)
+                                    root.appIconFailed = true;
+                            }
                         }
                     }
 
@@ -408,7 +418,7 @@ StyledRect {
             TextMetrics {
                 id: bodyPreviewMetrics
 
-                text: root.modelData.body
+                text: Strings.stripHtml(root.modelData.body)
                 font: bodyPreview.font
                 elide: Text.ElideRight
                 elideWidth: bodyPreview.width

@@ -216,7 +216,7 @@ TextFieldBase {
 
                 strokeWidth: root.activeFocus ? root.borderWidth : 1
                 strokeColor: root.isError ? Colours.palette.m3error : (root.activeFocus ? Colours.palette.m3primary : Colours.palette.m3outline)
-                fillColor: Colours.tPalette.m3surfaceContainer
+                fillColor: Colours.tPalette.m3surfaceContainerHigh
                 capStyle: ShapePath.RoundCap
 
                 startX: path.inset + root.horizontalPadding - root.clampedRadius + path.outlineGap * (1 - path.outlineGapScale) / 2 + path.outlineGap * path.outlineGapScale

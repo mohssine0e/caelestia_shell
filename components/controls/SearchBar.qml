@@ -24,8 +24,14 @@ TextFieldBase {
         id: bg
 
         anchors.fill: parent
-        color: Colours.tPalette.m3surfaceContainer
+        color: Colours.tPalette.m3surfaceContainerHigh
+        border.width: 1
+        border.color: root.activeFocus ? Colours.palette.m3primary : Qt.alpha(Colours.palette.m3outline, 0.35)
         radius: Tokens.rounding.full
+
+        Behavior on border.color {
+            CAnim {}
+        }
 
         StateLayer {
             id: stateLayer

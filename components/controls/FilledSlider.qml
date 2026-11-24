@@ -16,7 +16,9 @@ Slider {
     orientation: Qt.Vertical
 
     background: StyledRect {
-        color: Colours.layer(Colours.palette.m3surfaceContainer, 2)
+        color: Colours.palette.m3surfaceContainerHighest
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outline, 0.35)
         radius: Tokens.rounding.full
 
         // 100% threshold marker when over-amplification is supported (to > 1.0)

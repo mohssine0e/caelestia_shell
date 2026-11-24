@@ -74,7 +74,7 @@ Singleton {
         id: saveTimer
 
         interval: 1000
-        onTriggered: storage.setText(JSON.stringify(root.notClosed.map(n => ({
+        onTriggered: storage.setText(JSON.stringify(root.notClosed.slice(0, 75).map(n => ({
                     time: n.time,
                     id: n.id,
                     summary: n.summary,
@@ -119,7 +119,7 @@ Singleton {
         path: `${Paths.state}/notifs.json`
         onLoaded: {
             const data = JSON.parse(text());
-            for (const notif of data) {
+            for (const notif of data.slice(0, 75)) {
                 const properties = Object.assign({}, notif);
 
                 // Backwards compatibility for old notifications
