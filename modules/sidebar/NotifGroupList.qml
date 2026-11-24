@@ -19,8 +19,6 @@ LazyListView {
 
     signal requestToggleExpand(expand: bool)
 
-    anchors.left: parent.left
-    anchors.right: parent.right
     implicitHeight: contentHeight
 
     spacing: Math.round(Tokens.spacing.extraSmall)

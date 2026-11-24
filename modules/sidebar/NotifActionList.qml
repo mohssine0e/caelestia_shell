@@ -98,16 +98,21 @@ Item {
             id: actionList
 
             anchors.fill: parent
-            spacing: Tokens.spacing.small
+            spacing: Tokens.spacing.extraSmall
+
+            Item {
+                Layout.fillWidth: true
+                visible: (root.notif?.actions?.length ?? 0) === 0
+            }
 
             Repeater {
                 model: [
-                    {
-                        isClose: true
-                    },
                     ...(root.notif?.actions ?? []),
                     {
                         isCopy: true
+                    },
+                    {
+                        isClose: true
                     }
                 ]
 
@@ -115,14 +120,15 @@ Item {
                     id: action
 
                     required property var modelData
+                    readonly property bool isCompactIcon: Boolean(modelData.isClose || modelData.isCopy)
 
-                    Layout.fillWidth: true
+                    Layout.fillWidth: !isCompactIcon
                     Layout.fillHeight: true
-                    implicitWidth: actionInner.implicitWidth + Tokens.padding.medium * 2
-                    implicitHeight: actionInner.implicitHeight + Tokens.padding.small
+                    implicitWidth: isCompactIcon ? implicitHeight + Tokens.padding.small : actionInner.implicitWidth + Tokens.padding.medium * 2
+                    implicitHeight: actionInner.implicitHeight + Tokens.padding.extraSmall * 2
 
-                    Layout.preferredWidth: implicitWidth + (actionStateLayer.pressed ? Tokens.padding.large : 0)
-                    radius: actionStateLayer.pressed ? Tokens.rounding.medium / 2 : Tokens.rounding.medium
+                    Layout.preferredWidth: implicitWidth + (actionStateLayer.pressed ? Tokens.padding.small : 0)
+                    radius: isCompactIcon ? Tokens.rounding.full : (actionStateLayer.pressed ? Tokens.rounding.medium / 2 : Tokens.rounding.medium)
                     color: Colours.layer(Colours.palette.m3surfaceContainerHighest, 4)
 
                     Timer {
@@ -142,10 +148,11 @@ Item {
                                 Quickshell.clipboardText = root.notif.body;
                                 (actionInner.item as MaterialIcon).text = "inventory";
                                 copyTimer.start();
-                            } else if (action.modelData.invoke) {
-                                action.modelData.invoke();
-                            } else if (!root.notif.resident) {
-                                root.notif.close();
+                            } else {
+                                if (action.modelData.invoke)
+                                    action.modelData.invoke();
+                                if (!root.notif.resident)
+                                    root.notif.close();
                             }
                         }
                     }
@@ -154,7 +161,7 @@ Item {
                         id: actionInner
 
                         anchors.centerIn: parent
-                        sourceComponent: action.modelData.isClose || action.modelData.isCopy ? iconBtn : root.notif?.hasActionIcons ? iconComp : textComp
+                        sourceComponent: action.isCompactIcon ? iconBtn : (root.notif?.hasActionIcons && Quickshell.hasThemeIcon(action.modelData.identifier)) ? iconComp : textComp
                     }
 
                     Component {

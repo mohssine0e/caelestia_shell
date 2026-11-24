@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell.Services.Notifications
 import Caelestia.Config
 import Caelestia.I18n
 import qs.components
@@ -17,13 +18,20 @@ StyledRect {
     required property ScreenState screenState
 
     readonly property StyledText body: (expandedContent.item as ExpandedBody)?.body ?? null
-    readonly property real nonAnimHeight: expanded ? summary.implicitHeight + expandedContent.implicitHeight + expandedContent.anchors.topMargin + Tokens.padding.medium * 2 : summaryHeightMetrics.height
+    readonly property bool isRedundantSummary: {
+        const sum = (root.modelData?.summary ?? "").trim().toLowerCase();
+        const app = (root.modelData?.appName ?? "").trim().toLowerCase();
+        return sum.length === 0 || sum === app;
+    }
+    readonly property real nonAnimHeight: expanded
+        ? (isRedundantSummary ? 0 : summary.implicitHeight + expandedContent.anchors.topMargin) + expandedContent.implicitHeight + 20
+        : summaryHeightMetrics.height
 
     implicitHeight: nonAnimHeight
 
     radius: Tokens.rounding.medium
     color: {
-        const c = root.modelData?.urgency === "critical" ? Colours.palette.m3secondaryContainer : Colours.layer(Colours.palette.m3surfaceContainerHigh, 2);
+        const c = root.modelData?.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondaryContainer : Colours.layer(Colours.palette.m3surfaceContainerHigh, 2);
         return expanded ? c : Qt.alpha(c, 0);
     }
 
@@ -33,12 +41,12 @@ StyledRect {
         name: "expanded"
 
         PropertyChanges {
-            summary.anchors.margins: root.Tokens.padding.medium
-            dummySummary.anchors.margins: root.Tokens.padding.medium
-            compactBody.anchors.margins: root.Tokens.padding.medium
-            timeStr.anchors.margins: root.Tokens.padding.medium
-            expandedContent.anchors.margins: root.Tokens.padding.medium
-            summary.width: root.width - root.Tokens.padding.medium * 2 - timeStr.implicitWidth - root.Tokens.spacing.small
+            summary.anchors.margins: 10
+            dummySummary.anchors.margins: 10
+            compactBody.anchors.margins: 10
+            timeStr.anchors.margins: 10
+            expandedContent.anchors.margins: 10
+            summary.width: root.width - 20 - timeStr.implicitWidth - root.Tokens.spacing.small
             summary.maximumLineCount: Number.MAX_SAFE_INTEGER
         }
     }
@@ -47,12 +55,6 @@ StyledRect {
         Anim {
             properties: "margins,width,maximumLineCount"
         }
-    }
-
-    readonly property bool isRedundantSummary: {
-        const sum = (root.modelData?.summary ?? "").trim().toLowerCase();
-        const app = (root.modelData?.appName ?? "").trim().toLowerCase();
-        return sum.length === 0 || sum === app;
     }
 
     TextMetrics {
@@ -68,10 +70,10 @@ StyledRect {
         anchors.top: parent.top
         anchors.left: parent.left
 
-        visible: !root.isRedundantSummary || root.expanded
+        visible: !root.isRedundantSummary
         width: parent.width
-        text: root.isRedundantSummary ? (root.expanded ? (root.modelData?.appName ?? "") : "") : (root.modelData?.summary ?? "")
-        color: root.modelData?.urgency === "critical" ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
+        text: root.isRedundantSummary ? "" : (root.modelData?.summary ?? "")
+        color: root.modelData?.urgency === NotificationUrgency.Critical ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
         elide: Text.ElideRight
         wrapMode: Text.WordWrap
         maximumLineCount: 1
@@ -98,7 +100,7 @@ StyledRect {
 
         sourceComponent: StyledText {
             text: Strings.stripHtml(root.modelData?.body ?? "")
-            color: root.modelData?.urgency === "critical" ? Colours.palette.m3secondary : Colours.palette.m3outline
+            color: root.modelData?.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondary : Colours.palette.m3outline
             elide: Text.ElideRight
         }
     }
@@ -106,7 +108,7 @@ StyledRect {
     WrappedLoader {
         id: timeStr
 
-        shouldBeActive: root.expanded
+        shouldBeActive: root.expanded && !root.isRedundantSummary
         anchors.top: parent.top
         anchors.right: parent.right
 
@@ -122,10 +124,10 @@ StyledRect {
         id: expandedContent
 
         shouldBeActive: root.expanded
-        anchors.top: summary.bottom
+        anchors.top: root.isRedundantSummary ? parent.top : summary.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.topMargin: Tokens.spacing.extraSmall
+        anchors.topMargin: root.isRedundantSummary ? 0 : Tokens.spacing.extraSmall
 
         sourceComponent: ExpandedBody {}
     }
@@ -136,16 +138,19 @@ StyledRect {
 
     component ExpandedBody: ColumnLayout {
         readonly property alias body: bodyText
+        readonly property string rawBody: root.modelData?.body ?? ""
+        readonly property bool isHtml: /<[a-z][\s\S]*>/i.test(rawBody)
+        readonly property bool isMarkdown: !isHtml && /[*_`#\[\]]/.test(rawBody)
 
-        spacing: Tokens.spacing.medium
+        spacing: Tokens.spacing.extraSmall
 
         StyledText {
             id: bodyText
 
             Layout.fillWidth: true
-            textFormat: /<[a-z][\s\S]*>/i.test(root.modelData?.body ?? "") ? Text.RichText : Text.MarkdownText
-            text: /<[a-z][\s\S]*>/i.test(root.modelData?.body ?? "") ? (root.modelData?.body ?? "") : String(root.modelData?.body ?? "").replace(/(.)\n(?!\n)/g, "$1\n\n") || Tr.tr("No body here! :/")
-            color: root.modelData?.urgency === "critical" ? Colours.palette.m3secondary : Colours.palette.m3outline
+            textFormat: parent.isHtml ? Text.RichText : (parent.isMarkdown ? Text.MarkdownText : Text.PlainText)
+            text: parent.isHtml ? parent.rawBody : (parent.isMarkdown ? String(parent.rawBody).replace(/(.)\n(?!\n)/g, "$1\n\n") : String(parent.rawBody)) || Tr.tr("No body here! :/")
+            color: root.modelData?.urgency === NotificationUrgency.Critical ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
             wrapMode: Text.WordWrap
 
             onLinkActivated: link => {
@@ -154,8 +159,21 @@ StyledRect {
             }
         }
 
-        NotifActionList {
-            notif: root.modelData
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Tokens.spacing.small
+
+            StyledText {
+                visible: root.isRedundantSummary
+                animate: true
+                text: root.modelData?.timeStr ?? ""
+                color: Colours.palette.m3outline
+                font: Tokens.font.body.small
+            }
+
+            NotifActionList {
+                notif: root.modelData
+            }
         }
     }
 

@@ -32,9 +32,11 @@ StyledRect {
     }
 
     readonly property int nonAnimHeight: {
-        const headerHeight = header.implicitHeight + (root.expanded ? Math.round(Tokens.spacing.extraSmall) : 0);
-        const columnHeight = headerHeight + notifList.layoutHeight;
-        return Math.round(Math.max(TokenConfig.sizes.notifs.image, columnHeight) + 20);
+        const topHeight = root.expanded
+            ? Math.max(TokenConfig.sizes.notifs.image, header.implicitHeight) + Tokens.spacing.small
+            : header.implicitHeight;
+        const totalHeight = topHeight + notifList.layoutHeight;
+        return Math.round((root.expanded ? totalHeight : Math.max(TokenConfig.sizes.notifs.image, totalHeight)) + 20);
     }
     readonly property bool hasRedundantTopSummary: {
         const top = activeNotifs[0];
@@ -89,18 +91,17 @@ StyledRect {
         Anim {}
     }
 
-    RowLayout {
+    Item {
         id: content
 
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.fill: parent
         anchors.margins: 10
 
-        spacing: 10
-
         Item {
-            Layout.alignment: Qt.AlignLeft | Qt.AlignTop
+            id: iconBox
+
+            anchors.top: parent.top
+            anchors.left: parent.left
             implicitWidth: TokenConfig.sizes.notifs.image
             implicitHeight: TokenConfig.sizes.notifs.image
 
@@ -187,94 +188,100 @@ StyledRect {
             }
         }
 
-        Column {
-            id: column
+        RowLayout {
+            id: header
 
-            Layout.fillWidth: true
-            spacing: root.expanded ? Math.round(Tokens.spacing.extraSmall) : 0
+            anchors.top: parent.top
+            anchors.left: iconBox.right
+            anchors.right: parent.right
+            anchors.leftMargin: 10
+            height: root.expanded ? Math.max(implicitHeight, iconBox.height) : implicitHeight
+            spacing: Tokens.spacing.small
 
-            Behavior on spacing {
+            StyledText {
+                Layout.fillWidth: true
+                text: root.modelData
+                color: root.hasRedundantTopSummary ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
+                font: Tokens.font.body.small
+                elide: Text.ElideRight
+            }
+
+            StyledText {
+                animate: true
+                text: root.activeNotifs[0]?.timeStr ?? ""
+                color: Colours.palette.m3outline
+                font: Tokens.font.body.small
+            }
+
+            StyledRect {
+                implicitWidth: expandBtn.implicitWidth + Tokens.padding.large
+                implicitHeight: groupCount.implicitHeight + Tokens.padding.extraSmall
+
+                color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3error : Colours.layer(Colours.palette.m3surfaceContainerHigh, 3)
+                radius: Tokens.rounding.full
+
+                StateLayer {
+                    color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurface
+                    onClicked: root.toggleExpand(!root.expanded)
+                }
+
+                RowLayout {
+                    id: expandBtn
+
+                    anchors.centerIn: parent
+                    spacing: Tokens.spacing.extraSmall
+
+                    StyledText {
+                        id: groupCount
+
+                        Layout.leftMargin: Tokens.padding.extraSmall / 2
+                        animate: true
+                        text: root.notifCount
+                        color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurfaceVariant
+                        font: Tokens.font.body.small
+                    }
+
+                    MaterialIcon {
+                        Layout.rightMargin: -Tokens.padding.extraSmall / 2
+                        text: "expand_more"
+                        color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurfaceVariant
+                        rotation: root.expanded ? 180 : 0
+                        Layout.topMargin: root.expanded ? -Math.floor(Tokens.padding.extraSmall) : 0
+
+                        Behavior on rotation {
+                            Anim {}
+                        }
+
+                        Behavior on Layout.topMargin {
+                            Anim {}
+                        }
+                    }
+                }
+            }
+        }
+
+        NotifGroupList {
+            id: notifList
+
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.topMargin: root.expanded ? Math.max(iconBox.height, header.implicitHeight) + Tokens.spacing.small : header.implicitHeight
+            anchors.leftMargin: root.expanded ? 0 : iconBox.width + 10
+
+            props: root.props
+            notifs: root.notifs
+            expanded: root.expanded
+            container: root.container
+            screenState: root.screenState
+            onRequestToggleExpand: expand => root.toggleExpand(expand)
+
+            Behavior on anchors.leftMargin {
                 Anim {}
             }
 
-            RowLayout {
-                id: header
-
-                anchors.left: parent.left
-                anchors.right: parent.right
-                spacing: Tokens.spacing.small
-
-                StyledText {
-                    Layout.fillWidth: true
-                    text: root.modelData
-                    color: root.hasRedundantTopSummary ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
-                    font: Tokens.font.body.small
-                    elide: Text.ElideRight
-                }
-
-                StyledText {
-                    animate: true
-                    text: root.activeNotifs[0]?.timeStr ?? ""
-                    color: Colours.palette.m3outline
-                    font: Tokens.font.body.small
-                }
-
-                StyledRect {
-                    implicitWidth: expandBtn.implicitWidth + Tokens.padding.large
-                    implicitHeight: groupCount.implicitHeight + Tokens.padding.extraSmall
-
-                    color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3error : Colours.layer(Colours.palette.m3surfaceContainerHigh, 3)
-                    radius: Tokens.rounding.full
-
-                    StateLayer {
-                        color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurface
-                        onClicked: root.toggleExpand(!root.expanded)
-                    }
-
-                    RowLayout {
-                        id: expandBtn
-
-                        anchors.centerIn: parent
-                        spacing: Tokens.spacing.extraSmall
-
-                        StyledText {
-                            id: groupCount
-
-                            Layout.leftMargin: Tokens.padding.extraSmall / 2
-                            animate: true
-                            text: root.notifCount
-                            color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurfaceVariant
-                            font: Tokens.font.body.small
-                        }
-
-                        MaterialIcon {
-                            Layout.rightMargin: -Tokens.padding.extraSmall / 2
-                            text: "expand_more"
-                            color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurfaceVariant
-                            rotation: root.expanded ? 180 : 0
-                            Layout.topMargin: root.expanded ? -Math.floor(Tokens.padding.extraSmall) : 0
-
-                            Behavior on rotation {
-                                Anim {}
-                            }
-
-                            Behavior on Layout.topMargin {
-                                Anim {}
-                            }
-                        }
-                    }
-                }
-            }
-
-            NotifGroupList {
-                id: notifList
-
-                props: root.props
-                notifs: root.notifs
-                expanded: root.expanded
-                container: root.container
-                screenState: root.screenState
-                onRequestToggleExpand: expand => root.toggleExpand(expand)
+            Behavior on anchors.topMargin {
+                Anim {}
             }
         }
     }
