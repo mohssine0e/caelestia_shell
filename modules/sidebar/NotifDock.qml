@@ -21,30 +21,33 @@ Item {
     readonly property int notifCount: Notifs.list.reduce((acc, n) => n.closed ? acc : acc + 1, 0)
 
     anchors.fill: parent
-    anchors.margins: Tokens.padding.medium
+    anchors.margins: Tokens.padding.small
 
     Component.onCompleted: Notifs.list.forEach(n => n.popup = false)
 
-    Item {
+    StyledRect {
         id: title
 
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: Tokens.padding.extraSmall
 
-        implicitHeight: Math.max(count.implicitHeight, titleText.implicitHeight)
+        implicitHeight: Math.max(count.implicitHeight, titleText.implicitHeight, clearBtn.implicitHeight) + Tokens.padding.extraSmall
+        radius: Tokens.rounding.full
+        color: Colours.layer(Colours.palette.m3surfaceContainerHigh, 2)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
         StyledText {
             id: count
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
-            anchors.leftMargin: root.notifCount > 0 ? 0 : -width - titleText.anchors.leftMargin
+            anchors.leftMargin: root.notifCount > 0 ? Tokens.padding.medium : Tokens.padding.medium - width - titleText.anchors.leftMargin
             opacity: root.notifCount > 0 ? 1 : 0
 
             text: root.notifCount
-            color: Colours.palette.m3outline
+            color: Colours.palette.m3onSurface
             font: Tokens.font.label.large
 
             Behavior on anchors.leftMargin {
@@ -69,7 +72,7 @@ Item {
 
             // TRANSLATORS: the count itself is rendered separately, immediately to the left
             text: root.notifCount > 0 ? Tr.trCtxN("notification", "notifications", root.notifCount, "notification count label, number shown separately") : Tr.tr("Notifications")
-            color: Colours.palette.m3outline
+            color: Colours.palette.m3onSurface
             font: Tokens.font.label.large
             elide: Text.ElideRight
         }
@@ -79,11 +82,13 @@ Item {
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
+            anchors.rightMargin: Tokens.padding.extraSmall
             visible: root.notifCount > 0
             icon: "delete_sweep"
             font: Tokens.font.icon.medium
+            padding: Tokens.padding.extraSmall
             inactiveColour: "transparent"
-            inactiveOnColour: Colours.palette.m3outline
+            inactiveOnColour: Colours.palette.m3onSurfaceVariant
             onClicked: clearTimer.start()
         }
     }
@@ -95,7 +100,7 @@ Item {
         anchors.right: parent.right
         anchors.top: title.bottom
         anchors.bottom: parent.bottom
-        anchors.topMargin: Tokens.spacing.medium
+        anchors.topMargin: Tokens.spacing.small
 
         radius: Tokens.rounding.medium
         color: "transparent"

@@ -34,7 +34,15 @@ StyledRect {
     readonly property int nonAnimHeight: {
         const headerHeight = header.implicitHeight + (root.expanded ? Math.round(Tokens.spacing.extraSmall) : 0);
         const columnHeight = headerHeight + notifList.layoutHeight;
-        return Math.round(Math.max(TokenConfig.sizes.notifs.image, columnHeight) + Tokens.padding.medium * 2);
+        return Math.round(Math.max(TokenConfig.sizes.notifs.image, columnHeight) + 20);
+    }
+    readonly property bool hasRedundantTopSummary: {
+        const top = activeNotifs[0];
+        if (!top)
+            return false;
+        const sum = (top.summary ?? "").trim().toLowerCase();
+        const app = (top.appName ?? "").trim().toLowerCase();
+        return sum.length === 0 || sum === app;
     }
     readonly property bool expanded: props.expandedNotifs.includes(modelData)
     property bool imageFailed: false
@@ -74,6 +82,8 @@ StyledRect {
     clip: true
     radius: Tokens.rounding.large
     color: Colours.layer(Colours.palette.m3surfaceContainer, 2)
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
 
     Behavior on implicitHeight {
         Anim {}
@@ -85,9 +95,9 @@ StyledRect {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: Tokens.padding.medium
+        anchors.margins: 10
 
-        spacing: Tokens.spacing.medium
+        spacing: 10
 
         Item {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
@@ -197,7 +207,7 @@ StyledRect {
                 StyledText {
                     Layout.fillWidth: true
                     text: root.modelData
-                    color: Colours.palette.m3onSurfaceVariant
+                    color: root.hasRedundantTopSummary ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
                     font: Tokens.font.body.small
                     elide: Text.ElideRight
                 }
