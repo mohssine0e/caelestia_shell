@@ -16,19 +16,13 @@ Item {
         anchors.fill: parent
         spacing: Tokens.spacing.medium
 
-        StyledRect {
+        NotifDock {
+            objectName: "sidebarNotifications"
+
             Layout.fillWidth: true
             Layout.fillHeight: true
-
-            radius: Tokens.rounding.large
-            color: Colours.tPalette.m3surfaceContainerLow
-
-            NotifDock {
-                objectName: "sidebarNotifications"
-
-                props: root.props
-                screenState: root.screenState
-            }
+            props: root.props
+            screenState: root.screenState
         }
 
         StyledRect {

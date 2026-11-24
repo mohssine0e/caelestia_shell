@@ -20,9 +20,6 @@ Item {
     required property ScreenState screenState
     readonly property int notifCount: Notifs.list.reduce((acc, n) => n.closed ? acc : acc + 1, 0)
 
-    anchors.fill: parent
-    anchors.margins: Tokens.padding.small
-
     Component.onCompleted: Notifs.list.forEach(n => n.popup = false)
 
     StyledRect {
