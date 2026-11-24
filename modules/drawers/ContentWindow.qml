@@ -211,7 +211,7 @@ StyledWindow {
             panel: panels.sidebar
             deformAmount: 0.03
             implicitHeight: panel.height * (1 / rawDeformMatrix.m22) + 2
-            exclude: panels.sidebar.offsetScale > 0.08 ? [] : [utilsBg]
+            exclude: []
             bottomLeftRadius: Math.max(0, Math.min(1, panels.sidebar.offsetScale / 0.3)) * radius
         }
 
@@ -241,8 +241,8 @@ StyledWindow {
             id: utilsBg
 
             panel: panels.utilities
-            deformAmount: panels.sidebar.visible ? 0.1 : 0.15
-            exclude: panels.sidebar.offsetScale > 0.08 ? [] : [sidebarBg]
+            deformAmount: panels.sidebar.visible ? 0.03 : 0.15
+            exclude: []
             topLeftRadius: Math.max(0, Math.min(1, panels.sidebar.offsetScale / 0.3)) * radius
         }
 
@@ -284,7 +284,7 @@ StyledWindow {
             bar: bar
             borderThickness: root.borderThickness
 
-            utilities.horizontalStretch: (sidebarBg.rawDeformMatrix.m11 - 1) / 2 + 1
+            utilities.horizontalStretch: panels.sidebar.offsetScale > 0.05 ? ((sidebarBg.rawDeformMatrix.m11 - 1) / 2 + 1) : 1
             utilities.deformMatrix: utilsBg.rawDeformMatrix
 
             dashboard.transform: Matrix4x4 {
