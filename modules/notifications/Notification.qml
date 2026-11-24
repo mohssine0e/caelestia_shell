@@ -31,7 +31,8 @@ StyledRect {
         if (modelData.appIcon.startsWith("/") || modelData.appIcon.startsWith("file:")) return true;
         return Quickshell.hasThemeIcon(modelData.appIcon);
     }
-    readonly property int bodyTextFormat: /<[a-z][\s\S]*>/i.test(modelData.body) ? Text.RichText : (/[<*_`#\[\]]/.test(modelData.body) ? Text.MarkdownText : Text.PlainText)
+    readonly property string cleanedBody: Strings.cleanNotifBody(modelData.body)
+    readonly property int bodyTextFormat: /<[a-z][\s\S]*>/i.test(cleanedBody) ? Text.RichText : (/[<*_`#\[\]]/.test(cleanedBody) ? Text.MarkdownText : Text.PlainText)
     readonly property int nonAnimHeight: summary.implicitHeight + (root.expanded ? Tokens.spacing.extraSmall * 2 + appName.height + body.height + actions.height + actions.anchors.topMargin : bodyPreview.height) + inner.anchors.margins * 2
     property bool expanded: Config.notifs.openExpanded
 
@@ -445,8 +446,9 @@ StyledRect {
 
                 animate: true
                 textFormat: root.bodyTextFormat
-                text: root.modelData.body
+                text: root.cleanedBody
                 color: Colours.palette.m3onSurfaceVariant
+                linkColor: Colours.palette.m3primary
                 font: Tokens.font.body.small
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 height: text ? implicitHeight : 0

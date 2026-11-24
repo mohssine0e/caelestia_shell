@@ -98,62 +98,38 @@ Item {
             id: actionList
 
             anchors.fill: parent
-            spacing: Tokens.spacing.extraSmall
-
-            Item {
-                Layout.fillWidth: true
-                visible: (root.notif?.actions?.length ?? 0) === 0
-            }
+            spacing: Tokens.spacing.small
 
             Repeater {
-                model: [
-                    ...(root.notif?.actions ?? []),
-                    {
-                        isCopy: true
-                    },
-                    {
-                        isClose: true
-                    }
-                ]
+                model: root.notif?.actions ?? []
 
                 StyledRect {
                     id: action
 
+                    required property int index
                     required property var modelData
-                    readonly property bool isCompactIcon: Boolean(modelData.isClose || modelData.isCopy)
+                    readonly property bool isPrimary: index === 0 || modelData.identifier === "default"
 
-                    Layout.fillWidth: !isCompactIcon
+                    Layout.fillWidth: true
                     Layout.fillHeight: true
-                    implicitWidth: isCompactIcon ? implicitHeight + Tokens.padding.small : actionInner.implicitWidth + Tokens.padding.medium * 2
+                    implicitWidth: actionInner.implicitWidth + Tokens.padding.medium * 2
                     implicitHeight: actionInner.implicitHeight + Tokens.padding.extraSmall * 2
 
                     Layout.preferredWidth: implicitWidth + (actionStateLayer.pressed ? Tokens.padding.small : 0)
-                    radius: isCompactIcon ? Tokens.rounding.full : (actionStateLayer.pressed ? Tokens.rounding.medium / 2 : Tokens.rounding.medium)
-                    color: Colours.layer(Colours.palette.m3surfaceContainerHighest, 4)
-
-                    Timer {
-                        id: copyTimer
-
-                        interval: 3000
-                        onTriggered: (actionInner.item as MaterialIcon).text = "content_copy"
-                    }
+                    radius: actionStateLayer.pressed ? Tokens.rounding.medium / 2 : Tokens.rounding.medium
+                    color: isPrimary ? Colours.palette.m3secondaryContainer : Colours.layer(Colours.palette.m3surfaceContainerHighest, 3)
+                    border.width: isPrimary ? 0 : 1
+                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.55)
 
                     StateLayer {
                         id: actionStateLayer
 
+                        color: action.isPrimary ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
                         onClicked: {
-                            if (action.modelData.isClose) {
+                            if (action.modelData.invoke)
+                                action.modelData.invoke();
+                            if (!root.notif.resident)
                                 root.notif.close();
-                            } else if (action.modelData.isCopy) {
-                                Quickshell.clipboardText = root.notif.body;
-                                (actionInner.item as MaterialIcon).text = "inventory";
-                                copyTimer.start();
-                            } else {
-                                if (action.modelData.invoke)
-                                    action.modelData.invoke();
-                                if (!root.notif.resident)
-                                    root.notif.close();
-                            }
                         }
                     }
 
@@ -161,17 +137,7 @@ Item {
                         id: actionInner
 
                         anchors.centerIn: parent
-                        sourceComponent: action.isCompactIcon ? iconBtn : (root.notif?.hasActionIcons && Quickshell.hasThemeIcon(action.modelData.identifier)) ? iconComp : textComp
-                    }
-
-                    Component {
-                        id: iconBtn
-
-                        MaterialIcon {
-                            animate: action.modelData.isCopy ?? false
-                            text: action.modelData.isCopy ? "content_copy" : "close"
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
+                        sourceComponent: (root.notif?.hasActionIcons && Quickshell.hasThemeIcon(action.modelData.identifier)) ? iconComp : textComp
                     }
 
                     Component {
@@ -188,7 +154,8 @@ Item {
 
                         StyledText {
                             text: action.modelData.text
-                            color: Colours.palette.m3onSurfaceVariant
+                            color: action.isPrimary ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                            font: Tokens.font.label.medium
                         }
                     }
 

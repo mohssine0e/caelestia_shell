@@ -15,10 +15,19 @@ Singleton {
         return percent(Math.round(value * 100));
     }
 
-    function stripHtml(raw: string): string {
+    function cleanNotifBody(raw: string): string {
         if (!raw)
             return "";
         return String(raw)
+            .replace(/^\s*<a\b[^>]*>(?:https?:\/\/)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[^<]*)?<\/a>\s*/i, "")
+            .replace(/^\s*(?:https?:\/\/)?(?:web\.)?[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/\S*)?\s*\n+\s*/i, "")
+            .trim();
+    }
+
+    function stripHtml(raw: string): string {
+        if (!raw)
+            return "";
+        return cleanNotifBody(raw)
             .replace(/<br\s*\/?>/gi, " ")
             .replace(/<[^>]*>/g, "")
             .replace(/&amp;/g, "&")
