@@ -32,6 +32,11 @@ CustomMouseArea {
     property bool gcalConfigured: false
     property string selectedDateKey: ""
     property bool isAddingEvent: false
+    property bool formAllDay: true
+    property string editingEventId: ""
+    property string mutationAction: ""
+    property string mutationOutput: ""
+    property string mutationError: ""
     onIsAddingEventChanged: root.screenState.dashboardNeedsFocus = root.isAddingEvent
 
     readonly property string todayKey: dateToKey(Time.date)
@@ -62,14 +67,7 @@ CustomMouseArea {
             const d = new Date(yr, mo, 1 - mondayOffset + i);
             const key = root.dateToKey(d);
             const rawEvents = root.gcalEvents[key] || [];
-            // Show fixed-time events first so scheduled slots stay visible above all-day tasks.
-            const sortedEvents = rawEvents.slice().sort((a, b) => {
-                const aAllDay = root.isAllDayEvent(a);
-                const bAllDay = root.isAllDayEvent(b);
-                if (aAllDay !== bAllDay)
-                    return aAllDay ? 1 : -1;
-                return String(a.time || "").localeCompare(String(b.time || ""));
-            });
+            const sortedEvents = rawEvents.slice().sort(root.compareEventsByTime);
 
             cells.push({
                 index: i,
@@ -157,13 +155,27 @@ CustomMouseArea {
         if (!root.selectedDateKey)
             return [];
         const list = (root.gcalEvents[root.selectedDateKey] || []).slice();
-        return list.sort((a, b) => {
-            const aAllDay = root.isAllDayEvent(a);
-            const bAllDay = root.isAllDayEvent(b);
-            if (aAllDay !== bAllDay)
-                return aAllDay ? 1 : -1;
-            return String(a.time || "").localeCompare(String(b.time || ""));
-        });
+        return list.sort(root.compareEventsByTime);
+    }
+
+    function eventStartMinutes(ev: var): int {
+        if (root.isAllDayEvent(ev))
+            return 1440;
+        const match = String(ev.time || "").match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+        if (!match)
+            return 1439;
+        let hour = Number(match[1]);
+        const minute = Number(match[2]);
+        const period = String(match[3] || "").toLowerCase();
+        if (period === "pm" && hour < 12)
+            hour += 12;
+        else if (period === "am" && hour === 12)
+            hour = 0;
+        return hour * 60 + minute;
+    }
+
+    function compareEventsByTime(a: var, b: var): int {
+        return root.eventStartMinutes(a) - root.eventStartMinutes(b);
     }
 
     function isAllDayEvent(ev: var): bool {
@@ -179,6 +191,12 @@ CustomMouseArea {
         const t = String(ev.time || "").trim();
         const start = t.split(/\s*[-–]\s*/)[0].trim();
         return start.replace(/^0(\d:)/, "$1");
+    }
+
+    function eventLink(ev: var): string {
+        const source = String(ev?.url || ev?.location || "");
+        const match = source.match(/https?:\/\/[^\s<>]+/i);
+        return match ? match[0] : "";
     }
 
     function formatAgendaDate(key: string): string {
@@ -197,50 +215,50 @@ CustomMouseArea {
         return `${yr}-${mo}-${dy}`;
     }
 
+    function closeEventForm(): void {
+        root.isAddingEvent = false;
+        root.editingEventId = "";
+        root.mutationError = "";
+    }
+
+    function startEventMutation(action: string, payload: var): void {
+        if (eventMutation.running)
+            return;
+        root.mutationError = "";
+        root.mutationOutput = "";
+        root.mutationAction = action;
+        eventMutation.command = ["python3", Paths.home + "/.config/quickshell/caelestia/scripts/calendar_event.py", action, JSON.stringify(payload)];
+        eventMutation.running = true;
+    }
+
+    function editLocalEvent(ev: var): void {
+        root.editingEventId = String(ev.id || "");
+        root.formAllDay = root.isAllDayEvent(ev);
+        root.isAddingEvent = true;
+        eventTitleInput.text = String(ev.title || "");
+        eventTimeInput.text = root.formAllDay ? "" : root.shortEventTime(ev);
+        Qt.callLater(() => eventTitleInput.forceActiveFocus());
+    }
+
     function commitAddEvent(titleRaw: string, timeRaw: string): void {
         let title = (titleRaw || "").trim();
         let time = (timeRaw || "").trim();
         if (!title)
             return;
 
-        // Smart extract time from title if time field is empty
-        if (!time) {
-            const timeMatch = title.match(/\b((?:[01]?\d|2[0-3]):[0-5]\d|[1-9]\s*(?:am|pm)|1[0-2]\s*(?:am|pm))\b/i);
+        if (root.formAllDay) {
+            time = "All day";
+        } else if (!time) {
+            // Allow a time in the title for fast keyboard entry.
+            const timeMatch = title.match(/\b((?:[01]?\d|2[0-3]):[0-5]\d)\b/);
             if (timeMatch) {
                 time = timeMatch[1].trim();
                 title = title.replace(timeMatch[0], "").trim().replace(/\s+at\s*$/i, "").trim();
-            } else {
-                time = "All day";
             }
         }
-
-        const isAllDay = time.toLowerCase() === "all day" || time.toLowerCase() === "allday";
-        const targetKey = root.selectedDateKey || root.effectiveDateKey;
-
-        // 1. Instant local reactive UI update
-        const newEv = {
-            title: title,
-            time: time,
-            all_day: isAllDay,
-            location: ""
-        };
-        const currentList = root.gcalEvents[targetKey] || [];
-        const updatedList = currentList.concat([newEv]);
-        const copy = Object.assign({}, root.gcalEvents);
-        copy[targetKey] = updatedList;
-        root.gcalEvents = copy;
-
-        // 2. Persist to ~/.config/caelestia/local_events.json & ~/.cache/caelestia/gcal.json
-        const payload = JSON.stringify({
-            date: targetKey,
-            title: title,
-            time: time
+        root.startEventMutation(root.editingEventId ? "update" : "add", {
+            date: root.effectiveDateKey, id: root.editingEventId, title: title, time: time
         });
-        Quickshell.execDetached(["python3", Paths.home + "/.config/caelestia/scripts/sync-gcal.py", "--add-local", payload]);
-
-        // 3. Reset state & notify
-        root.isAddingEvent = false;
-        Toaster.toast("Event Added", `${title} • ${time}`, "event_available");
     }
 
     FileView {
@@ -283,6 +301,25 @@ CustomMouseArea {
         onExited: gcalStorage.reload()
     }
 
+    Process {
+        id: eventMutation
+        stdout: SplitParser { onRead: data => root.mutationOutput += data }
+        onExited: code => {
+            let result = ({});
+            try { result = JSON.parse(root.mutationOutput.trim()); } catch (e) {}
+            if (code !== 0 || !result.success) {
+                root.mutationError = result.error || Tr.tr("Could not save this event.");
+                return;
+            }
+            gcalStorage.reload();
+            if (root.mutationAction !== "delete")
+                root.closeEventForm();
+            Toaster.toast(root.mutationAction === "delete" ? Tr.tr("Event deleted")
+                : root.mutationAction === "update" ? Tr.tr("Event updated") : Tr.tr("Event added"),
+                result.event?.title || "", "event_available");
+        }
+    }
+
     anchors.left: parent.left
     anchors.right: parent.right
     implicitHeight: 492
@@ -291,7 +328,7 @@ CustomMouseArea {
     onClicked: {
         root.screenState.dashboardDate = new Date();
         root.selectedDateKey = "";
-        root.isAddingEvent = false;
+        root.closeEventForm();
     }
 
     Anim {
@@ -454,7 +491,13 @@ CustomMouseArea {
                     onClicked: {
                         if (!root.isAddingEvent && root.selectedDateKey === "")
                             root.selectedDateKey = root.todayKey;
-                        root.isAddingEvent = !root.isAddingEvent;
+                        if (root.isAddingEvent)
+                            root.closeEventForm();
+                        else {
+                            root.editingEventId = "";
+                            root.formAllDay = true;
+                            root.isAddingEvent = true;
+                        }
                     }
                 }
             }
@@ -665,7 +708,6 @@ CustomMouseArea {
 
                                 required property var modelData
                                 readonly property bool isAllDay: root.isAllDayEvent(modelData)
-                                readonly property string timeStr: root.shortEventTime(modelData)
 
                                 width: parent.width
                                 height: 17
@@ -674,27 +716,15 @@ CustomMouseArea {
                                 border.width: 1
                                 border.color: isAllDay ? Qt.alpha(Colours.palette.m3outlineVariant, 0.35) : Qt.alpha(Colours.palette.term4, 0.42)
 
-                                RowLayout {
+                                StyledText {
                                     anchors.fill: parent
                                     anchors.leftMargin: 4
                                     anchors.rightMargin: 4
-                                    spacing: 3
-
-                                    StyledText {
-                                        visible: !eventPill.isAllDay && eventPill.timeStr !== ""
-                                        text: eventPill.timeStr
-                                        font: Tokens.font.label.builders.small.weight(Font.DemiBold).build()
-                                        color: Colours.palette.term12
-                                    }
-
-                                    StyledText {
-                                        Layout.fillWidth: true
-                                        Layout.minimumWidth: 0
-                                        text: eventPill.modelData.title || Tr.tr("Untitled Event")
-                                        font: Tokens.font.label.small
-                                        color: Colours.palette.m3onSurface
-                                        elide: Text.ElideRight
-                                    }
+                                    text: eventPill.modelData.title || Tr.tr("Untitled Event")
+                                    font: Tokens.font.label.small
+                                    color: Colours.palette.m3onSurface
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
@@ -741,7 +771,7 @@ CustomMouseArea {
             anchors.fill: parent
             onClicked: {
                 root.selectedDateKey = "";
-                root.isAddingEvent = false;
+                root.closeEventForm();
             }
         }
 
@@ -750,7 +780,7 @@ CustomMouseArea {
 
             anchors.centerIn: parent
             width: Math.min(parent.width - Tokens.padding.large * 2, 420)
-            implicitHeight: Math.min(parent.height - Tokens.padding.large * 2, modalColumn.implicitHeight + Tokens.padding.large * 2)
+            implicitHeight: Math.min(parent.height - Tokens.padding.large * 2, modalColumn.implicitHeight + Tokens.padding.medium * 2)
             radius: Tokens.rounding.large
             color: Colours.palette.m3surfaceContainerHigh
             border.width: 1
@@ -772,114 +802,67 @@ CustomMouseArea {
                 id: modalColumn
 
                 anchors.fill: parent
-                anchors.margins: Tokens.padding.large
-                spacing: Tokens.spacing.small
+                anchors.margins: Tokens.padding.medium
+                spacing: Tokens.spacing.extraSmall
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: Tokens.spacing.small
+                    Layout.preferredHeight: 26
+                    spacing: Tokens.spacing.extraSmall
 
                     StyledText {
                         Layout.fillWidth: true
                         text: root.effectiveDateKey === root.todayKey ? Tr.tr("Today · %1").arg(root.formatAgendaDate(root.effectiveDateKey)) : root.formatAgendaDate(root.effectiveDateKey)
-                        font: Tokens.font.title.small
-                        color: Colours.palette.m3primary
+                        font: Tokens.font.label.medium
+                        color: Colours.palette.m3onSurface
                         elide: Text.ElideRight
                     }
 
-                    IconButton {
-                        icon: root.isAddingEvent ? "remove" : "add"
-                        isRound: true
-                        type: root.isAddingEvent ? IconButton.Tonal : IconButton.Text
-                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                        padding: Tokens.padding.extraSmall
-                        onClicked: root.isAddingEvent = !root.isAddingEvent
+                    TextButton {
+                        text: root.isAddingEvent ? Tr.tr("Cancel") : Tr.tr("Add event")
+                        type: TextButton.Text
+                        font: Tokens.font.label.small
+                        horizontalPadding: 5
+                        verticalPadding: 2
+                        enabled: !eventMutation.running
+                        onClicked: {
+                            if (root.isAddingEvent)
+                                root.closeEventForm();
+                            else {
+                                root.editingEventId = "";
+                                root.formAllDay = true;
+                                root.isAddingEvent = true;
+                            }
+                        }
                     }
 
                     IconButton {
                         icon: "close"
                         isRound: true
                         type: IconButton.Text
-                        font: Tokens.font.icon.builders.small.weight(Font.Bold).build()
-                        padding: Tokens.padding.extraSmall
+                        font: Tokens.font.icon.small
+                        padding: 2
+                        Layout.preferredWidth: 24
+                        Layout.preferredHeight: 24
                         onClicked: {
                             root.selectedDateKey = "";
-                            root.isAddingEvent = false;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: quickAddBox
-
-                    Layout.fillWidth: true
-                    visible: root.isAddingEvent
-                    radius: Tokens.rounding.medium
-                    color: Colours.palette.m3surfaceContainer
-                    border.width: 1
-                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.7)
-                    implicitHeight: quickAddLayout.implicitHeight + Tokens.padding.small * 2
-
-                    onVisibleChanged: {
-                        if (visible) {
-                            eventTitleInput.text = "";
-                            eventTimeInput.text = "";
-                            Qt.callLater(() => eventTitleInput.forceActiveFocus());
-                        }
-                    }
-
-                    RowLayout {
-                        id: quickAddLayout
-
-                        anchors.fill: parent
-                        anchors.margins: Tokens.padding.small
-                        spacing: Tokens.spacing.extraSmall
-
-                        StyledTextField {
-                            id: eventTitleInput
-
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            placeholderText: Tr.tr("Event title")
-                            placeholderFloats: false
-                            verticalPadding: Tokens.padding.extraSmall
-                            font: Tokens.font.body.small
-                            onAccepted: root.commitAddEvent(text, eventTimeInput.text)
-                            Keys.onEscapePressed: root.isAddingEvent = false
-                        }
-
-                        StyledTextField {
-                            id: eventTimeInput
-
-                            Layout.preferredWidth: Math.ceil(timeMetrics.advanceWidth) + leftPadding + rightPadding + Tokens.padding.small
-                            placeholderText: "14:00"
-                            placeholderFloats: false
-                            verticalPadding: Tokens.padding.extraSmall
-                            font: Tokens.font.body.small
-                            onAccepted: root.commitAddEvent(eventTitleInput.text, text)
-                            Keys.onEscapePressed: root.isAddingEvent = false
-                        }
-
-                        TextMetrics {
-                            id: timeMetrics
-
-                            font: Tokens.font.body.small
-                            text: "00:00"
-                        }
-
-                        IconButton {
-                            icon: "check"
-                            isRound: true
-                            type: IconButton.Filled
-                            padding: Tokens.padding.extraSmall
-                            onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                            root.closeEventForm();
                         }
                     }
                 }
 
                 StyledText {
                     Layout.fillWidth: true
-                    visible: root.selectedDayEvents.length === 0
+                    visible: !!root.mutationError
+                    text: root.mutationError
+                    font: Tokens.font.label.small
+                    color: Colours.palette.m3error
+                    wrapMode: Text.WordWrap
+                }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    visible: !root.isAddingEvent && root.selectedDayEvents.length === 0
                     text: Tr.tr("No events scheduled for this day")
                     font: Tokens.font.body.small
                     color: Colours.palette.m3onSurfaceVariant
@@ -889,11 +872,14 @@ CustomMouseArea {
                     id: dayEventsList
 
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(contentHeight, 240)
+                    // Give the view enough initial height to create its delegates, then use
+                    // their measured height. cacheBuffer includes rows below the fold.
+                    Layout.preferredHeight: Math.min(216, Math.max(root.selectedDayEvents.length * 48, contentHeight))
                     visible: root.selectedDayEvents.length > 0
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
-                    spacing: Tokens.spacing.extraSmall
+                    cacheBuffer: 500
+                    spacing: 4
                     model: root.selectedDayEvents
 
                     StyledScrollBar.vertical: StyledScrollBar {
@@ -906,28 +892,33 @@ CustomMouseArea {
 
                         required property var modelData
                         readonly property bool isAllDay: root.isAllDayEvent(modelData)
+                        readonly property bool canEdit: !!modelData.is_local && !!modelData.id
+                        readonly property string link: root.eventLink(modelData)
+                        property bool confirmDelete: false
 
                         width: dayEventsList.width
-                        implicitHeight: modalEventContent.implicitHeight + Tokens.padding.small * 2
+                        implicitHeight: modalEventContent.implicitHeight + 12
                         radius: Tokens.rounding.small
-                        color: Colours.palette.m3surfaceContainer
+                        color: Colours.palette.m3surfaceContainerLow
                         border.width: 1
-                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
+                        border.color: Qt.alpha(Colours.palette.m3outlineVariant, rowHover.hovered ? 0.65 : 0.42)
+
+                        HoverHandler { id: rowHover }
+                        Timer {
+                            interval: 4000
+                            running: modalEventRow.confirmDelete
+                            onTriggered: modalEventRow.confirmDelete = false
+                        }
 
                         RowLayout {
                             id: modalEventContent
 
                             anchors.fill: parent
-                            anchors.margins: Tokens.padding.small
-                            spacing: Tokens.spacing.small
-
-                            Rectangle {
-                                implicitWidth: 4
-                                Layout.minimumWidth: 4
-                                Layout.fillHeight: true
-                                radius: Tokens.rounding.full
-                                color: modalEventRow.isAllDay ? Colours.palette.m3tertiary : Colours.palette.term4
-                            }
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 6
+                            anchors.topMargin: 6
+                            anchors.bottomMargin: 6
+                            spacing: 4
 
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -956,9 +947,161 @@ CustomMouseArea {
                                     wrapMode: Text.WordWrap
                                 }
                             }
+
+                            IconButton {
+                                visible: rowHover.hovered && !!modalEventRow.link
+                                icon: "open_in_new"
+                                type: IconButton.Text
+                                font: Tokens.font.icon.small
+                                padding: 2
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                onClicked: Qt.openUrlExternally(modalEventRow.link)
+                            }
+
+                            IconButton {
+                                visible: (rowHover.hovered || modalEventRow.confirmDelete) && modalEventRow.canEdit
+                                icon: "edit"
+                                type: IconButton.Text
+                                font: Tokens.font.icon.small
+                                padding: 2
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                enabled: !eventMutation.running
+                                onClicked: root.editLocalEvent(modalEventRow.modelData)
+                            }
+
+                            IconButton {
+                                visible: (rowHover.hovered || modalEventRow.confirmDelete) && modalEventRow.canEdit
+                                icon: modalEventRow.confirmDelete ? "delete_forever" : "delete"
+                                type: modalEventRow.confirmDelete ? IconButton.Tonal : IconButton.Text
+                                font: Tokens.font.icon.small
+                                padding: 2
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                enabled: !eventMutation.running
+                                onClicked: {
+                                    if (!modalEventRow.confirmDelete) {
+                                        modalEventRow.confirmDelete = true;
+                                        return;
+                                    }
+                                    modalEventRow.confirmDelete = false;
+                                    root.startEventMutation("delete", {
+                                        date: root.effectiveDateKey, id: modalEventRow.modelData.id
+                                    });
+                                }
+                            }
                         }
                     }
                 }
+                ColumnLayout {
+                    id: quickAddForm
+
+                    Layout.fillWidth: true
+                    visible: root.isAddingEvent
+                    spacing: 6
+
+                    onVisibleChanged: {
+                        if (visible) {
+                            eventTitleInput.text = "";
+                            eventTimeInput.text = "";
+                            Qt.callLater(() => eventTitleInput.forceActiveFocus());
+                        }
+                    }
+
+                    RowLayout {
+                        id: quickAddOptions
+                        Layout.fillWidth: true
+                        spacing: Tokens.spacing.extraSmall
+
+                        BtnSwitcher {
+                            Layout.alignment: Qt.AlignVCenter
+                            givenHeight: 28
+                            font: Tokens.font.label.small
+                            borderColor: Qt.alpha(Colours.palette.m3outlineVariant, 0.45)
+                            backgroundColor: Colours.palette.m3surfaceContainerLow
+                            enabled: !eventMutation.running
+                            model: [
+                                { text: Tr.tr("Day"), value: "all-day" },
+                                { icon: "schedule", alwaysShowIcon: true, value: "time" }
+                            ]
+                            currentValue: root.formAllDay ? "all-day" : "time"
+                            onActivated: value => {
+                                root.formAllDay = value === "all-day";
+                                if (value === "time")
+                                    Qt.callLater(() => eventTimeInput.forceActiveFocus());
+                            }
+                        }
+
+                        StyledTextField {
+                            id: eventTimeInput
+
+                            Layout.preferredWidth: Math.ceil(timeMetrics.advanceWidth) + leftPadding + rightPadding + Tokens.padding.small
+                            visible: !root.formAllDay
+                            placeholderText: Tr.tr("14:00")
+                            placeholderFloats: false
+                            horizontalPadding: 8
+                            verticalPadding: 5
+                            borderWidth: 1
+                            font: Tokens.font.body.small
+                            enabled: !eventMutation.running
+                            onAccepted: root.commitAddEvent(eventTitleInput.text, text)
+                            Keys.onEscapePressed: root.closeEventForm()
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        TextMetrics {
+                            id: timeMetrics
+
+                            font: Tokens.font.body.small
+                            text: "00:00"
+                        }
+                    }
+
+                    RowLayout {
+                        id: quickAddLayout
+
+                        Layout.fillWidth: true
+                        spacing: Tokens.spacing.extraSmall
+
+                        StyledTextField {
+                            id: eventTitleInput
+
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            placeholderText: root.editingEventId ? Tr.tr("Edit event title") : Tr.tr("Event title")
+                            placeholderFloats: false
+                            horizontalPadding: 10
+                            verticalPadding: 5
+                            borderWidth: 1
+                            radius: Tokens.rounding.small
+                            font: Tokens.font.body.small
+                            enabled: !eventMutation.running
+                            onAccepted: root.commitAddEvent(text, eventTimeInput.text)
+                            Keys.onEscapePressed: root.closeEventForm()
+                        }
+
+                        CircularIndicator {
+                            visible: eventMutation.running
+                            running: visible
+                            implicitSize: 22
+                        }
+
+                        IconButton {
+                            icon: "check"
+                            isRound: true
+                            type: IconButton.Tonal
+                            font: Tokens.font.icon.small
+                            padding: 3
+                            Layout.preferredWidth: 26
+                            Layout.preferredHeight: 26
+                            enabled: !eventMutation.running && !!eventTitleInput.text.trim()
+                            onClicked: root.commitAddEvent(eventTitleInput.text, eventTimeInput.text)
+                        }
+                    }
+                }
+
             }
         }
     }

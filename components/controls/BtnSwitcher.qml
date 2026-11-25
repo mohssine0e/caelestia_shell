@@ -56,14 +56,14 @@ Item {
 
                 font: root.font
                 icon: {
-                    if (root.showOnlyActiveText) {
+                    if (modelData.alwaysShowIcon || root.showOnlyActiveText) {
                         return modelData.icon || ""
                     } else {
                         return root.currentValue === modelData.value ? (modelData.icon || "") : ""
                     }
                 }
                 text: {
-                    if (!root.showOnlyActiveText) {
+                    if (modelData.alwaysShowText || !root.showOnlyActiveText) {
                         return modelData.text || ""
                     } else {
                         return root.currentValue === modelData.value ? (modelData.text || "") : ""
@@ -85,4 +85,3 @@ Item {
         }
     }
 }
-
