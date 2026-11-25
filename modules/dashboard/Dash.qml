@@ -32,6 +32,7 @@ GridLayout {
         Layout.row: 0
         Layout.column: 1
         Layout.preferredWidth: Math.max(Tokens.sizes.dashboard.userWidth, 450)
+        Layout.fillWidth: true
         Layout.fillHeight: true
 
         radius: Tokens.rounding.extraLarge
@@ -49,6 +50,7 @@ GridLayout {
         Layout.column: 0
         Layout.columnSpan: 2
         Layout.fillWidth: true
+        Layout.minimumWidth: 960
         Layout.preferredHeight: calendar.implicitHeight
 
         radius: Tokens.rounding.extraLarge
