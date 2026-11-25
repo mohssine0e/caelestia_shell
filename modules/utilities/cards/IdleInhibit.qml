@@ -56,9 +56,13 @@ StyledRect {
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumHeight: Math.max(titleText.implicitHeight, sinceBadge.implicitHeight)
                 spacing: Tokens.spacing.small
 
                 StyledText {
+                    id: titleText
+
+                    visible: !RuntimeState.inhibitIdle
                     text: Tr.trCtx("Keep awake", "idle inhibitor")
                     font: Tokens.font.body.medium
                     elide: Text.ElideRight
@@ -82,7 +86,7 @@ StyledRect {
 
                         anchors.centerIn: parent
                         // TRANSLATORS: %1 = a clock time, e.g. 14:30
-                        text: Tr.tr("since: %1").arg(Tr.formatDateTime(new Date(RuntimeState.inhibitingIdleSince), Units.twelveHourClock ? "hh:mm a" : "hh:mm"))
+                        text: Tr.tr("Awake since: %1").arg(Tr.formatDateTime(new Date(RuntimeState.inhibitingIdleSince), Units.twelveHourClock ? "hh:mm a" : "hh:mm"))
                         color: Colours.palette.m3onTertiaryContainer
                         font: Tokens.font.label.small
                     }
