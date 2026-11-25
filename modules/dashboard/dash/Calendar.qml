@@ -86,6 +86,73 @@ CustomMouseArea {
         return cells;
     }
 
+    function computeNormalizedTracks(weights: var): var {
+        const sum = weights.reduce((acc, w) => acc + w, 0) || 1;
+        const fractions = [];
+        const offsets = [];
+        let cursor = 0;
+        for (let i = 0; i < weights.length; i++) {
+            const frac = weights[i] / sum;
+            offsets.push(cursor);
+            fractions.push(frac);
+            cursor += frac;
+        }
+        return {
+            fractions: fractions,
+            offsets: offsets
+        };
+    }
+
+    readonly property var colTracks: {
+        const weights = [];
+        for (let c = 0; c < 7; c++) {
+            let maxEvents = 0;
+            let hasToday = false;
+            for (let r = 0; r < 6; r++) {
+                const cell = root.monthCells[r * 7 + c];
+                if (cell.events.length > maxEvents)
+                    maxEvents = cell.events.length;
+                if (cell.isToday)
+                    hasToday = true;
+            }
+            if (maxEvents === 0 && !hasToday)
+                weights.push(0.60);
+            else if (maxEvents === 0)
+                weights.push(1.0);
+            else if (maxEvents === 1)
+                weights.push(1.18);
+            else
+                weights.push(1.32);
+        }
+        return root.computeNormalizedTracks(weights);
+    }
+
+    readonly property var rowTracks: {
+        const weights = [];
+        for (let r = 0; r < 6; r++) {
+            let maxEvents = 0;
+            let hasToday = false;
+            for (let c = 0; c < 7; c++) {
+                const cell = root.monthCells[r * 7 + c];
+                if (cell.events.length > maxEvents)
+                    maxEvents = cell.events.length;
+                if (cell.isToday)
+                    hasToday = true;
+            }
+            if (maxEvents === 0 && !hasToday)
+                weights.push(0.55);
+            else if (maxEvents === 0)
+                weights.push(0.95);
+            else if (maxEvents === 1)
+                weights.push(1.05);
+            else if (maxEvents === 2)
+                weights.push(1.28);
+            else
+                weights.push(1.45);
+        }
+        return root.computeNormalizedTracks(weights);
+    }
+
     readonly property var selectedDayEvents: {
         if (!root.selectedDateKey)
             return [];
@@ -407,8 +474,8 @@ CustomMouseArea {
                     required property int index
                     required property var modelData
 
-                    x: index * (weekdayHeader.width / 7)
-                    width: weekdayHeader.width / 7
+                    x: weekdayHeader.width * root.colTracks.offsets[index]
+                    width: weekdayHeader.width * root.colTracks.fractions[index]
                     height: weekdayHeader.height
 
                     StyledText {
@@ -421,15 +488,13 @@ CustomMouseArea {
             }
         }
 
-        // 6x7 monthly calendar sheet with crisp 1px grid dividers and glowing Today box.
+        // 6x7 monthly calendar sheet with dynamic empty row/col compression and soft Today fill.
         Item {
             id: gridContainer
 
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            readonly property real cellW: width / 7
-            readonly property real cellH: height / 6
             readonly property color dividerColor: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
 
             opacity: root.animOpacity
@@ -447,42 +512,27 @@ CustomMouseArea {
                 z: 1
             }
 
-            // Soft outer glow behind Today's box
-            Item {
-                id: todayGlowLayer
+            // Borderless tonal fill behind Today's box
+            Rectangle {
+                id: todayHighlight
 
                 readonly property var todayCell: root.monthCells.find(c => c.isToday) ?? null
                 visible: todayCell !== null
-                x: todayCell ? todayCell.col * gridContainer.cellW : 0
-                y: todayCell ? todayCell.row * gridContainer.cellH : 0
-                width: gridContainer.cellW
-                height: gridContainer.cellH
-                z: 4
-
-                RectangularShadow {
-                    anchors.fill: todayBox
-                    radius: todayBox.radius
-                    color: Qt.alpha(Colours.palette.m3primary, 0.48)
-                    blur: 16
-                    spread: 1
-                }
-
-                Rectangle {
-                    id: todayBox
-
-                    anchors.fill: parent
-                    radius: Tokens.rounding.small
-                    border.width: 2
-                    border.color: Colours.palette.m3primary
-                    gradient: Gradient {
-                        GradientStop {
-                            position: 0.0
-                            color: Qt.alpha(Colours.palette.m3primary, 0.26)
-                        }
-                        GradientStop {
-                            position: 1.0
-                            color: Qt.alpha(Colours.palette.m3primary, 0.11)
-                        }
+                x: (todayCell ? gridContainer.width * root.colTracks.offsets[todayCell.col] : 0) + 1
+                y: (todayCell ? gridContainer.height * root.rowTracks.offsets[todayCell.row] : 0) + 1
+                width: Math.max(0, (todayCell ? gridContainer.width * root.colTracks.fractions[todayCell.col] : 0) - 2)
+                height: Math.max(0, (todayCell ? gridContainer.height * root.rowTracks.fractions[todayCell.row] : 0) - 2)
+                z: 3
+                radius: Tokens.rounding.small
+                border.width: 0
+                gradient: Gradient {
+                    GradientStop {
+                        position: 0.0
+                        color: Qt.alpha(Colours.palette.m3primary, 0.24)
+                    }
+                    GradientStop {
+                        position: 1.0
+                        color: Qt.alpha(Colours.palette.m3primary, 0.11)
                     }
                 }
             }
@@ -501,13 +551,14 @@ CustomMouseArea {
                     readonly property bool isSelected: root.selectedDateKey === modelData.dayKey && !isToday
                     readonly property var events: modelData.events
                     readonly property int eventCount: events.length
-                    readonly property bool hasOverflow: eventCount > 2
-                    readonly property var visibleEvents: hasOverflow ? events.slice(0, 1) : events.slice(0, 2)
+                    readonly property int maxSlots: Math.max(0, Math.floor((height - dayNumberText.implicitHeight - 8) / 20))
+                    readonly property bool hasOverflow: maxSlots > 0 && eventCount > maxSlots
+                    readonly property var visibleEvents: hasOverflow ? (maxSlots >= 2 ? events.slice(0, maxSlots - 1) : []) : events.slice(0, maxSlots)
 
-                    x: col * gridContainer.cellW
-                    y: row * gridContainer.cellH
-                    width: gridContainer.cellW
-                    height: gridContainer.cellH
+                    x: gridContainer.width * root.colTracks.offsets[col]
+                    y: gridContainer.height * root.rowTracks.offsets[row]
+                    width: gridContainer.width * root.colTracks.fractions[col]
+                    height: gridContainer.height * root.rowTracks.fractions[row]
                     z: isToday ? 6 : 2
 
                     // 1px vertical & horizontal grid lines on non-edge edges
@@ -555,15 +606,15 @@ CustomMouseArea {
                         }
                     }
 
-                    // Centered day number at top of cell
+                    // Compact top-centered day number
                     StyledText {
                         id: dayNumberText
 
                         anchors.top: parent.top
-                        anchors.topMargin: 5
+                        anchors.topMargin: 2
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: Tr.locale.toString(cellItem.modelData.day)
-                        font: cellItem.isToday ? Tokens.font.body.builders.medium.weight(Font.DemiBold).build() : Tokens.font.body.small
+                        font: cellItem.isToday ? Tokens.font.label.builders.medium.weight(Font.DemiBold).build() : Tokens.font.label.small
                         color: {
                             if (cellItem.isToday)
                                 return Colours.palette.m3primary;
@@ -578,18 +629,6 @@ CustomMouseArea {
                                 return cellItem.modelData.isCurrentMonth ? 0.88 : 0.36;
                             return cellItem.modelData.isCurrentMonth ? 0.92 : 0.32;
                         }
-                    }
-
-                    // "Today" micro-label at top-right of Today cell
-                    StyledText {
-                        visible: cellItem.isToday
-                        anchors.top: parent.top
-                        anchors.topMargin: 6
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        text: Tr.tr("Today")
-                        font: Tokens.font.label.small
-                        color: Qt.alpha(Colours.palette.m3primary, 0.92)
                     }
 
                     // Centered empty hint inside Today's box when no events exist
@@ -611,7 +650,7 @@ CustomMouseArea {
                     // Event pills stack below the centered day number
                     Column {
                         anchors.top: dayNumberText.bottom
-                        anchors.topMargin: 4
+                        anchors.topMargin: 3
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.leftMargin: 4
@@ -629,7 +668,7 @@ CustomMouseArea {
                                 readonly property string timeStr: root.shortEventTime(modelData)
 
                                 width: parent.width
-                                height: 18
+                                height: 17
                                 radius: Tokens.rounding.extraSmall
                                 color: isAllDay ? Qt.alpha(Colours.palette.m3onSurface, 0.08) : Qt.alpha(Colours.palette.term4, 0.24)
                                 border.width: 1
@@ -660,11 +699,11 @@ CustomMouseArea {
                             }
                         }
 
-                        // Overflow indicator pill when a day has 3+ events
+                        // Overflow indicator pill when remaining events exceed cell height
                         Rectangle {
                             visible: cellItem.hasOverflow
                             width: parent.width
-                            height: 17
+                            height: 16
                             radius: Tokens.rounding.extraSmall
                             color: Qt.alpha(Colours.palette.m3onSurface, 0.06)
                             border.width: 1
@@ -676,7 +715,7 @@ CustomMouseArea {
                                 anchors.right: parent.right
                                 anchors.leftMargin: 4
                                 anchors.rightMargin: 4
-                                text: Tr.tr("+%1 more").arg(cellItem.eventCount - 1)
+                                text: Tr.tr("+%1 more").arg(cellItem.eventCount - cellItem.visibleEvents.length)
                                 font: Tokens.font.label.small
                                 color: Colours.palette.m3onSurfaceVariant
                                 elide: Text.ElideRight
