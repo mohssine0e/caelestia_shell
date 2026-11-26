@@ -17,23 +17,10 @@ GridLayout {
     Rect {
         Layout.row: 0
         Layout.column: 0
-        Layout.preferredWidth: Math.max(Tokens.sizes.dashboard.weatherWidth, 350)
-        Layout.preferredHeight: weather.implicitHeight
-
-        // Same corner radius as the profile and calendar cards beside it.
-        radius: Tokens.rounding.extraLarge
-
-        SmallWeather {
-            id: weather
-        }
-    }
-
-    Rect {
-        Layout.row: 0
-        Layout.column: 1
+        Layout.columnSpan: 2
         Layout.preferredWidth: Math.max(Tokens.sizes.dashboard.userWidth, 450)
+        Layout.preferredHeight: 132
         Layout.fillWidth: true
-        Layout.fillHeight: true
 
         radius: Tokens.rounding.extraLarge
 

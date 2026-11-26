@@ -8,37 +8,6 @@ import Caelestia.Config
 Singleton {
     id: root
 
-    readonly property var weatherIcons: ({
-            "0": "clear_day",
-            "1": "clear_day",
-            "2": "partly_cloudy_day",
-            "3": "cloud",
-            "45": "foggy",
-            "48": "foggy",
-            "51": "rainy",
-            "53": "rainy",
-            "55": "rainy",
-            "56": "rainy",
-            "57": "rainy",
-            "61": "rainy",
-            "63": "rainy",
-            "65": "rainy",
-            "66": "rainy",
-            "67": "rainy",
-            "71": "cloudy_snowing",
-            "73": "cloudy_snowing",
-            "75": "snowing_heavy",
-            "77": "cloudy_snowing",
-            "80": "rainy",
-            "81": "rainy",
-            "82": "rainy",
-            "85": "cloudy_snowing",
-            "86": "snowing_heavy",
-            "95": "thunderstorm",
-            "96": "thunderstorm",
-            "99": "thunderstorm"
-        })
-
     readonly property var categoryIcons: ({
             WebBrowser: "web",
             Printing: "print",
@@ -182,10 +151,6 @@ Singleton {
 
     function getBluetoothIcon(icon: string): string {
         return matchIcon(icon, bluetoothIconRules, "bluetooth");
-    }
-
-    function getWeatherIcon(code: string): string {
-        return weatherIcons[code] ?? "air";
     }
 
     function getNotifIcon(summary: string, urgency: int): string {

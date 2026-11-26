@@ -236,7 +236,7 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
 > - `nexus`: `networkRescanInterval`
 > - `notifs`: `actionOnClick`, `defaultExpireTimeout`, `expire`, `fullscreen`, `fullscreenExpireTimeout`
 > - `paths`: `lyricsDir`, `wallpaperDir`
-> - `services`: `audioIncrement`, `brightnessIncrement`, `clockFormat`, `dataUnits`, `defaultPlayer`, `gpuType`, `lyricsBackend`, `maxVolume`, `playerAliases`, `sensorUnits`, `smartScheme`, `visualiserBars`, `weatherLocation`, `weatherUnits`
+> - `services`: `audioIncrement`, `brightnessIncrement`, `clockFormat`, `dataUnits`, `defaultPlayer`, `gpuType`, `lyricsBackend`, `maxVolume`, `playerAliases`, `sensorUnits`, `smartScheme`, `visualiserBars`
 > - `utilities`: `gameMode.*`, `toasts.*`, `vpn.*`
 >
 > </details>
@@ -660,7 +660,6 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
         "showDashboard": true,
         "showMedia": true,
         "showPerformance": true,
-        "showWeather": true,
         "mediaUpdateInterval": 500,
         "resourceUpdateInterval": 1000,
         "dragThreshold": 50,
@@ -833,8 +832,6 @@ For example, to automatically hide the bar on the monitor named `DP-1`:
         "enableMicrophone": false
     },
     "services": {
-        "weatherLocation": "",
-        "weatherUnits": "Auto",
         "sensorUnits": "Celsius",
         "dataUnits": "Binary",
         "clockFormat": "Auto",

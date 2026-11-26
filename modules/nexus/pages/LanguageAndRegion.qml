@@ -5,7 +5,6 @@ import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.components.controls
-import qs.services
 import qs.modules.nexus.common
 
 PageBase {
@@ -107,50 +106,6 @@ PageBase {
             }
         }
 
-        // Weather
-        SectionHeader {
-            text: Tr.tr("Weather")
-        }
-
-        // Placeholder until the map-based location picker lands
-        ConnectedRect {
-            Layout.fillWidth: true
-            first: true
-            last: true
-            implicitHeight: comingSoon.implicitHeight + Tokens.padding.extraLarge * 2
-
-            ColumnLayout {
-                id: comingSoon
-
-                anchors.centerIn: parent
-                width: parent.width - Tokens.padding.largeIncreased * 2
-                spacing: Tokens.padding.extraSmall
-
-                MaterialIcon {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "map"
-                    color: Colours.palette.m3outlineVariant
-                    fontStyle: Tokens.font.icon.extraLarge
-                }
-
-                StyledText {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: Tr.tr("Location picker coming soon")
-                    color: Colours.palette.m3outlineVariant
-                    font: Tokens.font.title.small
-                }
-
-                StyledText {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    text: Tr.tr("Choose your weather location on a map in a future update")
-                    color: Colours.palette.m3outlineVariant
-                    font: Tokens.font.body.small
-                }
-            }
-        }
-
         // Units
         SectionHeader {
             text: Tr.tr("Units")
@@ -158,14 +113,6 @@ PageBase {
 
         SelectRow {
             first: true
-            label: Tr.tr("Temperature")
-            subtext: Tr.tr("Units for weather temperatures")
-            menuItems: root.tempItems
-            active: root.tempItems.find(i => i.value === GlobalConfig.services.weatherUnits)
-            onSelected: item => GlobalConfig.services.weatherUnits = item.value
-        }
-
-        SelectRow {
             label: Tr.tr("System temperatures")
             subtext: Tr.tr("Units for CPU and GPU temperatures")
             menuItems: root.tempItems

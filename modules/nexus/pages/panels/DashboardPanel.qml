@@ -65,16 +65,10 @@ PageBase {
         }
 
         ToggleRow {
+            last: true
             text: Tr.tr("Performance")
             checked: Config.dashboard.showPerformance
             onToggled: GlobalConfig.dashboard.showPerformance = checked
-        }
-
-        ToggleRow {
-            last: true
-            text: Tr.tr("Weather")
-            checked: Config.dashboard.showWeather
-            onToggled: GlobalConfig.dashboard.showWeather = checked
         }
 
         // Performance widgets

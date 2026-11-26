@@ -96,33 +96,6 @@ ColumnLayout {
 
         // Separator dot
         StyledText {
-            visible: weatherItem.visible
-            text: "•"
-            color: Colours.palette.m3outlineVariant
-            font: Tokens.font.label.builders.medium.scale(root.centerScale * 1.05).build()
-        }
-
-        // Weather
-        RowLayout {
-            id: weatherItem
-            visible: Boolean(Weather.cc && Weather.temp)
-            spacing: Tokens.spacing.small
-
-            MaterialIcon {
-                text: Weather.icon
-                color: Colours.palette.m3onSurfaceVariant
-                fontStyle: Tokens.font.icon.builders.medium.scale(root.centerScale * 1.05).build()
-            }
-
-            StyledText {
-                text: Weather.temp
-                color: Colours.palette.m3onSurfaceVariant
-                font: Tokens.font.label.builders.medium.scale(root.centerScale * 1.05).weight(Font.Medium).build()
-            }
-        }
-
-        // Separator dot
-        StyledText {
             visible: batteryItem.visible
             text: "•"
             color: Colours.palette.m3outlineVariant

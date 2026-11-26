@@ -34,7 +34,6 @@ ShellRoot {
         Notifs;
         Players;
         Brightness;
-        Weather.reload();
         BetterLyrics;
         LyricsSource;
 
