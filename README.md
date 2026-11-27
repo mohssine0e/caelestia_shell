@@ -12,6 +12,9 @@
 
 https://github.com/user-attachments/assets/0840f496-575c-4ca6-83a8-87bb01a85c5f
 
+> [!IMPORTANT]
+> [Known issues and deferred fixes](KNOWN_ISSUES.md), including a confirmed local lock bypass.
+
 ## Components
 
 - Widgets: [`Quickshell`](https://quickshell.outfoxxed.me)
